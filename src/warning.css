@@ -1,0 +1,49 @@
+/* Operational spacing warning — loaded after readability.css. */
+
+.spacing-conflict-cell::after {
+  content: none !important;
+  display: none !important;
+}
+
+.spacing-conflict-cell {
+  padding-bottom: 21px !important;
+  background: linear-gradient(90deg, rgba(255, 241, 239, .80), rgba(255, 248, 247, .18)) !important;
+  box-shadow: inset 3px 0 0 #d24b3f !important;
+}
+
+.spacing-conflict-cell .cell-input.strong {
+  border-color: #e7a39d !important;
+  background: #fff8f7 !important;
+  color: #9d3028 !important;
+  box-shadow: none !important;
+}
+
+.spacing-conflict-cell .cell-input.strong:focus {
+  border-color: #d86960 !important;
+  background: #fffafa !important;
+  box-shadow: 0 0 0 3px rgba(210, 75, 63, .09) !important;
+}
+
+.spacing-warning-badge {
+  position: absolute !important;
+  left: 12px !important;
+  right: auto !important;
+  bottom: 4px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: calc(100% - 24px) !important;
+  padding: 2px 7px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: #fde4e1 !important;
+  color: #a7352c !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
