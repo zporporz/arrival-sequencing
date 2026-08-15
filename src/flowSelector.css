@@ -1,0 +1,61 @@
+.flow-selector-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+}
+
+.flow-selector-label {
+  padding-left: 2px;
+  color: #7a879b;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .08em;
+}
+
+.flow-selector {
+  min-height: 42px;
+  padding: 0 34px 0 12px;
+  border: 1px solid #d5deea;
+  border-radius: 10px;
+  background: #fff;
+  color: #253655;
+  font-size: 13px;
+  font-weight: 800;
+  outline: 0;
+  cursor: pointer;
+}
+
+.flow-selector:hover { border-color: #b8c7dc; }
+.flow-selector:focus {
+  border-color: #7ea5eb;
+  box-shadow: 0 0 0 3px rgba(36, 95, 212, .08);
+}
+
+.timing-pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 13px 16px;
+  border: 1px solid #f0c9c4;
+  border-left: 4px solid #cc4e43;
+  border-radius: 11px;
+  background: #fff7f6;
+  color: #75322c;
+}
+
+.timing-pending-banner strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.timing-pending-banner span {
+  color: #8a5c57;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1250px) {
+  .flow-selector-wrap { min-width: 170px; }
+}
