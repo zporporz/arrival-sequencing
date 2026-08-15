@@ -27,22 +27,14 @@ function clearConflict(input: HTMLInputElement) {
   cell.querySelector(`.${BADGE_CLASS}`)?.remove()
 }
 
-function applyConflict(input: HTMLInputElement, gapMinutes: number, minimumClock: string) {
+function applySpacingConflict(input: HTMLInputElement, gapMinutes: number, minimumClock: string) {
   const cell = input.closest('td')
   if (!cell) return
 
-  const isOrderConflict = gapMinutes < 0
-  const warningLabel = isOrderConflict
-    ? `⚠ ORDER CONFLICT · ${Math.abs(gapMinutes)}m EARLIER`
-    : `⚠ SPACING · GAP ${gapMinutes}m · MIN ${minimumClock}`
-
-  const detail = isOrderConflict
-    ? `${warningLabel} — this row is sequenced after the previous row but its CLDT is earlier. Minimum planning CLDT: ${minimumClock}.`
-    : `${warningLabel} — below the ${TARGET_GAP_MINUTES}-minute planning target, not a universal separation minimum.`
-
-  cell.classList.add(CONFLICT_CLASS, isOrderConflict ? ORDER_CLASS : SPACING_CLASS)
+  const warningLabel = `⚠ SPACING · GAP ${gapMinutes}m · MIN ${minimumClock}`
+  cell.classList.add(CONFLICT_CLASS, SPACING_CLASS)
   cell.setAttribute('data-spacing-warning', warningLabel)
-  cell.setAttribute('title', detail)
+  cell.setAttribute('title', `${warningLabel} — below the ${TARGET_GAP_MINUTES}-minute planning target, not a universal separation minimum.`)
   cell.style.position = 'relative'
 
   let badge = cell.querySelector<HTMLSpanElement>(`.${BADGE_CLASS}`)
@@ -59,27 +51,23 @@ function recalculateSpacing() {
 
   for (const input of inputs) clearConflict(input)
 
-  let previousMinutes: number | null = null
+  const ordered = inputs
+    .map((input) => ({ input, minutes: parseClock(input.value.trim()) }))
+    .filter((item): item is { input: HTMLInputElement; minutes: number } => item.minutes !== null)
+    .sort((a, b) => a.minutes - b.minutes)
 
-  for (const input of inputs) {
-    const currentMinutes = parseClock(input.value.trim())
-    if (currentMinutes === null) {
-      previousMinutes = null
-      continue
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1]
+    const current = ordered[index]
+    const gapMinutes = current.minutes - previous.minutes
+
+    if (gapMinutes < TARGET_GAP_MINUTES) {
+      applySpacingConflict(
+        current.input,
+        gapMinutes,
+        formatClock(previous.minutes + TARGET_GAP_MINUTES),
+      )
     }
-
-    if (previousMinutes !== null) {
-      let gapMinutes = currentMinutes - previousMinutes
-
-      // Treat a large backwards clock jump as crossing midnight, not an order conflict.
-      if (gapMinutes < -720) gapMinutes += 1440
-
-      if (gapMinutes < TARGET_GAP_MINUTES) {
-        applyConflict(input, gapMinutes, formatClock(previousMinutes + TARGET_GAP_MINUTES))
-      }
-    }
-
-    previousMinutes = currentMinutes
   }
 }
 
