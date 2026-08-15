@@ -151,6 +151,30 @@ th:nth-child(12), td:nth-child(12) { min-width: 120px; }
 .summary-card span { font-size: 11.5px; }
 .summary-card small { font-size: 11px; }
 
+.spacing-conflict-cell {
+  background: #fff7f5;
+  box-shadow: inset 0 0 0 1px #f1b4aa;
+}
+
+.spacing-conflict-cell .cell-input.strong {
+  border-color: #e88473;
+  background: #fff1ee;
+  color: #a13d31;
+  box-shadow: 0 0 0 3px rgba(216, 95, 64, .08);
+}
+
+.spacing-conflict-cell::after {
+  content: attr(data-spacing-warning);
+  position: absolute;
+  right: 12px;
+  bottom: 2px;
+  color: #c14f3f;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .01em;
+  pointer-events: none;
+}
+
 @media (min-width: 1800px) {
   .content { padding: 28px 28px 44px; }
   .topbar { padding: 20px 28px; }
