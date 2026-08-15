@@ -26,6 +26,14 @@ const intervalLabel = (value: string | null | undefined) => {
   return `${sign}${String(hours).padStart(2, '0')}:${match[3]}`
 }
 
+const formatAtcTimeDraft = (raw: string) => {
+  const digits = raw.replace(/\D/g, '').slice(0, 4)
+  if (digits.length <= 2) return digits
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`
+}
+
+const isValidAtcTime = (value: string) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+
 const isoFromClock = (serviceDate: string, hhmm: string, anchor?: string | null) => {
   const [hours, minutes] = hhmm.split(':').map(Number)
   const candidate = new Date(`${serviceDate}T00:00:00.000Z`)
@@ -366,13 +374,13 @@ function App() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th>SEQ VAR</th><th>STATUS</th><th /></tr>
+                <tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th title="ALDT − ELDT">EST VAR</th><th title="ALDT − CLDT">SEQ VAR</th><th>STATUS</th><th /></tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={13} className="empty-state">Connecting to shared sequence…</td></tr>
+                  <tr><td colSpan={14} className="empty-state">Connecting to shared sequence…</td></tr>
                 ) : visibleArrivals.length === 0 ? (
-                  <tr><td colSpan={13} className="empty-state">No flights yet. Click “Add Flight” to start.</td></tr>
+                  <tr><td colSpan={14} className="empty-state">No flights yet. Click “Add Flight” to start.</td></tr>
                 ) : visibleArrivals.map((row) => (
                   <tr key={row.id} className={row.status !== 'LANDED' ? 'active-row' : ''}>
                     <td className="seq-cell">{row.sequence_no}</td>
@@ -392,7 +400,8 @@ function App() {
                     <td><EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} strong /></td>
                     <td className="computed-cell">{timeOnly(row.cto)}</td>
                     <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} allowEmpty /></td>
-                    <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'}>{intervalLabel(row.seq_var)}</td>
+                    <td className={row.est_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − ELDT">{intervalLabel(row.est_var)}</td>
+                    <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − CLDT">{intervalLabel(row.seq_var)}</td>
                     <td>
                       <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(event) => void updateStatus(row, event.target.value as ArrivalStatus)}>
                         <option value="INBOUND">INBOUND</option><option value="SEQUENCED">SEQUENCED</option><option value="LANDING">LANDING</option><option value="LANDED">LANDED</option><option value="CANCELLED">CANCELLED</option>
@@ -441,9 +450,43 @@ function EditableTime({ row, field, value, saving, editing, onStart, onSave, str
   const [draft, setDraft] = useState(current)
   useEffect(() => setDraft(current), [current])
   const key = `${row.id}:${field}`
+
+  const commit = () => {
+    if (draft === '' && allowEmpty) {
+      if (current !== '') void onSave(row, field, null)
+      return
+    }
+    if (!isValidAtcTime(draft)) {
+      setDraft(current)
+      return
+    }
+    if (draft !== current) void onSave(row, field, draft)
+  }
+
   return (
     <div className="cell-editor-wrap">
-      <input type="time" className={`cell-input time${strong ? ' strong' : ''}`} value={draft} disabled={saving === key} onFocus={() => onStart(row.id, field)} onChange={(event) => setDraft(event.target.value)} onBlur={() => { if (draft !== current) void onSave(row, field, draft || (allowEmpty ? null : current)) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={5}
+        placeholder="HH:MM"
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={`${field.toUpperCase()} UTC time in 24-hour HH:MM format`}
+        className={`cell-input time${strong ? ' strong' : ''}`}
+        value={draft}
+        disabled={saving === key}
+        onFocus={() => onStart(row.id, field)}
+        onChange={(event) => setDraft(formatAtcTimeDraft(event.target.value))}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+          if (event.key === 'Escape') {
+            setDraft(current)
+            event.currentTarget.blur()
+          }
+        }}
+      />
       {editing[key] && <small className="editing-tag">{editing[key].displayName}</small>}
     </div>
   )
