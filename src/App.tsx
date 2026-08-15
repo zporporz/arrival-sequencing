@@ -5,8 +5,9 @@ import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
 
 const AIRPORT = 'VTBD' as const
-const FLOW = '21'
-const DEFAULT_RUNWAY_CONFIG = '21L / 21R'
+const requestedFlow = new URLSearchParams(window.location.search).get('flow')
+const FLOW = requestedFlow === '03' ? '03' : '21'
+const DEFAULT_RUNWAY_CONFIG = FLOW === '03' ? '03L / 03R' : '21L / 21R'
 
 const timeOnly = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -367,7 +368,7 @@ function App() {
             </div>
             <div className="toolbar-controls">
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
-              <button className="secondary-button">Flow 21</button>
+              <button className="secondary-button">Flow {FLOW}</button>
             </div>
           </div>
 
