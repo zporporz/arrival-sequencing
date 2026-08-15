@@ -1,6 +1,7 @@
 const TARGET_GAP_MINUTES = 2
 const CLDT_SELECTOR = 'tbody input.cell-input.time.strong'
 const CONFLICT_CLASS = 'spacing-conflict-cell'
+const BADGE_CLASS = 'spacing-warning-badge'
 
 function parseClock(value: string) {
   const match = value.match(/^([01]\d|2[0-3]):([0-5]\d)$/)
@@ -26,15 +27,26 @@ function clearConflict(input: HTMLInputElement) {
   cell.classList.remove(CONFLICT_CLASS)
   cell.removeAttribute('data-spacing-warning')
   cell.removeAttribute('title')
+  cell.querySelector(`.${BADGE_CLASS}`)?.remove()
 }
 
 function applyConflict(input: HTMLInputElement, gapMinutes: number, minimumClock: string) {
   const cell = input.closest('td')
   if (!cell) return
+
   const label = `GAP ${displayGap(gapMinutes)} · MIN ${minimumClock}`
   cell.classList.add(CONFLICT_CLASS)
   cell.setAttribute('data-spacing-warning', label)
   cell.setAttribute('title', `${label} — 2-minute planning target, not a universal separation minimum`)
+  cell.style.position = 'relative'
+
+  let badge = cell.querySelector<HTMLSpanElement>(`.${BADGE_CLASS}`)
+  if (!badge) {
+    badge = document.createElement('span')
+    badge.className = BADGE_CLASS
+    cell.appendChild(badge)
+  }
+  badge.textContent = label
 }
 
 function recalculateSpacing() {
@@ -45,7 +57,7 @@ function recalculateSpacing() {
   let previousMinutes: number | null = null
 
   for (const input of inputs) {
-    const currentMinutes = parseClock(input.value)
+    const currentMinutes = parseClock(input.value.trim())
     if (currentMinutes === null) {
       previousMinutes = null
       continue
@@ -77,6 +89,7 @@ export function installSpacingGuard() {
   }, true)
 
   document.addEventListener('change', schedule, true)
+  document.addEventListener('focusout', schedule, true)
 
   const start = () => {
     schedule()
@@ -89,9 +102,9 @@ export function installSpacingGuard() {
       attributeFilter: ['value'],
     })
 
-    // React may update an input's value property without changing the value attribute.
-    // A lightweight periodic pass keeps warnings correct after remote realtime updates too.
-    window.setInterval(schedule, 1000)
+    // React/Supabase realtime can update value properties without a DOM attribute mutation.
+    // Re-checking twice per second is tiny for this small table and keeps the warning deterministic.
+    window.setInterval(schedule, 500)
   }
 
   if (document.readyState === 'loading') {
