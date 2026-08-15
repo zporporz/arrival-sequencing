@@ -35,9 +35,10 @@ function applyConflict(input: HTMLInputElement, gapMinutes: number, minimumClock
   if (!cell) return
 
   const label = `GAP ${displayGap(gapMinutes)} · MIN ${minimumClock}`
+  const warningLabel = `⚠ ${label}`
   cell.classList.add(CONFLICT_CLASS)
-  cell.setAttribute('data-spacing-warning', label)
-  cell.setAttribute('title', `${label} — 2-minute planning target, not a universal separation minimum`)
+  cell.setAttribute('data-spacing-warning', warningLabel)
+  cell.setAttribute('title', `${warningLabel} — 2-minute planning target, not a universal separation minimum`)
   cell.style.position = 'relative'
 
   let badge = cell.querySelector<HTMLSpanElement>(`.${BADGE_CLASS}`)
@@ -46,7 +47,7 @@ function applyConflict(input: HTMLInputElement, gapMinutes: number, minimumClock
     badge.className = BADGE_CLASS
     cell.appendChild(badge)
   }
-  badge.textContent = label
+  badge.textContent = warningLabel
 }
 
 function recalculateSpacing() {
