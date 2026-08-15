@@ -7,7 +7,7 @@ type FlowConfig = {
 
 const FLOWS: FlowConfig[] = [
   { flow: '21', runway: '21L / 21R', label: 'VTBD · RWY 21', timingReady: true },
-  { flow: '03', runway: '03L / 03R', label: 'VTBD · RWY 03', timingReady: false },
+  { flow: '03', runway: '03L / 03R', label: 'VTBD · RWY 03', timingReady: true },
 ]
 
 export function getSelectedFlow(): FlowConfig {
@@ -51,18 +51,15 @@ function installSelectorUi() {
     if (content && !content.querySelector('.timing-pending-banner')) {
       const banner = document.createElement('div')
       banner.className = 'timing-pending-banner'
-      banner.innerHTML = '<strong>VTBD RWY 03 timing data pending</strong><span>This flow has its own realtime session, but Add Flight is disabled until its REF FIX timing dataset is entered and reviewed.</span>'
+      banner.innerHTML = '<strong>Timing data pending</strong><span>This flow has its own realtime session, but Add Flight is disabled until its REF FIX timing dataset is entered and reviewed.</span>'
       content.prepend(banner)
     }
 
     const addButton = document.querySelector<HTMLButtonElement>('.primary-button')
     if (addButton) {
       addButton.disabled = true
-      addButton.title = 'VTBD RWY 03 timing dataset is not configured yet.'
+      addButton.title = 'Timing dataset is not configured yet.'
     }
-
-    const footer = document.querySelector<HTMLElement>('.workspace-footer > div:last-child')
-    if (footer) footer.innerHTML = '⚠ VTBD RWY 03 timing dataset pending · <strong class="live">● LIVE</strong>'
   }
 
   return true
