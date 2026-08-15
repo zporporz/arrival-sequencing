@@ -195,6 +195,60 @@
   font-size: 10px;
 }
 
+/* Desktop board: fit the operational columns inside the card instead of
+   forcing readability.css's old 1780px prototype width. The explicit widths
+   keep labels and controls readable while avoiding a pointless scrollbar on
+   normal controller displays. */
+@media (min-width: 1500px) {
+  .table-wrap {
+    overflow-x: hidden !important;
+    scrollbar-gutter: auto !important;
+  }
+
+  .table-wrap table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+  }
+
+  .table-wrap th,
+  .table-wrap td {
+    box-sizing: border-box !important;
+  }
+
+  th:nth-child(1), td:nth-child(1) { width: 52px !important; min-width: 52px !important; }
+  th:nth-child(2), td:nth-child(2) { width: 120px !important; min-width: 120px !important; }
+  th:nth-child(3), td:nth-child(3) { width: 82px !important; min-width: 82px !important; }
+  th:nth-child(4), td:nth-child(4) { width: 102px !important; min-width: 102px !important; }
+  th:nth-child(5), td:nth-child(5) { width: 102px !important; min-width: 102px !important; }
+  th:nth-child(6), td:nth-child(6) { width: 100px !important; min-width: 100px !important; }
+  th:nth-child(7), td:nth-child(7) { width: 104px !important; min-width: 104px !important; }
+  th:nth-child(8), td:nth-child(8) { width: 124px !important; min-width: 124px !important; }
+  th:nth-child(9), td:nth-child(9) { width: 104px !important; min-width: 104px !important; }
+  th:nth-child(10), td:nth-child(10) { width: 106px !important; min-width: 106px !important; }
+  th:nth-child(11), td:nth-child(11) { width: 94px !important; min-width: 94px !important; }
+  th:nth-child(12), td:nth-child(12) { width: 94px !important; min-width: 94px !important; }
+  th:nth-child(13), td:nth-child(13) { width: 108px !important; min-width: 108px !important; }
+  th:nth-child(14), td:nth-child(14) { width: 176px !important; min-width: 176px !important; }
+
+  .row-actions {
+    gap: 5px !important;
+    justify-content: flex-end;
+  }
+
+  .landed-now-button,
+  .quick-cancel-button {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+@media (max-width: 1499px) {
+  .table-wrap {
+    overflow-x: auto !important;
+  }
+}
+
 @media (max-width: 900px) {
   .activity-toggle {
     right: 14px;
