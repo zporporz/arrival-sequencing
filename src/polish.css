@@ -164,14 +164,23 @@ th:nth-child(12), td:nth-child(12) { min-width: 120px; }
 }
 
 .spacing-conflict-cell::after {
-  content: attr(data-spacing-warning);
+  content: none;
+}
+
+.spacing-warning-badge {
   position: absolute;
-  right: 12px;
-  bottom: 2px;
+  z-index: 5;
+  right: 10px;
+  bottom: 1px;
   color: #c14f3f;
+  background: #fff7f5;
+  border-radius: 4px;
+  padding: 1px 4px;
   font-size: 8px;
   font-weight: 850;
+  line-height: 1.15;
   letter-spacing: .01em;
+  white-space: nowrap;
   pointer-events: none;
 }
 
