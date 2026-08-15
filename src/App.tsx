@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import { ensureAnonymousSession, isSupabaseConfigured, supabase } from './lib/supabase'
+import { getBrowserIdentity, saveBrowserDisplayName } from './browserIdentity'
+import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
 
 const AIRPORT = 'VTBD' as const
@@ -51,44 +52,27 @@ const averageInterval = (rows: ArrivalView[]) => {
   const gaps = times.slice(1).map((time, index) => time - times[index])
   const averageMs = gaps.reduce((sum, value) => sum + value, 0) / gaps.length
   const totalSeconds = Math.max(0, Math.round(averageMs / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  return `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}`
 }
 
-type EditingState = Record<string, { userId: string; displayName: string }>
-
-function SetupRequired() {
-  return (
-    <div className="setup-shell">
-      <div className="setup-card">
-        <div className="setup-icon">✈</div>
-        <div className="eyebrow">ARRIVAL SEQUENCING</div>
-        <h1>Supabase connection required</h1>
-        <p>The application code is ready. Add the two Vite environment variables to connect the shared realtime database.</p>
-        <pre>VITE_SUPABASE_URL=...{`\n`}VITE_SUPABASE_PUBLISHABLE_KEY=...</pre>
-        <p className="muted">Do not use a secret/service-role key in the browser.</p>
-      </div>
-    </div>
-  )
-}
+type EditingState = Record<string, { displayName: string }>
 
 function App() {
+  const identity = useMemo(() => getBrowserIdentity(), [])
   const [session, setSession] = useState<SequenceSession | null>(null)
   const [arrivals, setArrivals] = useState<ArrivalView[]>([])
   const [fixes, setFixes] = useState<FixTiming[]>([])
-  const [profileName, setProfileName] = useState('Controller')
+  const [profileName, setProfileName] = useState(identity.displayName)
   const [onlineControllers, setOnlineControllers] = useState<string[]>([])
   const [editing, setEditing] = useState<EditingState>({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [savingCell, setSavingCell] = useState<string | null>(null)
+  const [utcNow, setUtcNow] = useState(new Date())
   const channelRef = useRef<RealtimeChannel | null>(null)
-  const userIdRef = useRef<string | null>(null)
 
-  const refreshArrivals = async (sessionId: string) => {
-    if (!supabase) return
+  const refreshArrivals = useCallback(async (sessionId: string) => {
     const { data, error: queryError } = await supabase
       .from('arrival_sequence_view')
       .select('*')
@@ -98,10 +82,9 @@ function App() {
 
     if (queryError) throw queryError
     setArrivals((data ?? []) as ArrivalView[])
-  }
+  }, [])
 
-  const loadFixes = async (activeSession: SequenceSession) => {
-    if (!supabase) return
+  const loadFixes = useCallback(async (activeSession: SequenceSession) => {
     const { data, error: queryError } = await supabase
       .from('fix_timings')
       .select('*')
@@ -119,36 +102,23 @@ function App() {
       if (!byFix.has(row.fix)) byFix.set(row.fix, row)
     }
     setFixes([...byFix.values()].sort((a, b) => a.fix.localeCompare(b.fix)))
-  }
+  }, [])
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      setLoading(false)
-      return
-    }
+    const timer = window.setInterval(() => setUtcNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
+  useEffect(() => {
     let disposed = false
-    const client = supabase
 
     const bootstrap = async () => {
       try {
         setLoading(true)
         setError(null)
-        const authSession = await ensureAnonymousSession()
-        const userId = authSession.user.id
-        userIdRef.current = userId
-
-        const { data: profile, error: profileError } = await client
-          .from('controller_profiles')
-          .select('display_name')
-          .eq('user_id', userId)
-          .single()
-        if (profileError) throw profileError
-        const displayName = profile.display_name as string
-        if (!disposed) setProfileName(displayName)
-
         const todayUtc = new Date().toISOString().slice(0, 10)
-        const { data: existingSession, error: sessionQueryError } = await client
+
+        const { data: existingSession, error: sessionQueryError } = await supabase
           .from('sequence_sessions')
           .select('*')
           .eq('airport', AIRPORT)
@@ -158,11 +128,12 @@ function App() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
+
         if (sessionQueryError) throw sessionQueryError
 
         let activeSession = existingSession as SequenceSession | null
         if (!activeSession) {
-          const { data: createdSession, error: createSessionError } = await client
+          const { data: createdSession, error: createSessionError } = await supabase
             .from('sequence_sessions')
             .insert({
               airport: AIRPORT,
@@ -170,7 +141,6 @@ function App() {
               runway_config: DEFAULT_RUNWAY_CONFIG,
               service_date: todayUtc,
               status: 'ACTIVE',
-              created_by: userId,
             })
             .select('*')
             .single()
@@ -182,8 +152,8 @@ function App() {
         setSession(activeSession)
         await Promise.all([refreshArrivals(activeSession.id), loadFixes(activeSession)])
 
-        const realtimeChannel = client.channel(`sequence:${activeSession.id}`, {
-          config: { presence: { key: userId } },
+        const realtimeChannel = supabase.channel(`sequence:${activeSession.id}`, {
+          config: { presence: { key: identity.id } },
         })
 
         realtimeChannel
@@ -195,23 +165,20 @@ function App() {
               table: 'arrivals',
               filter: `session_id=eq.${activeSession.id}`,
             },
-            () => void refreshArrivals(activeSession!.id).catch((err) => setError(err.message)),
+            () => void refreshArrivals(activeSession!.id).catch((err: Error) => setError(err.message)),
           )
           .on('presence', { event: 'sync' }, () => {
-            const state = realtimeChannel.presenceState<{ displayName: string }>()
+            const state = realtimeChannel.presenceState<{ displayName?: string }>()
             const names = Object.values(state)
               .flat()
               .map((presence) => presence.displayName)
-              .filter(Boolean)
+              .filter((name): name is string => Boolean(name))
             setOnlineControllers([...new Set(names)])
           })
           .on('broadcast', { event: 'editing' }, ({ payload }) => {
-            if (!payload || payload.userId === userId) return
+            if (!payload || payload.userId === identity.id) return
             const key = `${payload.arrivalId}:${payload.field}`
-            setEditing((current) => ({
-              ...current,
-              [key]: { userId: payload.userId, displayName: payload.displayName },
-            }))
+            setEditing((current) => ({ ...current, [key]: { displayName: payload.displayName } }))
           })
           .on('broadcast', { event: 'editing-end' }, ({ payload }) => {
             if (!payload) return
@@ -224,7 +191,7 @@ function App() {
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
-              await realtimeChannel.track({ displayName, onlineAt: new Date().toISOString() })
+              await realtimeChannel.track({ displayName: profileName, onlineAt: new Date().toISOString() })
             }
           })
 
@@ -240,10 +207,10 @@ function App() {
 
     return () => {
       disposed = true
-      if (channelRef.current) void client.removeChannel(channelRef.current)
+      if (channelRef.current) void supabase.removeChannel(channelRef.current)
       channelRef.current = null
     }
-  }, [])
+  }, [identity.id, loadFixes, profileName, refreshArrivals])
 
   const visibleArrivals = useMemo(() => {
     const needle = search.trim().toUpperCase()
@@ -264,40 +231,40 @@ function App() {
 
   const startEditing = (arrivalId: string, field: string) => {
     const channel = channelRef.current
-    if (!channel || !userIdRef.current) return
+    if (!channel) return
     void channel.send({
       type: 'broadcast',
       event: 'editing',
-      payload: { arrivalId, field, userId: userIdRef.current, displayName: profileName },
+      payload: { arrivalId, field, userId: identity.id, displayName: profileName },
     })
   }
 
   const stopEditing = (arrivalId: string, field: string) => {
     const channel = channelRef.current
-    if (!channel || !userIdRef.current) return
+    if (!channel) return
     void channel.send({
       type: 'broadcast',
       event: 'editing-end',
-      payload: { arrivalId, field, userId: userIdRef.current },
+      payload: { arrivalId, field, userId: identity.id },
     })
   }
 
   const updateArrival = async (row: ArrivalView, field: string, value: string | null) => {
-    if (!supabase || !session) return
+    if (!session) return
     const cellKey = `${row.id}:${field}`
     setSavingCell(cellKey)
     setError(null)
 
     try {
       let dbValue: string | null = value
-      if (field === 'eto' && value) dbValue = isoFromClock(session.service_date, value)
+      if (field === 'eto' && value) dbValue = isoFromClock(session.service_date, value, row.eto)
       if (field === 'cldt' && value) dbValue = isoFromClock(session.service_date, value, row.eto)
       if (field === 'aldt') dbValue = value ? isoFromClock(session.service_date, value, row.cldt) : null
 
-      const { error: updateError } = await supabase
-        .from('arrivals')
-        .update({ [field]: dbValue })
-        .eq('id', row.id)
+      const patch: Record<string, string | null> = { [field]: dbValue }
+      if (field === 'aldt') patch.status = dbValue ? 'LANDED' : 'SEQUENCED'
+
+      const { error: updateError } = await supabase.from('arrivals').update(patch).eq('id', row.id)
       if (updateError) throw updateError
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -307,12 +274,16 @@ function App() {
     }
   }
 
+  const updateStatus = async (row: ArrivalView, status: ArrivalStatus) => {
+    const { error: updateError } = await supabase.from('arrivals').update({ status }).eq('id', row.id)
+    if (updateError) setError(updateError.message)
+  }
+
   const addFlight = async () => {
-    if (!supabase || !session || fixes.length === 0) return
+    if (!session || fixes.length === 0) return
     try {
       setError(null)
       const now = new Date()
-      const serviceDate = session.service_date
       const hhmm = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
       const sequenceNo = arrivals.reduce((max, row) => Math.max(max, row.sequence_no), 0) + 1
       const { error: insertError } = await supabase.from('arrivals').insert({
@@ -322,7 +293,7 @@ function App() {
         aircraft_type: null,
         departure: null,
         ref_fix: fixes[0].fix,
-        eto: isoFromClock(serviceDate, hhmm),
+        eto: isoFromClock(session.service_date, hhmm),
         status: 'INBOUND',
       })
       if (insertError) throw insertError
@@ -332,24 +303,18 @@ function App() {
   }
 
   const deleteFlight = async (row: ArrivalView) => {
-    if (!supabase) return
     if (!window.confirm(`Delete ${row.callsign}?`)) return
     const { error: deleteError } = await supabase.from('arrivals').delete().eq('id', row.id)
     if (deleteError) setError(deleteError.message)
   }
 
   const saveProfileName = async () => {
-    if (!supabase || !userIdRef.current) return
-    const clean = profileName.trim() || 'Controller'
+    const clean = saveBrowserDisplayName(profileName)
     setProfileName(clean)
-    const { error: profileError } = await supabase
-      .from('controller_profiles')
-      .update({ display_name: clean })
-      .eq('user_id', userIdRef.current)
-    if (profileError) setError(profileError.message)
+    if (channelRef.current) {
+      await channelRef.current.track({ displayName: clean, onlineAt: new Date().toISOString() })
+    }
   }
-
-  if (!isSupabaseConfigured) return <SetupRequired />
 
   return (
     <div className="app-shell">
@@ -363,6 +328,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <div className="clock-card"><span>UTC</span><strong>{utcNow.toISOString().slice(11, 19)}</strong></div>
           <div className="connection-pill"><span className="live-dot" /> REALTIME</div>
           <div className="controller-stack">
             <span>{onlineControllers.length || 1} online</span>
@@ -370,115 +336,115 @@ function App() {
               {onlineControllers.slice(0, 4).map((name) => <i key={name} title={name}>{name.slice(0, 2).toUpperCase()}</i>)}
             </div>
           </div>
-          <input
-            className="controller-name"
-            value={profileName}
-            onChange={(event) => setProfileName(event.target.value)}
-            onBlur={() => void saveProfileName()}
-            aria-label="Controller display name"
-          />
+          <input className="controller-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} onBlur={() => void saveProfileName()} aria-label="Controller display name" />
           <button className="primary-button" onClick={() => void addFlight()} disabled={!session || fixes.length === 0}>+ Add Flight</button>
         </div>
       </header>
 
       <main className="content">
         {error && <div className="error-banner"><strong>Database:</strong> {error}</div>}
-        {loading && <div className="loading-bar">Connecting to shared sequence…</div>}
 
         <section className="summary-grid">
-          <article className="summary-card"><span>Flights in sequence</span><strong>{arrivals.length}</strong><small>Shared rows</small></article>
-          <article className="summary-card"><span>Next landing (CLDT)</span><strong>{nextLanding ? timeOnly(nextLanding.cldt) : '—'}</strong><small>{nextLanding?.callsign ?? 'No inbound traffic'}</small></article>
-          <article className="summary-card"><span>Average interval</span><strong>{averageInterval(arrivals)}</strong><small>Calculated from CLDT</small></article>
+          <article className="summary-card"><span>Flights in sequence</span><strong>{arrivals.filter((row) => !['LANDED', 'CANCELLED'].includes(row.status)).length}</strong><small>{arrivals.length} total rows</small></article>
+          <article className="summary-card"><span>Next landing (CLDT)</span><strong>{nextLanding ? timeOnly(nextLanding.cldt) : '—'}</strong><small>{nextLanding?.callsign ?? 'No active traffic'}</small></article>
+          <article className="summary-card"><span>Average interval</span><strong>{averageInterval(arrivals)}</strong><small>CLDT planning gap</small></article>
           <article className="summary-card"><span>Controllers online</span><strong>{onlineControllers.length || 1}</strong><small>Presence channel</small></article>
         </section>
 
         <section className="workspace-card">
           <div className="workspace-toolbar">
             <div>
-              <div className="section-kicker">{AIRPORT} · FLOW {FLOW} · {session?.runway_config ?? DEFAULT_RUNWAY_CONFIG}</div>
               <h2>Arrival sequence</h2>
-              <p>Type directly into editable cells. Changes save automatically and appear on every connected screen.</p>
+              <p>Click editable cells. Changes autosave and appear on every connected screen.</p>
             </div>
             <div className="toolbar-controls">
-              <input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" />
-              <button className="secondary-button" onClick={() => session && void refreshArrivals(session.id)}>↻ Refresh</button>
+              <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <button className="secondary-button">Flow 21</button>
             </div>
           </div>
 
           <div className="table-wrap">
             <table>
               <thead>
-                <tr>
-                  <th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th>SEQ VAR</th><th>STATUS</th><th />
-                </tr>
+                <tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th>SEQ VAR</th><th>STATUS</th><th /></tr>
               </thead>
               <tbody>
-                {visibleArrivals.map((row) => {
-                  const editableOwner = (field: string) => editing[`${row.id}:${field}`]
-                  const cellClass = (field: string, extra = '') => {
-                    const key = `${row.id}:${field}`
-                    return `editable-cell ${savingCell === key ? 'saving-cell' : ''} ${editableOwner(field) ? 'remote-editing' : ''} ${extra}`
-                  }
-
-                  return (
-                    <tr key={row.id} className={row.status === 'SEQUENCED' ? 'active-row' : ''}>
-                      <td className="seq-cell">{row.sequence_no}</td>
-                      <td className={cellClass('callsign')} data-editor={editableOwner('callsign')?.displayName}>
-                        <input defaultValue={row.callsign} onFocus={() => startEditing(row.id, 'callsign')} onBlur={(e) => void updateArrival(row, 'callsign', e.target.value)} />
-                      </td>
-                      <td className={cellClass('aircraft_type')} data-editor={editableOwner('aircraft_type')?.displayName}>
-                        <input defaultValue={row.aircraft_type ?? ''} onFocus={() => startEditing(row.id, 'aircraft_type')} onBlur={(e) => void updateArrival(row, 'aircraft_type', e.target.value)} />
-                      </td>
-                      <td className={cellClass('departure')} data-editor={editableOwner('departure')?.displayName}>
-                        <input defaultValue={row.departure ?? ''} onFocus={() => startEditing(row.id, 'departure')} onBlur={(e) => void updateArrival(row, 'departure', e.target.value)} />
-                      </td>
-                      <td className={cellClass('ref_fix')} data-editor={editableOwner('ref_fix')?.displayName}>
-                        <select value={row.ref_fix} onFocus={() => startEditing(row.id, 'ref_fix')} onBlur={() => stopEditing(row.id, 'ref_fix')} onChange={(e) => void updateArrival(row, 'ref_fix', e.target.value)}>
-                          {fixes.map((fix) => <option key={fix.id} value={fix.fix}>{fix.fix}{fix.verified ? '' : ' *'}</option>)}
+                {loading ? (
+                  <tr><td colSpan={13} className="empty-state">Connecting to shared sequence…</td></tr>
+                ) : visibleArrivals.length === 0 ? (
+                  <tr><td colSpan={13} className="empty-state">No flights yet. Click “Add Flight” to start.</td></tr>
+                ) : visibleArrivals.map((row) => (
+                  <tr key={row.id} className={row.status !== 'LANDED' ? 'active-row' : ''}>
+                    <td className="seq-cell">{row.sequence_no}</td>
+                    <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} bold /></td>
+                    <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                    <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                    <td>
+                      <div className="cell-editor-wrap">
+                        <select className="cell-select" value={row.ref_fix} disabled={savingCell === `${row.id}:ref_fix`} onFocus={() => startEditing(row.id, 'ref_fix')} onChange={(event) => void updateArrival(row, 'ref_fix', event.target.value)}>
+                          {fixes.map((fix) => <option key={fix.fix} value={fix.fix}>{fix.fix}</option>)}
                         </select>
-                      </td>
-                      <td className={cellClass('eto')} data-editor={editableOwner('eto')?.displayName}>
-                        <input type="time" defaultValue={timeOnly(row.eto)} onFocus={() => startEditing(row.id, 'eto')} onBlur={(e) => void updateArrival(row, 'eto', e.target.value)} />
-                      </td>
-                      <td className="computed-cell">{timeOnly(row.eldt)}</td>
-                      <td className={cellClass('cldt', 'cldt-cell')} data-editor={editableOwner('cldt')?.displayName}>
-                        <input type="time" defaultValue={timeOnly(row.cldt)} onFocus={() => startEditing(row.id, 'cldt')} onBlur={(e) => void updateArrival(row, 'cldt', e.target.value)} />
-                      </td>
-                      <td className="computed-cell">{timeOnly(row.cto)}</td>
-                      <td className={cellClass('aldt')} data-editor={editableOwner('aldt')?.displayName}>
-                        <input type="time" defaultValue={row.aldt ? timeOnly(row.aldt) : ''} onFocus={() => startEditing(row.id, 'aldt')} onBlur={(e) => void updateArrival(row, 'aldt', e.target.value || null)} />
-                      </td>
-                      <td className={row.seq_var?.startsWith('-') ? 'negative-var' : row.seq_var ? 'positive-var' : ''}>{intervalLabel(row.seq_var)}</td>
-                      <td>
-                        <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(e) => void updateArrival(row, 'status', e.target.value as ArrivalStatus)}>
-                          <option value="INBOUND">INBOUND</option>
-                          <option value="SEQUENCED">SEQUENCED</option>
-                          <option value="LANDING">LANDING</option>
-                          <option value="LANDED">LANDED</option>
-                          <option value="CANCELLED">CANCELLED</option>
-                        </select>
-                      </td>
-                      <td><button className="row-menu" onClick={() => void deleteFlight(row)} title={`Delete ${row.callsign}`}>×</button></td>
-                    </tr>
-                  )
-                })}
-                {!loading && visibleArrivals.length === 0 && (
-                  <tr><td colSpan={13} className="empty-state">No flights yet. Click <strong>+ Add Flight</strong> to create the first shared row.</td></tr>
-                )}
+                        {editing[`${row.id}:ref_fix`] && <small className="editing-tag">{editing[`${row.id}:ref_fix`].displayName}</small>}
+                      </div>
+                    </td>
+                    <td><EditableTime row={row} field="eto" value={row.eto} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                    <td className="computed-cell">{timeOnly(row.eldt)}</td>
+                    <td><EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} strong /></td>
+                    <td className="computed-cell">{timeOnly(row.cto)}</td>
+                    <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} allowEmpty /></td>
+                    <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'}>{intervalLabel(row.seq_var)}</td>
+                    <td>
+                      <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(event) => void updateStatus(row, event.target.value as ArrivalStatus)}>
+                        <option value="INBOUND">INBOUND</option><option value="SEQUENCED">SEQUENCED</option><option value="LANDING">LANDING</option><option value="LANDED">LANDED</option><option value="CANCELLED">CANCELLED</option>
+                      </select>
+                    </td>
+                    <td><button className="icon-button danger" onClick={() => void deleteFlight(row)} title="Delete flight">×</button></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
 
           <footer className="workspace-footer">
-            <div className="legend">
-              <span><i className="dot editable-dot" /> Editable / autosave</span>
-              <span><i className="dot computed-dot" /> Auto: ELDT & CTO</span>
-              <span><i className="dot provisional-dot" /> * provisional timing</span>
-            </div>
-            <div>{session ? `Session ${session.service_date}` : 'Connecting…'} · <strong className="live">● LIVE</strong></div>
+            <div className="legend"><span><i className="dot editable-dot" /> Editable / autosave</span><span><i className="dot computed-dot" /> ELDT + CTO calculated</span></div>
+            <div>{fixes.some((fix) => !fix.verified) ? '⚠ VTBD timing values are provisional' : 'Timing dataset verified'} · <strong className="live">● LIVE</strong></div>
           </footer>
         </section>
       </main>
+    </div>
+  )
+}
+
+type EditorCommon = {
+  row: ArrivalView
+  field: string
+  saving: string | null
+  editing: EditingState
+  onStart: (arrivalId: string, field: string) => void
+  onSave: (row: ArrivalView, field: string, value: string | null) => Promise<void>
+}
+
+function EditableText({ row, field, value, saving, editing, onStart, onSave, bold = false }: EditorCommon & { value: string; bold?: boolean }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  const key = `${row.id}:${field}`
+  return (
+    <div className="cell-editor-wrap">
+      <input className={`cell-input${bold ? ' bold' : ''}`} value={draft} disabled={saving === key} onFocus={() => onStart(row.id, field)} onChange={(event) => setDraft(event.target.value.toUpperCase())} onBlur={() => { if (draft.trim() !== value) void onSave(row, field, draft.trim() || null) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      {editing[key] && <small className="editing-tag">{editing[key].displayName}</small>}
+    </div>
+  )
+}
+
+function EditableTime({ row, field, value, saving, editing, onStart, onSave, strong = false, allowEmpty = false }: EditorCommon & { value: string | null; strong?: boolean; allowEmpty?: boolean }) {
+  const current = value ? timeOnly(value) : ''
+  const [draft, setDraft] = useState(current)
+  useEffect(() => setDraft(current), [current])
+  const key = `${row.id}:${field}`
+  return (
+    <div className="cell-editor-wrap">
+      <input type="time" className={`cell-input time${strong ? ' strong' : ''}`} value={draft} disabled={saving === key} onFocus={() => onStart(row.id, field)} onChange={(event) => setDraft(event.target.value)} onBlur={() => { if (draft !== current) void onSave(row, field, draft || (allowEmpty ? null : current)) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      {editing[key] && <small className="editing-tag">{editing[key].displayName}</small>}
     </div>
   )
 }
