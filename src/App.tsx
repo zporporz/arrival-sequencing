@@ -50,6 +50,12 @@ const isoFromClock = (serviceDate: string, hhmm: string, anchor?: string | null)
   return candidate.toISOString()
 }
 
+const sameInstant = (left: string, right: string) => {
+  const leftTime = new Date(left).getTime()
+  const rightTime = new Date(right).getTime()
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && Math.abs(leftTime - rightTime) < 1000
+}
+
 const averageInterval = (rows: ArrivalView[]) => {
   const times = rows
     .filter((row) => row.status !== 'CANCELLED')
@@ -283,8 +289,45 @@ function App() {
     }
   }
 
+  const resetCldt = async (row: ArrivalView) => {
+    const cellKey = `${row.id}:cldt`
+    setSavingCell(cellKey)
+    setError(null)
+    try {
+      const { error: updateError } = await supabase
+        .from('arrivals')
+        .update({ cldt: row.eldt })
+        .eq('id', row.id)
+      if (updateError) throw updateError
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingCell(null)
+      stopEditing(row.id, 'cldt')
+    }
+  }
+
+  const landedNow = async (row: ArrivalView) => {
+    const cellKey = `${row.id}:aldt`
+    setSavingCell(cellKey)
+    setError(null)
+    try {
+      const { error: updateError } = await supabase
+        .from('arrivals')
+        .update({ aldt: new Date().toISOString(), status: 'LANDED' })
+        .eq('id', row.id)
+      if (updateError) throw updateError
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingCell(null)
+    }
+  }
+
   const updateStatus = async (row: ArrivalView, status: ArrivalStatus) => {
-    const { error: updateError } = await supabase.from('arrivals').update({ status }).eq('id', row.id)
+    const patch: { status: ArrivalStatus; aldt?: string } = { status }
+    if (status === 'LANDED' && !row.aldt) patch.aldt = new Date().toISOString()
+    const { error: updateError } = await supabase.from('arrivals').update(patch).eq('id', row.id)
     if (updateError) setError(updateError.message)
   }
 
@@ -332,7 +375,7 @@ function App() {
           <div className="brand-mark">✈</div>
           <div>
             <div className="eyebrow">THAILAND APPROACH TOOLS</div>
-            <h1>VTBD Arrival Sequencing</h1>
+            <h1>BKK TMA Arrival Sequencing</h1>
             <p>Flow {FLOW} · Shared realtime workspace</p>
           </div>
         </div>
@@ -382,35 +425,51 @@ function App() {
                   <tr><td colSpan={14} className="empty-state">Connecting to shared sequence…</td></tr>
                 ) : visibleArrivals.length === 0 ? (
                   <tr><td colSpan={14} className="empty-state">No flights yet. Click “Add Flight” to start.</td></tr>
-                ) : visibleArrivals.map((row) => (
-                  <tr key={row.id} className={row.status !== 'LANDED' ? 'active-row' : ''}>
-                    <td className="seq-cell">{row.sequence_no}</td>
-                    <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} bold /></td>
-                    <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
-                    <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
-                    <td>
-                      <div className="cell-editor-wrap">
-                        <select className="cell-select" value={row.ref_fix} disabled={savingCell === `${row.id}:ref_fix`} onFocus={() => startEditing(row.id, 'ref_fix')} onChange={(event) => void updateArrival(row, 'ref_fix', event.target.value)}>
-                          {fixes.map((fix) => <option key={fix.fix} value={fix.fix}>{fix.fix}</option>)}
+                ) : visibleArrivals.map((row) => {
+                  const cldtOverride = !sameInstant(row.cldt, row.eldt)
+                  return (
+                    <tr key={row.id} className={row.status === 'LANDED' ? 'landed-row' : 'active-row'}>
+                      <td className="seq-cell">{row.sequence_no}</td>
+                      <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} bold /></td>
+                      <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                      <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                      <td>
+                        <div className="cell-editor-wrap">
+                          <select className="cell-select" value={row.ref_fix} disabled={savingCell === `${row.id}:ref_fix`} onFocus={() => startEditing(row.id, 'ref_fix')} onChange={(event) => void updateArrival(row, 'ref_fix', event.target.value)}>
+                            {fixes.map((fix) => <option key={fix.fix} value={fix.fix}>{fix.fix}</option>)}
+                          </select>
+                          {editing[`${row.id}:ref_fix`] && <small className="editing-tag">{editing[`${row.id}:ref_fix`].displayName}</small>}
+                        </div>
+                      </td>
+                      <td><EditableTime row={row} field="eto" value={row.eto} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                      <td className="computed-cell">{timeOnly(row.eldt)}</td>
+                      <td className="cldt-control-cell">
+                        <EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} strong />
+                        <div className="cldt-control-meta">
+                          <span className={`cldt-mode-badge ${cldtOverride ? 'override' : 'auto'}`}>{cldtOverride ? 'OVERRIDE' : 'AUTO'}</span>
+                          {cldtOverride && (
+                            <button className="cldt-reset-button" onClick={() => void resetCldt(row)} disabled={savingCell === `${row.id}:cldt`} title="Reset CLDT to ELDT">↺ Reset</button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="computed-cell">{timeOnly(row.cto)}</td>
+                      <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} allowEmpty /></td>
+                      <td className={row.est_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − ELDT">{intervalLabel(row.est_var)}</td>
+                      <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − CLDT">{intervalLabel(row.seq_var)}</td>
+                      <td>
+                        <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(event) => void updateStatus(row, event.target.value as ArrivalStatus)}>
+                          <option value="INBOUND">INBOUND</option><option value="SEQUENCED">SEQUENCED</option><option value="LANDING">LANDING</option><option value="LANDED">LANDED</option><option value="CANCELLED">CANCELLED</option>
                         </select>
-                        {editing[`${row.id}:ref_fix`] && <small className="editing-tag">{editing[`${row.id}:ref_fix`].displayName}</small>}
-                      </div>
-                    </td>
-                    <td><EditableTime row={row} field="eto" value={row.eto} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
-                    <td className="computed-cell">{timeOnly(row.eldt)}</td>
-                    <td><EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} strong /></td>
-                    <td className="computed-cell">{timeOnly(row.cto)}</td>
-                    <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} allowEmpty /></td>
-                    <td className={row.est_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − ELDT">{intervalLabel(row.est_var)}</td>
-                    <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − CLDT">{intervalLabel(row.seq_var)}</td>
-                    <td>
-                      <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(event) => void updateStatus(row, event.target.value as ArrivalStatus)}>
-                        <option value="INBOUND">INBOUND</option><option value="SEQUENCED">SEQUENCED</option><option value="LANDING">LANDING</option><option value="LANDED">LANDED</option><option value="CANCELLED">CANCELLED</option>
-                      </select>
-                    </td>
-                    <td><button className="icon-button danger" onClick={() => void deleteFlight(row)} title="Delete flight">×</button></td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="row-actions-cell">
+                        <div className="row-actions">
+                          <button className={`landed-now-button${row.status === 'LANDED' ? ' is-landed' : ''}`} onClick={() => void landedNow(row)} disabled={row.status === 'LANDED' || savingCell === `${row.id}:aldt`} title="Set ALDT to the current UTC time and mark LANDED">{row.status === 'LANDED' ? '✓ Landed' : '✓ Landed Now'}</button>
+                          <button className="icon-button danger" onClick={() => void deleteFlight(row)} title="Delete flight">×</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
