@@ -43,6 +43,9 @@ function installSelectorUi() {
   select.addEventListener('change', () => switchFlow(select.value))
   toolbar.appendChild(wrap)
 
+  const title = document.querySelector<HTMLElement>('.brand-block h1')
+  if (title) title.textContent = 'BKK TMA Arrival Sequencing'
+
   const subtitle = document.querySelector<HTMLElement>('.brand-block p')
   if (subtitle) subtitle.textContent = `Flow ${selected.flow} · ${selected.runway} · Shared realtime workspace`
 
