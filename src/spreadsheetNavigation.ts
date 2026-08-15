@@ -12,9 +12,13 @@ function controlsInRow(row: HTMLTableRowElement) {
     .filter((control) => !control.disabled)
 }
 
-function tableRows(table: HTMLTableElement) {
-  return Array.from(table.querySelectorAll<HTMLTableRowElement>(ROW_SELECTOR))
+function editableRows(root: ParentNode = document) {
+  return Array.from(root.querySelectorAll<HTMLTableRowElement>(ROW_SELECTOR))
     .filter((row) => controlsInRow(row).length > 0)
+}
+
+function tableRows(table: HTMLTableElement) {
+  return editableRows(table)
 }
 
 function controlPosition(control: EditableControl) {
@@ -28,7 +32,7 @@ function controlPosition(control: EditableControl) {
   const columnIndex = controls.indexOf(control)
   if (rowIndex < 0 || columnIndex < 0) return null
 
-  return { table, rows, rowIndex, columnIndex }
+  return { rows, rowIndex, columnIndex }
 }
 
 function focusControl(control: EditableControl | undefined) {
@@ -85,7 +89,7 @@ export function installSpreadsheetNavigation() {
     const target = event.target
     if (!(target instanceof Element)) return
     if (target.closest('.primary-button')) {
-      previousRowCount = document.querySelectorAll(`${ROW_SELECTOR} input.cell-input`).length
+      previousRowCount = editableRows().length
       focusNewRowUntil = Date.now() + 4000
     }
   }, true)
@@ -104,7 +108,7 @@ export function installSpreadsheetNavigation() {
     }
 
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      if (control instanceof HTMLSelectElement && !event.altKey) {
+      if (control instanceof HTMLSelectElement) {
         event.preventDefault()
         moveVertical(control, event.key === 'ArrowUp' ? -1 : 1)
         return
@@ -128,8 +132,7 @@ export function installSpreadsheetNavigation() {
   const observer = new MutationObserver(() => {
     if (Date.now() > focusNewRowUntil) return
 
-    const rows = Array.from(document.querySelectorAll<HTMLTableRowElement>(ROW_SELECTOR))
-      .filter((row) => controlsInRow(row).length > 0)
+    const rows = editableRows()
     if (rows.length <= previousRowCount) return
 
     const newest = rows[rows.length - 1]
