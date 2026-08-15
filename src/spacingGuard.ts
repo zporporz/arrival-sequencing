@@ -88,6 +88,10 @@ export function installSpacingGuard() {
       attributes: true,
       attributeFilter: ['value'],
     })
+
+    // React may update an input's value property without changing the value attribute.
+    // A lightweight periodic pass keeps warnings correct after remote realtime updates too.
+    window.setInterval(schedule, 1000)
   }
 
   if (document.readyState === 'loading') {
