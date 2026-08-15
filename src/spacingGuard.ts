@@ -27,6 +27,12 @@ function clearConflict(input: HTMLInputElement) {
   cell.querySelector(`.${BADGE_CLASS}`)?.remove()
 }
 
+function isActiveForSpacing(input: HTMLInputElement) {
+  const row = input.closest('tr')
+  const status = row?.querySelector<HTMLSelectElement>('.status-select')?.value
+  return status !== 'LANDED' && status !== 'CANCELLED'
+}
+
 function applySpacingConflict(input: HTMLInputElement, gapMinutes: number, minimumClock: string) {
   const cell = input.closest('td')
   if (!cell) return
@@ -52,6 +58,7 @@ function recalculateSpacing() {
   for (const input of inputs) clearConflict(input)
 
   const ordered = inputs
+    .filter(isActiveForSpacing)
     .map((input) => ({ input, minutes: parseClock(input.value.trim()) }))
     .filter((item): item is { input: HTMLInputElement; minutes: number } => item.minutes !== null)
     .sort((a, b) => a.minutes - b.minutes)
@@ -97,8 +104,6 @@ export function installSpacingGuard() {
       attributeFilter: ['value'],
     })
 
-    // React/Supabase realtime can update value properties without a DOM attribute mutation.
-    // Re-checking twice per second is tiny for this small table and keeps the warning deterministic.
     window.setInterval(schedule, 500)
   }
 
