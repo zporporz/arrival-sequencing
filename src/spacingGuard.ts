@@ -1,6 +1,8 @@
 const TARGET_GAP_MINUTES = 2
 const CLDT_SELECTOR = 'tbody input.cell-input.time.strong'
 const CONFLICT_CLASS = 'spacing-conflict-cell'
+const SPACING_CLASS = 'spacing-gap-cell'
+const ORDER_CLASS = 'order-conflict-cell'
 const BADGE_CLASS = 'spacing-warning-badge'
 
 function parseClock(value: string) {
@@ -16,15 +18,10 @@ function formatClock(totalMinutes: number) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 }
 
-function displayGap(deltaMinutes: number) {
-  if (deltaMinutes < 0) return `-${Math.abs(deltaMinutes)}m`
-  return `${deltaMinutes}m`
-}
-
 function clearConflict(input: HTMLInputElement) {
   const cell = input.closest('td')
   if (!cell) return
-  cell.classList.remove(CONFLICT_CLASS)
+  cell.classList.remove(CONFLICT_CLASS, SPACING_CLASS, ORDER_CLASS)
   cell.removeAttribute('data-spacing-warning')
   cell.removeAttribute('title')
   cell.querySelector(`.${BADGE_CLASS}`)?.remove()
@@ -34,11 +31,18 @@ function applyConflict(input: HTMLInputElement, gapMinutes: number, minimumClock
   const cell = input.closest('td')
   if (!cell) return
 
-  const label = `GAP ${displayGap(gapMinutes)} · MIN ${minimumClock}`
-  const warningLabel = `⚠ ${label}`
-  cell.classList.add(CONFLICT_CLASS)
+  const isOrderConflict = gapMinutes < 0
+  const warningLabel = isOrderConflict
+    ? `⚠ ORDER CONFLICT · ${Math.abs(gapMinutes)}m EARLIER`
+    : `⚠ SPACING · GAP ${gapMinutes}m · MIN ${minimumClock}`
+
+  const detail = isOrderConflict
+    ? `${warningLabel} — this row is sequenced after the previous row but its CLDT is earlier. Minimum planning CLDT: ${minimumClock}.`
+    : `${warningLabel} — below the ${TARGET_GAP_MINUTES}-minute planning target, not a universal separation minimum.`
+
+  cell.classList.add(CONFLICT_CLASS, isOrderConflict ? ORDER_CLASS : SPACING_CLASS)
   cell.setAttribute('data-spacing-warning', warningLabel)
-  cell.setAttribute('title', `${warningLabel} — 2-minute planning target, not a universal separation minimum`)
+  cell.setAttribute('title', detail)
   cell.style.position = 'relative'
 
   let badge = cell.querySelector<HTMLSpanElement>(`.${BADGE_CLASS}`)
@@ -66,6 +70,8 @@ function recalculateSpacing() {
 
     if (previousMinutes !== null) {
       let gapMinutes = currentMinutes - previousMinutes
+
+      // Treat a large backwards clock jump as crossing midnight, not an order conflict.
       if (gapMinutes < -720) gapMinutes += 1440
 
       if (gapMinutes < TARGET_GAP_MINUTES) {
