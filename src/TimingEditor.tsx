@@ -258,16 +258,35 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
         credentials: 'same-origin',
         cache: 'no-store',
       })
-      const tablePayload = await tableResponse.json() as { tables?: WaypointTable[]; error?: string }
+      const tablePayload = await tableResponse.json() as { tables?: WaypointTable[]; transitionWaypoints?: string[]; error?: string }
       if (!tableResponse.ok) throw new Error(tablePayload.error || `Waypoint lookup returned ${tableResponse.status}`)
-      const matchingTables = (tablePayload.tables || []).filter((table) => normalizeRunway(table.runwayApplicability) === normalizeRunway(runway.label))
-      if (!matchingTables.length) {
-        syncEntryFixes()
-        setAipWaypointMessage(`CAAT waypoint list table was not found for ${airport.icao} ${runway.label}; STAR entry fixes were loaded instead.`)
+      const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
+      const transitionWaypoints = (tablePayload.transitionWaypoints || []).map((fix) => fix.toUpperCase()).filter((fix) => !existingFixes.has(fix))
+      if (transitionWaypoints.length) {
+        const next = new Map<string, StarTimingDraft>()
+        for (const fix of transitionWaypoints) {
+          next.set(fix, {
+            fix,
+            minutes: '',
+            source: '',
+            effectiveFrom: defaultEffectiveFrom,
+            designators: [],
+            origin: 'AIP transition waypoint · AD 2.22 inbound routes',
+          })
+        }
+        const sorted = [...next.values()].sort((left, right) => left.fix.localeCompare(right.fix))
+        setStarDrafts(Object.fromEntries(sorted.map((draft) => [draft.fix, draft])))
+        setAipWaypointMessage(`${sorted.length} transition REF FIX candidates loaded from CAAT AD 2.22. Nominal Min is still required.`)
         return
       }
 
-      const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
+      const matchingTables = (tablePayload.tables || []).filter((table) => normalizeRunway(table.runwayApplicability) === normalizeRunway(runway.label))
+      if (!matchingTables.length) {
+        syncEntryFixes()
+        setAipWaypointMessage(`CAAT transition-waypoint / waypoint-list data was not found for ${airport.icao} ${runway.label}; STAR entry fixes were loaded instead.`)
+        return
+      }
+
       const next = new Map<string, StarTimingDraft>()
       for (const suggestion of starFixSuggestions) next.set(suggestion.fix, { ...suggestion, designators: [...suggestion.designators] })
 

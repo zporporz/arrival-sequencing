@@ -88,6 +88,33 @@ function extractWaypointTables(html, aerodromeUrl, airport) {
   return tables;
 }
 
+function extractTransitionWaypoints(html) {
+  const fixes = new Set();
+  const ignored = new Set(['INBOUND', 'ROUTES', 'ROUTE', 'TRANSITION', 'WAYPOINT', 'STAR', 'VTBS', 'RWY', 'NIL']);
+
+  for (const tableMatch of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+    const tableHtml = tableMatch[0];
+    const tableText = normalizeAipText(tableHtml).toUpperCase();
+    if (!tableText.includes('INBOUND ROUTES') || !tableText.includes('TRANSITION WAYPOINT') || !tableText.includes('STAR')) continue;
+
+    for (const rowMatch of tableHtml.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
+      const cells = [...rowMatch[0].matchAll(/<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)>/gi)]
+        .map((match) => normalizeAipText(match[1]).toUpperCase())
+        .filter(Boolean);
+      if (cells.length < 2) continue;
+      const waypointCell = cells[1];
+      if (waypointCell.includes('TRANSITION WAYPOINT')) continue;
+      for (const token of waypointCell.match(/\b[A-Z][A-Z0-9]{1,7}\b/g) || []) {
+        if (ignored.has(token)) continue;
+        if (/^\d+$/.test(token)) continue;
+        fixes.add(token);
+      }
+    }
+  }
+
+  return [...fixes].sort();
+}
+
 async function issueContext(request) {
   const url = new URL(request.url);
   const requestedIssue = url.searchParams.get('issue') || null;
@@ -132,7 +159,8 @@ async function scanWaypointTables(env, request) {
   const aerodromeUrl = `${CAAT_ORIGIN}/${issue.folder}/html/eAIP/VT-AD-2.${airport}-en-GB.html`;
   const html = await fetchText(aerodromeUrl);
   const tables = extractWaypointTables(html, aerodromeUrl, airport);
-  return { issue: { ...issue, sourceUrl: aerodromeUrl }, airport, tables };
+  const transitionWaypoints = extractTransitionWaypoints(html);
+  return { issue: { ...issue, sourceUrl: aerodromeUrl }, airport, tables, transitionWaypoints };
 }
 
 async function proxyAsset(request) {
