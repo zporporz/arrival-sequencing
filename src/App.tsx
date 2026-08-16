@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { useAuthUser } from './AuthGate'
+import IvaoTrafficPanel, { type TrafficFlight } from './IvaoTrafficPanel'
 import { getBrowserIdentity } from './browserIdentity'
 import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
@@ -533,6 +534,21 @@ function App() {
     }
   }
 
+  const addIvaoFlight = async (flight: TrafficFlight, refFix: string, eto: string) => {
+    if (!session) throw new Error('No active sequence session')
+    const sequenceNo = arrivals.reduce((max, row) => Math.max(max, row.sequence_no), 0) + 1
+    await sequenceApi('/api/sequence/arrival', {
+      action: 'create',
+      sessionId: session.id,
+      sequenceNo,
+      callsign: flight.callsign,
+      aircraftType: flight.aircraft,
+      departure: flight.departure,
+      refFix,
+      eto: isoFromClock(session.service_date, eto),
+    })
+  }
+
   const deleteFlight = async (row: ArrivalView) => {
     if (!window.confirm(`Delete ${row.callsign}?`)) return
     try {
@@ -668,6 +684,13 @@ function App() {
             </div>
             <div className="toolbar-controls react-workspace-actions">
               <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>
+              {workspace && <IvaoTrafficPanel
+                airport={workspace.airport}
+                fixes={fixes.map((fix) => fix.fix)}
+                existingCallsigns={arrivals.map((row) => row.callsign)}
+                disabled={!session || !workspace.timingReady || fixes.length === 0}
+                onAdd={addIvaoFlight}
+              />}
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
           </div>
