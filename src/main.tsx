@@ -19,6 +19,7 @@ import { installFlowSelector } from './flowSelector'
 import { installLifecyclePanel } from './lifecyclePanel'
 import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
+import { installAuthTopbar } from './authTopbar'
 import AuthGate from './AuthGate'
 import App from './App'
 
@@ -30,6 +31,7 @@ installTimeWorkflow()
 installFlowSelector()
 installLifecyclePanel()
 installRestoreCancelled()
+installAuthTopbar()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
