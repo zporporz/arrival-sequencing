@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { setAuthenticatedVid } from './browserIdentity'
+import { setAuthenticatedIdentity } from './browserIdentity'
 
 export type AuthUser = {
   id: number | string
@@ -38,6 +38,32 @@ function loginMessage() {
   return 'IVAO sign-in was not completed. Please try again.'
 }
 
+function normalizedPositions(user: AuthUser) {
+  return [...new Set(user.staffPositions.map((position) => position.trim()).filter(Boolean))]
+}
+
+function controllerIdentity(user: AuthUser) {
+  const positions = normalizedPositions(user)
+
+  if (!user.isThailandStaff) {
+    return {
+      displayName: `${user.name} · ${user.vid}`,
+      tooltip: `${user.name} · VID ${user.vid}`,
+    }
+  }
+
+  let positionLabel = 'TH STAFF'
+  if (positions.length === 1) positionLabel = positions[0]
+  if (positions.length === 2) positionLabel = positions.join(' / ')
+  if (positions.length > 2) positionLabel = `${positions.slice(0, 2).join(' / ')} +${positions.length - 2}`
+
+  const positionDetail = positions.length ? positions.join(' · ') : 'Thailand Division Staff'
+  return {
+    displayName: `${positionLabel} · ${user.vid}`,
+    tooltip: `${user.name} · VID ${user.vid} · ${positionDetail}`,
+  }
+}
+
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
@@ -50,7 +76,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       try {
         const response = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
         if (response.status === 401) {
-          setAuthenticatedVid(null)
+          setAuthenticatedIdentity(null)
           if (!disposed) setUser(null)
           return
         }
@@ -58,17 +84,22 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
         const payload = await response.json() as AuthResponse
         if (!payload.authenticated || !payload.user) {
-          setAuthenticatedVid(null)
+          setAuthenticatedIdentity(null)
           if (!disposed) setUser(null)
           return
         }
 
-        setAuthenticatedVid(payload.user.vid)
+        const identity = controllerIdentity(payload.user)
+        setAuthenticatedIdentity({
+          vid: payload.user.vid,
+          displayName: identity.displayName,
+          tooltip: identity.tooltip,
+        })
         document.documentElement.dataset.authRole = payload.user.role
         document.documentElement.dataset.authVid = payload.user.vid
         if (!disposed) setUser(payload.user)
       } catch (sessionError) {
-        setAuthenticatedVid(null)
+        setAuthenticatedIdentity(null)
         if (!disposed) {
           setError(sessionError instanceof Error ? sessionError.message : String(sessionError))
           setUser(null)
