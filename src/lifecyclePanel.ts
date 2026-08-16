@@ -4,11 +4,26 @@ type ViewMode = 'ACTIVE' | 'COMPLETED' | 'ALL'
 
 type AuditLog = {
   id: number
+  record_id: string | null
   action: string
   old_row: Record<string, unknown> | null
   new_row: Record<string, unknown> | null
   changed_by_label: string | null
   changed_at: string
+}
+
+type ActivityEntry = {
+  id: number
+  detail: string
+  actor: string
+  changedAt: string
+}
+
+type ActivityGroup = {
+  key: string
+  callsign: string
+  sequenceNo: string
+  entries: ActivityEntry[]
 }
 
 let viewMode: ViewMode = 'ACTIVE'
@@ -133,9 +148,10 @@ function describeAudit(log: AuditLog) {
   const before = log.old_row ?? {}
   const after = log.new_row ?? {}
   const callsign = String(after.callsign ?? before.callsign ?? 'Flight')
+  const sequenceNo = String(after.sequence_no ?? before.sequence_no ?? '—')
 
-  if (log.action === 'INSERT') return { callsign, detail: 'Flight added to sequence' }
-  if (log.action === 'DELETE') return { callsign, detail: 'Flight deleted from sequence' }
+  if (log.action === 'INSERT') return { callsign, sequenceNo, detail: 'Flight added to sequence' }
+  if (log.action === 'DELETE') return { callsign, sequenceNo, detail: 'Flight deleted from sequence' }
 
   const changes: string[] = []
   for (const field of visibleFields) {
@@ -146,12 +162,49 @@ function describeAudit(log: AuditLog) {
   }
 
   if (changes.length === 0) return null
-  return { callsign, detail: changes.slice(0, 2).join(' · ') }
+  return { callsign, sequenceNo, detail: changes.join(' · ') }
 }
 
 function auditMatchesSession(log: AuditLog, sessionId: string) {
   const row = log.new_row ?? log.old_row
   return row?.session_id === sessionId
+}
+
+function groupActivity(logs: AuditLog[]) {
+  const groups = new Map<string, ActivityGroup>()
+
+  for (const log of logs) {
+    const description = describeAudit(log)
+    if (!description) continue
+
+    const key = log.record_id ?? `audit-${log.id}`
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        callsign: description.callsign,
+        sequenceNo: description.sequenceNo,
+        entries: [],
+      }
+      groups.set(key, group)
+    }
+
+    group.entries.push({
+      id: log.id,
+      detail: description.detail,
+      actor: log.changed_by_label || 'Controller',
+      changedAt: log.changed_at,
+    })
+  }
+
+  return [...groups.values()]
+}
+
+function utcLabel(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}Z`
 }
 
 async function resolveSessionId() {
@@ -183,43 +236,66 @@ async function loadActivity() {
 
     const { data, error } = await supabase
       .from('audit_logs')
-      .select('id, action, old_row, new_row, changed_by_label, changed_at')
+      .select('id, record_id, action, old_row, new_row, changed_by_label, changed_at')
       .eq('table_name', 'arrivals')
       .order('changed_at', { ascending: false })
-      .limit(120)
+      .limit(200)
     if (error) throw error
 
     const logs = ((data ?? []) as AuditLog[]).filter((log) => auditMatchesSession(log, sessionId))
+    const groups = groupActivity(logs).slice(0, 30)
     if (list) list.replaceChildren()
 
-    let shown = 0
-    for (const log of logs) {
-      const description = describeAudit(log)
-      if (!description || !list) continue
-      shown += 1
+    for (const group of groups) {
+      if (!list) break
 
-      const item = document.createElement('article')
-      item.className = 'activity-item'
+      const details = document.createElement('details')
+      details.className = 'activity-group'
 
-      const header = document.createElement('div')
+      const summary = document.createElement('summary')
+      const identity = document.createElement('div')
+      identity.className = 'activity-group-identity'
+      const seq = document.createElement('span')
+      seq.textContent = `SEQ ${group.sequenceNo}`
       const callsign = document.createElement('strong')
-      callsign.textContent = description.callsign
-      const time = document.createElement('time')
-      const date = new Date(log.changed_at)
-      time.textContent = Number.isNaN(date.getTime()) ? '—' : `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}Z`
-      header.append(callsign, time)
+      callsign.textContent = group.callsign
+      identity.append(seq, callsign)
 
-      const detail = document.createElement('p')
-      detail.textContent = description.detail
-      const actor = document.createElement('small')
-      actor.textContent = log.changed_by_label || 'Controller'
+      const meta = document.createElement('div')
+      meta.className = 'activity-group-meta'
+      const count = document.createElement('b')
+      count.textContent = `${group.entries.length} ${group.entries.length === 1 ? 'change' : 'changes'}`
+      const latest = document.createElement('time')
+      latest.textContent = utcLabel(group.entries[0]?.changedAt ?? '')
+      meta.append(count, latest)
 
-      item.append(header, detail, actor)
-      list.appendChild(item)
-      if (shown >= 30) break
+      summary.append(identity, meta)
+      details.appendChild(summary)
+
+      const history = document.createElement('div')
+      history.className = 'activity-group-history'
+      for (const entry of group.entries) {
+        const item = document.createElement('article')
+        item.className = 'activity-entry'
+
+        const top = document.createElement('div')
+        const actor = document.createElement('strong')
+        actor.textContent = entry.actor
+        const time = document.createElement('time')
+        time.textContent = utcLabel(entry.changedAt)
+        top.append(actor, time)
+
+        const detail = document.createElement('p')
+        detail.textContent = entry.detail
+        item.append(top, detail)
+        history.appendChild(item)
+      }
+
+      details.appendChild(history)
+      list.appendChild(details)
     }
 
-    if (state) state.textContent = shown ? '' : 'No activity yet.'
+    if (state) state.textContent = groups.length ? '' : 'No activity yet.'
   } catch (error) {
     if (state) state.textContent = error instanceof Error ? error.message : String(error)
   } finally {
@@ -248,12 +324,22 @@ function installActivityPanel() {
   title.textContent = 'Recent activity'
   titleWrap.append(eyebrow, title)
 
+  const headerActions = document.createElement('div')
+  headerActions.className = 'activity-header-actions'
+  const refreshButton = document.createElement('button')
+  refreshButton.type = 'button'
+  refreshButton.className = 'activity-refresh'
+  refreshButton.textContent = 'Refresh'
+  refreshButton.title = 'Refresh activity now'
+  refreshButton.addEventListener('click', () => void loadActivity())
+
   const close = document.createElement('button')
   close.type = 'button'
   close.className = 'activity-close'
   close.textContent = '×'
   close.title = 'Close activity'
-  header.append(titleWrap, close)
+  headerActions.append(refreshButton, close)
+  header.append(titleWrap, headerActions)
 
   const state = document.createElement('div')
   state.className = 'activity-state'
@@ -297,7 +383,7 @@ export function installLifecyclePanel() {
     window.setInterval(() => {
       schedule()
       if (activityOpen) void loadActivity()
-    }, 4000)
+    }, 15000)
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true })
