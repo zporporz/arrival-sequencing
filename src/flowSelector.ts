@@ -1,13 +1,14 @@
 type FlowConfig = {
   flow: '21' | '03'
+  airport: 'VTBD'
+  airportName: string
   runway: string
-  label: string
   timingReady: boolean
 }
 
 const FLOWS: FlowConfig[] = [
-  { flow: '21', runway: '21L / 21R', label: 'VTBD · RWY 21', timingReady: true },
-  { flow: '03', runway: '03L / 03R', label: 'VTBD · RWY 03', timingReady: false },
+  { flow: '21', airport: 'VTBD', airportName: 'Don Mueang', runway: '21L / 21R', timingReady: true },
+  { flow: '03', airport: 'VTBD', airportName: 'Don Mueang', runway: '03L / 03R', timingReady: false },
 ]
 
 export function getSelectedFlow(): FlowConfig {
@@ -22,44 +23,114 @@ function switchFlow(flow: string) {
   window.location.assign(url.toString())
 }
 
+function makeRunwayButton(item: FlowConfig, selected: FlowConfig) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = [
+    'runway-workspace-button',
+    item.flow === selected.flow ? 'is-active' : '',
+    item.timingReady ? 'is-ready' : 'is-pending',
+  ].filter(Boolean).join(' ')
+  button.dataset.flow = item.flow
+  button.setAttribute('aria-label', `${item.airport} runway ${item.runway}${item.timingReady ? '' : ', timing pending'}`)
+  if (item.flow === selected.flow) button.setAttribute('aria-current', 'page')
+
+  const runway = document.createElement('span')
+  runway.className = 'runway-workspace-runway'
+  runway.textContent = item.runway
+  button.appendChild(runway)
+
+  const state = document.createElement('small')
+  state.className = 'runway-workspace-state'
+  state.textContent = item.timingReady ? 'TIMING ACTIVE' : 'TIMING PENDING'
+  button.appendChild(state)
+
+  if (item.flow !== selected.flow) button.addEventListener('click', () => switchFlow(item.flow))
+  return button
+}
+
+function buildWorkspaceNavigation(selected: FlowConfig) {
+  const section = document.createElement('section')
+  section.className = 'sequence-destination-nav'
+  section.setAttribute('aria-label', 'Arrival sequencing workspace navigation')
+
+  const airportRow = document.createElement('div')
+  airportRow.className = 'destination-nav-row airport-nav-row'
+
+  const airportHeading = document.createElement('div')
+  airportHeading.className = 'destination-nav-heading'
+  airportHeading.innerHTML = '<span>AIRPORT</span><strong>Select workspace</strong>'
+  airportRow.appendChild(airportHeading)
+
+  const airportTabs = document.createElement('div')
+  airportTabs.className = 'airport-workspace-tabs'
+  airportTabs.innerHTML = `
+    <button type="button" class="airport-workspace-button is-active" aria-current="page">
+      <span class="airport-workspace-code">VTBD</span>
+      <span class="airport-workspace-name">Don Mueang</span>
+    </button>
+    <button type="button" class="airport-workspace-button is-disabled" disabled title="VTBS timing dataset is not configured yet">
+      <span class="airport-workspace-code">VTBS</span>
+      <span class="airport-workspace-name">Suvarnabhumi</span>
+      <small>COMING SOON</small>
+    </button>
+  `
+  airportRow.appendChild(airportTabs)
+  section.appendChild(airportRow)
+
+  const runwayRow = document.createElement('div')
+  runwayRow.className = 'destination-nav-row runway-nav-row'
+
+  const runwayHeading = document.createElement('div')
+  runwayHeading.className = 'destination-nav-heading'
+  runwayHeading.innerHTML = '<span>RUNWAY CONFIGURATION</span><strong>VTBD arrivals</strong>'
+  runwayRow.appendChild(runwayHeading)
+
+  const runwayTabs = document.createElement('div')
+  runwayTabs.className = 'runway-workspace-tabs'
+  for (const item of FLOWS) runwayTabs.appendChild(makeRunwayButton(item, selected))
+  runwayRow.appendChild(runwayTabs)
+  section.appendChild(runwayRow)
+
+  return section
+}
+
 function installSelectorUi() {
   const selected = getSelectedFlow()
+  const content = document.querySelector<HTMLElement>('.content')
+  const workspace = content?.querySelector<HTMLElement>('.workspace-card')
   const toolbar = document.querySelector<HTMLElement>('.toolbar-controls')
-  if (!toolbar || toolbar.querySelector('.flow-selector-wrap')) return false
+  if (!content || !workspace || !toolbar) return false
 
-  const oldButton = toolbar.querySelector<HTMLButtonElement>('.secondary-button')
-  oldButton?.remove()
+  // Remove the old form-like flow controls. Airport/runway selection is now page navigation.
+  toolbar.querySelector('.flow-selector-wrap')?.remove()
+  toolbar.querySelector('.secondary-button')?.remove()
 
-  const wrap = document.createElement('div')
-  wrap.className = 'flow-selector-wrap'
-  wrap.innerHTML = `
-    <span class="flow-selector-label">AIRPORT / RUNWAY</span>
-    <select class="flow-selector" aria-label="Airport and runway configuration">
-      ${FLOWS.map((item) => `<option value="${item.flow}" ${item.flow === selected.flow ? 'selected' : ''}>${item.label}${item.timingReady ? '' : ' · PENDING'}</option>`).join('')}
-    </select>
-  `
-
-  const select = wrap.querySelector<HTMLSelectElement>('.flow-selector')!
-  select.addEventListener('change', () => switchFlow(select.value))
-  toolbar.appendChild(wrap)
+  let navigation = content.querySelector<HTMLElement>('.sequence-destination-nav')
+  if (!navigation) {
+    navigation = buildWorkspaceNavigation(selected)
+    content.insertBefore(navigation, workspace)
+  }
 
   const title = document.querySelector<HTMLElement>('.brand-block h1')
   if (title) title.textContent = 'Bangkok FIR Arrival Sequencing'
 
   const subtitle = document.querySelector<HTMLElement>('.brand-block p')
-  if (subtitle) subtitle.textContent = `VTBD · RWY ${selected.runway} · Shared realtime workspace`
+  if (subtitle) subtitle.textContent = `${selected.airport} · RWY ${selected.runway} · Shared realtime workspace`
 
   document.title = 'Bangkok FIR Arrival Sequencing'
 
-  if (!selected.timingReady) {
-    const content = document.querySelector<HTMLElement>('.content')
-    if (content && !content.querySelector('.timing-pending-banner')) {
-      const banner = document.createElement('div')
-      banner.className = 'timing-pending-banner'
-      banner.innerHTML = '<strong>VTBD RWY 03 timing data pending</strong><span>No source-backed nominal REF FIX-to-landing timing dataset is configured for this runway configuration yet.</span>'
-      content.prepend(banner)
-    }
+  const existingBanner = content.querySelector<HTMLElement>('.timing-pending-banner')
+  if (selected.timingReady) {
+    existingBanner?.remove()
+  } else if (!existingBanner) {
+    const banner = document.createElement('div')
+    banner.className = 'timing-pending-banner'
+    banner.innerHTML = '<strong>VTBD RWY 03 timing data pending</strong><span>No source-backed nominal REF FIX-to-landing timing dataset is configured for this runway configuration yet.</span>'
+    content.insertBefore(banner, workspace)
+  }
 
+  if (!selected.timingReady) {
     const addButton = document.querySelector<HTMLButtonElement>('.primary-button')
     if (addButton) {
       addButton.disabled = true
