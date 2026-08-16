@@ -21,7 +21,7 @@ import { installLifecyclePanel } from './lifecyclePanel'
 import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
 import AuthGate from './AuthGate'
-import AdminPanel from './AdminPanel'
+import AdminPanel from './AdminPanelV2'
 import App from './App'
 
 installAuditIdentity()
