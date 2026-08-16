@@ -95,8 +95,6 @@
 
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 
-/* React still owns the original field for presence state, but authenticated
-   users only see the IVAO-backed identity control. */
 .controller-name.auth-controller-source {
   display: none !important;
 }
@@ -116,28 +114,28 @@
   flex: 0 0 auto;
 }
 
+/* Deliberately not a box: this is account identity, not another form control. */
 .auth-controller-summary {
   display: grid;
-  grid-template-columns: 28px minmax(72px, auto) 12px;
+  grid-template-columns: 28px minmax(70px, auto) 12px;
   align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 5px 9px 5px 7px;
-  border: 1px solid #dbe3f0;
-  border-radius: 9px;
-  background: #fff;
+  gap: 7px;
+  min-height: 38px;
+  padding: 2px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #17223d;
   cursor: pointer;
   list-style: none;
-  box-shadow: 0 2px 7px rgba(31, 51, 91, .04);
+  box-shadow: none;
 }
 
 .auth-controller-summary::-webkit-details-marker { display: none; }
 
-.auth-controller-profile[open] .auth-controller-summary,
-.auth-controller-summary:hover {
-  border-color: #c8d5ee;
-  background: #f8faff;
+.auth-controller-profile[open] .auth-controller-label-primary,
+.auth-controller-summary:hover .auth-controller-label-primary {
+  color: #3157c9;
 }
 
 .auth-controller-avatar {
@@ -166,6 +164,7 @@
   color: #17223d;
   font-size: 11px;
   font-weight: 900;
+  transition: color .15s ease;
 }
 
 .auth-controller-label-secondary {
@@ -188,7 +187,7 @@
 
 .auth-controller-menu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 9px);
   right: 0;
   z-index: 500;
   width: min(330px, calc(100vw - 24px));
