@@ -114,24 +114,33 @@
   flex: 0 0 auto;
 }
 
-/* Deliberately not a box: this is account identity, not another form control. */
+/* Account identity is plain topbar text, never a form-like box. */
 .auth-controller-summary {
-  display: grid;
-  grid-template-columns: 28px minmax(70px, auto) 12px;
+  display: inline-flex !important;
   align-items: center;
-  gap: 7px;
-  min-height: 38px;
-  padding: 2px 2px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  gap: 8px;
+  min-height: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
   color: #17223d;
   cursor: pointer;
   list-style: none;
-  box-shadow: none;
+  box-shadow: none !important;
 }
 
 .auth-controller-summary::-webkit-details-marker { display: none; }
+
+.auth-controller-summary:hover,
+.auth-controller-profile[open] .auth-controller-summary {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
 
 .auth-controller-profile[open] .auth-controller-label-primary,
 .auth-controller-summary:hover .auth-controller-label-primary {
@@ -141,6 +150,7 @@
 .auth-controller-avatar {
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -153,13 +163,16 @@
 
 .auth-controller-label-wrap {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: 1px;
+  min-width: max-content;
   line-height: 1.1;
 }
 
 .auth-controller-label-primary {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
   white-space: nowrap;
   color: #17223d;
   font-size: 11px;
@@ -168,6 +181,8 @@
 }
 
 .auth-controller-label-secondary {
+  max-width: none !important;
+  overflow: visible !important;
   white-space: nowrap;
   color: #8793a8;
   font-size: 9px;
@@ -175,6 +190,7 @@
 }
 
 .auth-controller-chevron {
+  flex: 0 0 auto;
   color: #71809a;
   font-size: 11px;
   line-height: 1;
@@ -277,7 +293,6 @@
 
 @media (max-width: 1180px) {
   .auth-controller-summary {
-    grid-template-columns: 26px minmax(62px, auto) 10px;
     gap: 6px;
   }
 
