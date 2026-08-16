@@ -352,7 +352,6 @@ function App() {
       if (field === 'aldt') dbValue = value ? isoFromClock(session.service_date, value, row.cldt) : null
 
       const patch: Record<string, string | null> = { [field]: dbValue }
-      if (field === 'aldt') patch.status = dbValue ? 'LANDED' : 'SEQUENCED'
 
       const { error: updateError } = await supabase.from('arrivals').update(patch).eq('id', row.id)
       if (updateError) throw updateError
