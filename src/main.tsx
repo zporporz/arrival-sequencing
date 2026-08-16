@@ -12,6 +12,7 @@ import './lifecyclePanel.css'
 import './restoreCancelled.css'
 import './auth.css'
 import './authIdentityOverride.css'
+import './addFlightPlacement.css'
 import { installSpreadsheetNavigation } from './spreadsheetNavigation'
 import { installSpacingGuard } from './spacingGuard'
 import { installFieldGuide } from './fieldGuide'
@@ -21,6 +22,7 @@ import { installLifecyclePanel } from './lifecyclePanel'
 import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
 import { installAuthTopbar } from './authTopbar'
+import { installAddFlightPlacement } from './addFlightPlacement'
 import AuthGate from './AuthGate'
 import AdminPanel from './AdminPanel'
 import App from './App'
@@ -34,6 +36,7 @@ installFlowSelector()
 installLifecyclePanel()
 installRestoreCancelled()
 installAuthTopbar()
+installAddFlightPlacement()
 
 const isAdminRoute = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
 
