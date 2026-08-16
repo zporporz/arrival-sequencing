@@ -19,13 +19,11 @@ import { installSpacingGuard } from './spacingGuard'
 import { installFieldGuide } from './fieldGuide'
 import { installTimeWorkflow } from './timeWorkflow'
 import { installLifecyclePanel } from './lifecyclePanel'
-import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
 import AuthGate from './AuthGate'
 import AdminPanel from './AdminPanelV2'
 import App from './App'
 
-installAuditIdentity()
 installSpreadsheetNavigation()
 installSpacingGuard()
 installFieldGuide()

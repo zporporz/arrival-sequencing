@@ -122,6 +122,19 @@ const compactStaffPosition = (value: string) => {
   return acronym ? `TH-${acronym}` : ''
 }
 
+async function sequenceApi(path: string, body: Record<string, unknown>) {
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = await response.json() as { error?: string; session?: unknown; timingReady?: boolean; data?: unknown }
+  if (!response.ok) throw new Error(payload.error || `Sequence API returned ${response.status}`)
+  return payload
+}
+
 type EditingState = Record<string, { displayName: string }>
 
 function App() {
@@ -261,55 +274,11 @@ function App() {
           window.history.replaceState(null, '', canonicalUrl.toString())
         }
 
-        const todayUtc = new Date().toISOString().slice(0, 10)
-
-        const { data: existingSession, error: sessionQueryError } = await supabase
-          .from('sequence_sessions')
-          .select('*')
-          .eq('airport', selectedWorkspace.airport)
-          .eq('flow', selectedWorkspace.flow)
-          .eq('service_date', todayUtc)
-          .eq('status', 'ACTIVE')
-          .eq('archived', false)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (sessionQueryError) throw sessionQueryError
-
-        let activeSession = existingSession as SequenceSession | null
-        if (!activeSession) {
-          const { data: createdSession, error: createSessionError } = await supabase
-            .from('sequence_sessions')
-            .insert({
-              airport: selectedWorkspace.airport,
-              flow: selectedWorkspace.flow,
-              runway_config: selectedWorkspace.runway,
-              service_date: todayUtc,
-              status: 'ACTIVE',
-            })
-            .select('*')
-            .single()
-          if (createSessionError) {
-            if (createSessionError.code !== '23505') throw createSessionError
-            const { data: racedSession, error: racedSessionError } = await supabase
-              .from('sequence_sessions')
-              .select('*')
-              .eq('airport', selectedWorkspace.airport)
-              .eq('flow', selectedWorkspace.flow)
-              .eq('service_date', todayUtc)
-              .eq('status', 'ACTIVE')
-              .eq('archived', false)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-            if (racedSessionError) throw racedSessionError
-            activeSession = racedSession as SequenceSession | null
-          } else {
-            activeSession = createdSession as SequenceSession
-          }
-        }
-
+        const sessionPayload = await sequenceApi('/api/sequence/session', {
+          airport: selectedWorkspace.airport,
+          flow: selectedWorkspace.flow,
+        })
+        const activeSession = sessionPayload.session as SequenceSession | null
         if (disposed || !activeSession) return
         setSession(activeSession)
         await Promise.all([refreshArrivals(activeSession.id), loadFixes(activeSession)])
@@ -456,8 +425,7 @@ function App() {
 
       const patch: Record<string, string | null> = { [field]: dbValue }
 
-      const { error: updateError } = await supabase.from('arrivals').update(patch).eq('id', row.id)
-      if (updateError) throw updateError
+      await sequenceApi('/api/sequence/arrival', { action: 'update', id: row.id, values: patch })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -471,11 +439,7 @@ function App() {
     setSavingCell(cellKey)
     setError(null)
     try {
-      const { error: updateError } = await supabase
-        .from('arrivals')
-        .update({ cldt: row.eldt })
-        .eq('id', row.id)
-      if (updateError) throw updateError
+      await sequenceApi('/api/sequence/arrival', { action: 'update', id: row.id, values: { cldt: row.eldt } })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -489,11 +453,7 @@ function App() {
     setSavingCell(cellKey)
     setError(null)
     try {
-      const { error: updateError } = await supabase
-        .from('arrivals')
-        .update({ aldt: new Date().toISOString(), status: 'LANDED' })
-        .eq('id', row.id)
-      if (updateError) throw updateError
+      await sequenceApi('/api/sequence/arrival', { action: 'update', id: row.id, values: { aldt: new Date().toISOString(), status: 'LANDED' } })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -504,8 +464,11 @@ function App() {
   const updateStatus = async (row: ArrivalView, status: ArrivalStatus) => {
     const patch: { status: ArrivalStatus; aldt?: string } = { status }
     if (status === 'LANDED' && !row.aldt) patch.aldt = new Date().toISOString()
-    const { error: updateError } = await supabase.from('arrivals').update(patch).eq('id', row.id)
-    if (updateError) setError(updateError.message)
+    try {
+      await sequenceApi('/api/sequence/arrival', { action: 'update', id: row.id, values: patch })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const addFlight = async () => {
@@ -515,17 +478,16 @@ function App() {
       const now = new Date()
       const hhmm = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
       const sequenceNo = arrivals.reduce((max, row) => Math.max(max, row.sequence_no), 0) + 1
-      const { error: insertError } = await supabase.from('arrivals').insert({
-        session_id: session.id,
-        sequence_no: sequenceNo,
+      await sequenceApi('/api/sequence/arrival', {
+        action: 'create',
+        sessionId: session.id,
+        sequenceNo,
         callsign: 'NEW',
-        aircraft_type: null,
+        aircraftType: null,
         departure: null,
-        ref_fix: fixes[0].fix,
+        refFix: fixes[0].fix,
         eto: isoFromClock(session.service_date, hhmm),
-        status: 'INBOUND',
       })
-      if (insertError) throw insertError
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -533,8 +495,11 @@ function App() {
 
   const deleteFlight = async (row: ArrivalView) => {
     if (!window.confirm(`Delete ${row.callsign}?`)) return
-    const { error: deleteError } = await supabase.from('arrivals').delete().eq('id', row.id)
-    if (deleteError) setError(deleteError.message)
+    try {
+      await sequenceApi('/api/sequence/arrival', { action: 'delete', id: row.id })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const switchWorkspace = (airport: PublishedAirport, runway: PublishedRunway) => {
