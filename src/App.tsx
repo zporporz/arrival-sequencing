@@ -56,6 +56,12 @@ const sameInstant = (left: string, right: string) => {
   return Number.isFinite(leftTime) && Number.isFinite(rightTime) && Math.abs(leftTime - rightTime) < 1000
 }
 
+const sortArrivalRows = (rows: ArrivalView[]) => [...rows].sort((left, right) => {
+  const sequenceDelta = left.sequence_no - right.sequence_no
+  if (sequenceDelta !== 0) return sequenceDelta
+  return new Date(left.cldt).getTime() - new Date(right.cldt).getTime()
+})
+
 const averageInterval = (rows: ArrivalView[]) => {
   const times = rows
     .filter((row) => row.status !== 'CANCELLED')
@@ -86,6 +92,9 @@ function App() {
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [utcNow, setUtcNow] = useState(new Date())
   const channelRef = useRef<RealtimeChannel | null>(null)
+  const profileNameRef = useRef(profileName)
+  const realtimePendingIdsRef = useRef<Set<string>>(new Set())
+  const realtimeFlushTimerRef = useRef<number | null>(null)
 
   const refreshArrivals = useCallback(async (sessionId: string) => {
     const { data, error: queryError } = await supabase
@@ -98,6 +107,37 @@ function App() {
     if (queryError) throw queryError
     setArrivals((data ?? []) as ArrivalView[])
   }, [])
+
+  const syncArrivalRows = useCallback(async (arrivalIds: string[]) => {
+    const uniqueIds = [...new Set(arrivalIds)]
+    if (uniqueIds.length === 0) return
+
+    const { data, error: queryError } = await supabase
+      .from('arrival_sequence_view')
+      .select('*')
+      .in('id', uniqueIds)
+
+    if (queryError) throw queryError
+    const incoming = (data ?? []) as ArrivalView[]
+
+    setArrivals((current) => {
+      const byId = new Map(current.map((row) => [row.id, row]))
+      for (const row of incoming) byId.set(row.id, row)
+      return sortArrivalRows([...byId.values()])
+    })
+  }, [])
+
+  const queueArrivalSync = useCallback((arrivalId: string) => {
+    realtimePendingIdsRef.current.add(arrivalId)
+    if (realtimeFlushTimerRef.current !== null) return
+
+    realtimeFlushTimerRef.current = window.setTimeout(() => {
+      const ids = [...realtimePendingIdsRef.current]
+      realtimePendingIdsRef.current.clear()
+      realtimeFlushTimerRef.current = null
+      void syncArrivalRows(ids).catch((err: Error) => setError(err.message))
+    }, 75)
+  }, [syncArrivalRows])
 
   const loadFixes = useCallback(async (activeSession: SequenceSession) => {
     const { data, error: queryError } = await supabase
@@ -118,6 +158,10 @@ function App() {
     }
     setFixes([...byFix.values()].sort((a, b) => a.fix.localeCompare(b.fix)))
   }, [])
+
+  useEffect(() => {
+    profileNameRef.current = profileName
+  }, [profileName])
 
   useEffect(() => {
     const timer = window.setInterval(() => setUtcNow(new Date()), 1000)
@@ -171,16 +215,39 @@ function App() {
           config: { presence: { key: identity.id } },
         })
 
+        const rowChangeConfig = {
+          schema: 'public',
+          table: 'arrivals',
+          filter: `session_id=eq.${activeSession.id}`,
+          select: ['id'],
+        } as const
+
         realtimeChannel
           .on(
             'postgres_changes',
-            {
-              event: '*',
-              schema: 'public',
-              table: 'arrivals',
-              filter: `session_id=eq.${activeSession.id}`,
+            { event: 'INSERT', ...rowChangeConfig },
+            ({ new: newRow }) => {
+              const arrivalId = (newRow as { id?: string }).id
+              if (arrivalId) queueArrivalSync(arrivalId)
             },
-            () => void refreshArrivals(activeSession!.id).catch((err: Error) => setError(err.message)),
+          )
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', ...rowChangeConfig },
+            ({ new: newRow }) => {
+              const arrivalId = (newRow as { id?: string }).id
+              if (arrivalId) queueArrivalSync(arrivalId)
+            },
+          )
+          .on(
+            'postgres_changes',
+            { event: 'DELETE', schema: 'public', table: 'arrivals', select: ['id'] },
+            ({ old: oldRow }) => {
+              const arrivalId = (oldRow as { id?: string }).id
+              if (!arrivalId) return
+              realtimePendingIdsRef.current.delete(arrivalId)
+              setArrivals((current) => current.filter((row) => row.id !== arrivalId))
+            },
           )
           .on('presence', { event: 'sync' }, () => {
             const state = realtimeChannel.presenceState<{ displayName?: string }>()
@@ -206,7 +273,7 @@ function App() {
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
-              await realtimeChannel.track({ displayName: profileName, onlineAt: new Date().toISOString() })
+              await realtimeChannel.track({ displayName: profileNameRef.current, onlineAt: new Date().toISOString() })
             }
           })
 
@@ -222,10 +289,15 @@ function App() {
 
     return () => {
       disposed = true
+      if (realtimeFlushTimerRef.current !== null) {
+        window.clearTimeout(realtimeFlushTimerRef.current)
+        realtimeFlushTimerRef.current = null
+      }
+      realtimePendingIdsRef.current.clear()
       if (channelRef.current) void supabase.removeChannel(channelRef.current)
       channelRef.current = null
     }
-  }, [identity.id, loadFixes, profileName, refreshArrivals])
+  }, [identity.id, loadFixes, queueArrivalSync, refreshArrivals])
 
   const visibleArrivals = useMemo(() => {
     const needle = search.trim().toUpperCase()
@@ -363,6 +435,7 @@ function App() {
   const saveProfileName = async () => {
     const clean = saveBrowserDisplayName(profileName)
     setProfileName(clean)
+    profileNameRef.current = clean
     if (channelRef.current) {
       await channelRef.current.track({ displayName: clean, onlineAt: new Date().toISOString() })
     }
