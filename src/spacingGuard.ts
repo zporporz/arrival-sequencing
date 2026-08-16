@@ -2,6 +2,7 @@ const TARGET_GAP_MINUTES = 2
 const CLDT_SELECTOR = 'tbody input.cell-input.time.strong'
 const CONFLICT_CLASS = 'spacing-conflict-cell'
 const SPACING_CLASS = 'spacing-gap-cell'
+const EXACT_CLASS = 'same-cldt-conflict'
 const ORDER_CLASS = 'order-conflict-cell'
 const BADGE_CLASS = 'spacing-warning-badge'
 
@@ -43,7 +44,7 @@ function rowMeta(input: HTMLInputElement) {
 function clearConflict(input: HTMLInputElement) {
   const cell = input.closest('td')
   if (!cell) return
-  cell.classList.remove(CONFLICT_CLASS, SPACING_CLASS, ORDER_CLASS)
+  cell.classList.remove(CONFLICT_CLASS, SPACING_CLASS, EXACT_CLASS, ORDER_CLASS)
   cell.removeAttribute('data-spacing-warning')
   cell.removeAttribute('title')
   cell.querySelector(`.${BADGE_CLASS}`)?.remove()
@@ -67,6 +68,7 @@ function applySpacingConflict(input: HTMLInputElement, conflict: Conflict) {
     : `${gapMinutes}-minute CLDT gap with SEQ ${partner.sequence} ${partner.callsign}. Planning target is ${TARGET_GAP_MINUTES} minutes; earliest target from the earlier flight is ${minimumClock}.`
 
   cell.classList.add(CONFLICT_CLASS, SPACING_CLASS)
+  if (gapMinutes === 0) cell.classList.add(EXACT_CLASS)
   cell.setAttribute('data-spacing-warning', warningLabel)
   cell.setAttribute('title', title)
   cell.style.position = 'relative'
