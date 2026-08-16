@@ -95,10 +95,15 @@
 
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 
-/* The old editable controller-name field remains as React's presence source,
-   but authenticated users interact with the fixed IVAO profile control instead. */
+/* React still owns the original field for presence state, but authenticated
+   users only see the IVAO-backed identity control. */
 .controller-name.auth-controller-source {
   display: none !important;
+}
+
+.topbar,
+.topbar-actions {
+  overflow: visible !important;
 }
 
 .topbar-actions {
@@ -107,20 +112,19 @@
 
 .auth-controller-profile {
   position: relative;
-  z-index: 120;
-  min-width: 0;
+  z-index: 220;
+  flex: 0 0 auto;
 }
 
 .auth-controller-summary {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 28px minmax(72px, auto) 12px;
   align-items: center;
-  justify-content: space-between;
-  gap: 7px;
-  min-height: 34px;
-  max-width: 250px;
-  padding: 0 10px 0 12px;
+  gap: 8px;
+  min-height: 42px;
+  padding: 5px 9px 5px 7px;
   border: 1px solid #dbe3f0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: #fff;
   color: #17223d;
   cursor: pointer;
@@ -133,22 +137,47 @@
 .auth-controller-profile[open] .auth-controller-summary,
 .auth-controller-summary:hover {
   border-color: #c8d5ee;
-  background: #f9fbff;
+  background: #f8faff;
 }
 
-.auth-controller-label {
+.auth-controller-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #edf3ff;
+  color: #3157c9;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.auth-controller-label-wrap {
+  display: flex;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+}
+
+.auth-controller-label-primary {
   white-space: nowrap;
+  color: #17223d;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 900;
+}
+
+.auth-controller-label-secondary {
+  white-space: nowrap;
+  color: #8793a8;
+  font-size: 9px;
+  font-weight: 750;
 }
 
 .auth-controller-chevron {
-  flex: 0 0 auto;
-  color: #7d8aa2;
-  font-size: 12px;
+  color: #71809a;
+  font-size: 11px;
   line-height: 1;
   transition: transform .15s ease;
 }
@@ -161,12 +190,13 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 280px;
-  padding: 13px;
+  z-index: 500;
+  width: min(330px, calc(100vw - 24px));
+  padding: 15px;
   border: 1px solid #dbe3f0;
-  border-radius: 11px;
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 16px 42px rgba(31, 51, 91, .16);
+  box-shadow: 0 18px 48px rgba(31, 51, 91, .20);
 }
 
 .auth-controller-heading {
@@ -177,7 +207,7 @@
 
 .auth-controller-name {
   color: #17223d;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 850;
   line-height: 1.25;
 }
@@ -189,7 +219,7 @@
 }
 
 .auth-controller-role {
-  margin-top: 11px;
+  margin-top: 12px;
   color: #3157c9;
   font-size: 9px;
   font-weight: 900;
@@ -202,49 +232,58 @@
 
 .auth-controller-positions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 7px;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .auth-controller-position {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 7px;
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
   border: 1px solid #dbe5fb;
-  border-radius: 6px;
-  background: #f3f7ff;
+  border-radius: 7px;
+  background: #f5f8ff;
   color: #3157c9;
   font-size: 10px;
-  font-weight: 850;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .auth-controller-divider {
   height: 1px;
-  margin: 12px 0 8px;
+  margin: 13px 0 8px;
   background: #e9eef7;
 }
 
 .auth-controller-signout {
   display: flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 8px;
-  border-radius: 6px;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: #f8fafc;
   color: #66728a;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 800;
   text-decoration: none;
 }
 
 .auth-controller-signout:hover {
-  background: #f5f7fb;
+  background: #fff2f0;
   color: #b23b32;
 }
 
 @media (max-width: 1180px) {
   .auth-controller-summary {
-    max-width: 170px;
+    grid-template-columns: 26px minmax(62px, auto) 10px;
+    gap: 6px;
+  }
+
+  .auth-controller-avatar {
+    width: 26px;
+    height: 26px;
   }
 }
