@@ -9,6 +9,14 @@ function makeTextElement(tag: string, className: string, text: string) {
   return element
 }
 
+function splitDisplayName(displayName: string, vid: string) {
+  const suffix = ` · ${vid}`
+  if (displayName.endsWith(suffix)) {
+    return { primary: displayName.slice(0, -suffix.length), secondary: `VID ${vid}` }
+  }
+  return { primary: displayName, secondary: `VID ${vid}` }
+}
+
 function buildProfile() {
   const identity = getAuthenticatedIdentity()
   const input = document.querySelector<HTMLInputElement>('input.controller-name')
@@ -22,10 +30,13 @@ function buildProfile() {
   const actions = input.parentElement
   if (!actions) return
 
+  const display = splitDisplayName(identity.displayName, identity.vid)
   let details = actions.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
   if (details) {
-    const label = details.querySelector<HTMLElement>('.auth-controller-label')
-    if (label) label.textContent = identity.displayName
+    const primary = details.querySelector<HTMLElement>('.auth-controller-label-primary')
+    const secondary = details.querySelector<HTMLElement>('.auth-controller-label-secondary')
+    if (primary) primary.textContent = display.primary
+    if (secondary) secondary.textContent = display.secondary
     details.title = identity.tooltip
     return
   }
@@ -37,8 +48,20 @@ function buildProfile() {
   const summary = document.createElement('summary')
   summary.className = 'auth-controller-summary'
   summary.setAttribute('aria-label', 'Open IVAO account menu')
-  summary.appendChild(makeTextElement('span', 'auth-controller-label', identity.displayName))
-  summary.appendChild(makeTextElement('span', 'auth-controller-chevron', '⌄'))
+
+  const avatar = makeTextElement(
+    'span',
+    'auth-controller-avatar',
+    identity.isThailandStaff ? 'TH' : (identity.name || identity.vid).slice(0, 2).toUpperCase(),
+  )
+  summary.appendChild(avatar)
+
+  const labelWrap = document.createElement('span')
+  labelWrap.className = 'auth-controller-label-wrap'
+  labelWrap.appendChild(makeTextElement('span', 'auth-controller-label-primary', display.primary))
+  labelWrap.appendChild(makeTextElement('span', 'auth-controller-label-secondary', display.secondary))
+  summary.appendChild(labelWrap)
+  summary.appendChild(makeTextElement('span', 'auth-controller-chevron', '▾'))
   details.appendChild(summary)
 
   const menu = document.createElement('div')
@@ -73,7 +96,7 @@ function buildProfile() {
   const signOut = document.createElement('a')
   signOut.className = 'auth-controller-signout'
   signOut.href = '/api/auth/logout'
-  signOut.textContent = 'Sign out'
+  signOut.textContent = 'Sign out of IVAO'
   menu.appendChild(signOut)
 
   details.appendChild(menu)
