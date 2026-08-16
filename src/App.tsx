@@ -215,17 +215,15 @@ function App() {
           config: { presence: { key: identity.id } },
         })
 
-        const rowChangeConfig = {
-          schema: 'public',
-          table: 'arrivals',
-          filter: `session_id=eq.${activeSession.id}`,
-          select: ['id'],
-        } as const
-
         realtimeChannel
           .on(
             'postgres_changes',
-            { event: 'INSERT', ...rowChangeConfig },
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'arrivals',
+              filter: `session_id=eq.${activeSession.id}`,
+            },
             ({ new: newRow }) => {
               const arrivalId = (newRow as { id?: string }).id
               if (arrivalId) queueArrivalSync(arrivalId)
@@ -233,7 +231,12 @@ function App() {
           )
           .on(
             'postgres_changes',
-            { event: 'UPDATE', ...rowChangeConfig },
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'arrivals',
+              filter: `session_id=eq.${activeSession.id}`,
+            },
             ({ new: newRow }) => {
               const arrivalId = (newRow as { id?: string }).id
               if (arrivalId) queueArrivalSync(arrivalId)
@@ -241,7 +244,7 @@ function App() {
           )
           .on(
             'postgres_changes',
-            { event: 'DELETE', schema: 'public', table: 'arrivals', select: ['id'] },
+            { event: 'DELETE', schema: 'public', table: 'arrivals' },
             ({ old: oldRow }) => {
               const arrivalId = (oldRow as { id?: string }).id
               if (!arrivalId) return
