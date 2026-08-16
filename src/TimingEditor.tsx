@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+
+GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 type Airport = { id: string; icao: string; name: string; active: boolean }
 type RunwayConfig = { id: string; airport_id: string; flow: string; label: string; timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'; active: boolean }
@@ -40,6 +44,71 @@ type StarTimingDraft = {
   source: string
   effectiveFrom: string
   designators: string[]
+  origin: string
+}
+
+type WaypointTable = {
+  airport: string
+  runwayApplicability: string
+  chartReference: string
+  assetPath: string
+}
+
+const normalizeRunway = (value: string) => value
+  .toUpperCase()
+  .replace(/^RWY\s*/i, '')
+  .replace(/\s*\/\s*/g, ' / ')
+  .replace(/\s+/g, ' ')
+  .trim()
+
+const normalizeLine = (value: string) => value.replace(/\s+/g, ' ').trim()
+
+const LAT_RE = /(?:\d{6}(?:\.\d+)?|\d{2}\s+\d{2}\s+\d{2}(?:\.\d+)?)\s*[NS]\b/i
+const LON_RE = /(?:\d{7}(?:\.\d+)?|\d{3}\s+\d{2}\s+\d{2}(?:\.\d+)?)\s*[EW]\b/i
+const IGNORED_FIX_WORDS = new Set(['WAYPOINT', 'IDENTIFIER', 'LATITUDE', 'LONGITUDE', 'THAILAND', 'RNAV', 'STAR', 'RWY', 'ICAO', 'REMARKS', 'COURSE', 'DISTANCE', 'MAGNETIC'])
+
+async function extractWaypointFixes(pdfBytes: ArrayBuffer) {
+  const pdf = await getDocument({ data: new Uint8Array(pdfBytes) }).promise
+  const fixes = new Set<string>()
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const points = content.items
+      .filter((item): item is typeof item & { str: string; transform: number[] } => 'str' in item && 'transform' in item && Boolean(item.str.trim()))
+      .map((item) => ({ text: item.str.trim(), x: item.transform[4], y: item.transform[5] }))
+      .sort((a, b) => Math.abs(b.y - a.y) > 2 ? b.y - a.y : a.x - b.x)
+
+    const rows: Array<{ y: number; items: typeof points }> = []
+    for (const point of points) {
+      let row = rows.find((candidate) => Math.abs(candidate.y - point.y) <= 2.5)
+      if (!row) {
+        row = { y: point.y, items: [] }
+        rows.push(row)
+      }
+      row.items.push(point)
+    }
+
+    for (const row of rows) {
+      const line = normalizeLine(row.items.sort((a, b) => a.x - b.x).map((item) => item.text).join(' ')).toUpperCase()
+      const latMatch = line.match(LAT_RE)
+      const lonMatch = line.match(LON_RE)
+      if (!latMatch || !lonMatch || latMatch.index == null) continue
+
+      const beforeCoordinates = line.slice(0, latMatch.index)
+      const tokens = beforeCoordinates.match(/\b[A-Z][A-Z0-9]{2,7}\b/g) || []
+      const candidate = [...tokens].reverse().find((token) => {
+        if (IGNORED_FIX_WORDS.has(token)) return false
+        if (/^RW\d{2}[LRC]?$/.test(token)) return false
+        if (/^[A-Z]{2,6}\d[A-Z]$/.test(token)) return false
+        if (/^AD\d*$/.test(token)) return false
+        return true
+      })
+      if (candidate) fixes.add(candidate)
+    }
+  }
+
+  return [...fixes].sort()
 }
 
 export default function TimingEditor({ airports, runwayConfigs, starProcedures = [], fixTimings, saving, act }: Props) {
@@ -47,6 +116,8 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
   const [runwayId, setRunwayId] = useState('')
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [starDrafts, setStarDrafts] = useState<Record<string, StarTimingDraft>>({})
+  const [loadingAipWaypoints, setLoadingAipWaypoints] = useState(false)
+  const [aipWaypointMessage, setAipWaypointMessage] = useState('')
 
   useEffect(() => {
     if (!airportId && airports.length) setAirportId(airports.find((a) => a.active)?.id || airports[0].id)
@@ -71,16 +142,25 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
     return fixTimings.filter((t) => t.runway_config_id === runway.id || (!t.runway_config_id && t.airport === airport?.icao && t.flow === runway.flow))
   }, [fixTimings, runway, airport])
 
+  const runwayStars = useMemo(() => {
+    if (!runway) return []
+    return starProcedures.filter((star) => star.runway_config_id === runway.id && star.active)
+  }, [runway, starProcedures])
+
+  const defaultEffectiveFrom = useMemo(() => {
+    const dates = runwayStars.map((star) => star.effective_from).filter((value): value is string => Boolean(value)).sort()
+    return dates.at(-1) || new Date().toISOString().slice(0, 10)
+  }, [runwayStars])
+
   const starFixSuggestions = useMemo(() => {
-    if (!runway) return [] as StarTimingDraft[]
     const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
     const grouped = new Map<string, StarTimingDraft>()
-    for (const star of starProcedures) {
-      if (star.runway_config_id !== runway.id || !star.active || !star.entry_fix) continue
+    for (const star of runwayStars) {
+      if (!star.entry_fix) continue
       const fix = star.entry_fix.trim().toUpperCase()
       if (!fix || existingFixes.has(fix)) continue
       const current = grouped.get(fix)
-      const effectiveFrom = star.effective_from || new Date().toISOString().slice(0, 10)
+      const effectiveFrom = star.effective_from || defaultEffectiveFrom
       if (current) {
         if (!current.designators.includes(star.designator)) current.designators.push(star.designator)
         if (effectiveFrom > current.effectiveFrom) current.effectiveFrom = effectiveFrom
@@ -91,11 +171,12 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
           source: '',
           effectiveFrom,
           designators: [star.designator],
+          origin: `STAR entry: ${star.designator}`,
         })
       }
     }
     return [...grouped.values()].sort((left, right) => left.fix.localeCompare(right.fix))
-  }, [runway, timings, starProcedures])
+  }, [runwayStars, timings, defaultEffectiveFrom])
 
   useEffect(() => {
     const next: Record<number, Draft> = {}
@@ -112,6 +193,7 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
 
   useEffect(() => {
     setStarDrafts({})
+    setAipWaypointMessage('')
   }, [runwayId])
 
   const changed = (timing: FixTiming) => {
@@ -160,10 +242,73 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
     })
   }
 
-  const syncStarFixes = () => {
+  const syncEntryFixes = () => {
     const next: Record<string, StarTimingDraft> = {}
     for (const suggestion of starFixSuggestions) next[suggestion.fix] = { ...suggestion, designators: [...suggestion.designators] }
     setStarDrafts(next)
+    setAipWaypointMessage(`${Object.keys(next).length} STAR entry fixes loaded as drafts.`)
+  }
+
+  const loadAipWaypoints = async () => {
+    if (!airport || !runway || !runwayStars.length) return
+    setLoadingAipWaypoints(true)
+    setAipWaypointMessage('Locating CAAT STAR waypoint list…')
+    try {
+      const tableResponse = await fetch(`/api/admin/aip-import?mode=waypoint-tables&airport=${encodeURIComponent(airport.icao)}`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      const tablePayload = await tableResponse.json() as { tables?: WaypointTable[]; error?: string }
+      if (!tableResponse.ok) throw new Error(tablePayload.error || `Waypoint lookup returned ${tableResponse.status}`)
+      const matchingTables = (tablePayload.tables || []).filter((table) => normalizeRunway(table.runwayApplicability) === normalizeRunway(runway.label))
+      if (!matchingTables.length) {
+        syncEntryFixes()
+        setAipWaypointMessage(`CAAT waypoint list table was not found for ${airport.icao} ${runway.label}; STAR entry fixes were loaded instead.`)
+        return
+      }
+
+      const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
+      const next = new Map<string, StarTimingDraft>()
+      for (const suggestion of starFixSuggestions) next.set(suggestion.fix, { ...suggestion, designators: [...suggestion.designators] })
+
+      for (const table of matchingTables) {
+        setAipWaypointMessage(`Reading ${table.chartReference} waypoint list…`)
+        const assetResponse = await fetch(`/api/admin/aip-import?asset=${encodeURIComponent(table.assetPath)}`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        })
+        if (!assetResponse.ok) {
+          const payload = await assetResponse.json().catch(() => ({})) as { error?: string }
+          throw new Error(payload.error || `${table.chartReference} returned ${assetResponse.status}`)
+        }
+        const fixes = await extractWaypointFixes(await assetResponse.arrayBuffer())
+        for (const fix of fixes) {
+          if (existingFixes.has(fix)) continue
+          const entryStars = runwayStars.filter((star) => star.entry_fix?.toUpperCase() === fix).map((star) => star.designator)
+          const current = next.get(fix)
+          if (current) {
+            current.origin = `${current.origin}; AIP waypoint list ${table.chartReference}`
+            continue
+          }
+          next.set(fix, {
+            fix,
+            minutes: '',
+            source: '',
+            effectiveFrom: defaultEffectiveFrom,
+            designators: entryStars,
+            origin: `AIP waypoint list ${table.chartReference}`,
+          })
+        }
+      }
+
+      const sorted = [...next.values()].sort((left, right) => left.fix.localeCompare(right.fix))
+      setStarDrafts(Object.fromEntries(sorted.map((draft) => [draft.fix, draft])))
+      setAipWaypointMessage(`${sorted.length} unsaved REF FIX candidates loaded from CAAT STAR data. Nominal Min is still required.`)
+    } catch (error) {
+      setAipWaypointMessage(error instanceof Error ? `AIP waypoint load failed: ${error.message}` : `AIP waypoint load failed: ${String(error)}`)
+    } finally {
+      setLoadingAipWaypoints(false)
+    }
   }
 
   const starDraftReady = (draft: StarTimingDraft) => {
@@ -209,7 +354,7 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
           <p>Edits here change the same master timing dataset used by new arrivals. Existing flights keep their timing snapshot.</p>
         </div>
         <div className="timing-heading-actions">
-          {starFixSuggestions.length > 0 && starDraftList.length === 0 && <button disabled={saving || !runway} onClick={syncStarFixes}>Sync reference fixes from STAR ({starFixSuggestions.length})</button>}
+          {runwayStars.length > 0 && starDraftList.length === 0 && <button disabled={saving || loadingAipWaypoints || !runway} onClick={() => void loadAipWaypoints()}>{loadingAipWaypoints ? 'Reading AIP waypoints…' : 'Load AIP STAR waypoints'}</button>}
           {starDraftList.length > 0 && <button className="primary-admin-action" disabled={saving || readyStarDraftCount === 0} onClick={() => void saveAllStarDrafts()}>Save ready drafts ({readyStarDraftCount})</button>}
           <button disabled={saving || !runway} onClick={() => void addTiming()}>+ Add timing</button>
         </div>
@@ -221,12 +366,14 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
         {runway && <div className={`timing-config-state ${runway.timing_status.toLowerCase()}`}>{runway.timing_status === 'ACTIVE' ? 'TIMING ACTIVE' : runway.timing_status === 'PENDING' ? 'TIMING PENDING' : 'TIMING DISABLED'}</div>}
       </div>
 
+      {aipWaypointMessage && <div className="timing-note"><strong>AIP:</strong> {aipWaypointMessage}</div>}
+
       {!runway ? <div className="admin-empty">Select a runway configuration.</div> : (
         <div className="admin-table-wrap">
           <table className="admin-table timing-table">
             <thead><tr><th>REF FIX</th><th>NOMINAL MIN</th><th>SOURCE</th><th>VERIFIED</th><th>STATUS</th><th>EFFECTIVE</th><th /></tr></thead>
             <tbody>
-              {timings.length === 0 && starDraftList.length === 0 ? <tr><td colSpan={7} className="admin-empty-cell">No timing records for this configuration. {starFixSuggestions.length > 0 ? `${starFixSuggestions.length} reference fixes are available from imported STAR data.` : 'Add one only when a planning timing is available.'}</td></tr> : timings.map((timing) => {
+              {timings.length === 0 && starDraftList.length === 0 ? <tr><td colSpan={7} className="admin-empty-cell">No timing records for this configuration. {runwayStars.length > 0 ? 'Use Load AIP STAR waypoints to prepare candidates from the official STAR waypoint list.' : 'Add one only when a planning timing is available.'}</td></tr> : timings.map((timing) => {
                 const draft = drafts[timing.id]
                 if (!draft) return null
                 const isChanged = changed(timing)
@@ -241,7 +388,7 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
                 </tr>
               })}
               {starDraftList.map((draft) => <tr key={`star-draft-${draft.fix}`} className="timing-star-draft">
-                <td><strong>{draft.fix}</strong><small>From STAR: {draft.designators.join(', ')}</small></td>
+                <td><strong>{draft.fix}</strong><small>{draft.designators.length ? `STAR entry: ${draft.designators.join(', ')} · ` : ''}{draft.origin}</small></td>
                 <td><input className="timing-minutes" type="number" min="0.1" max="180" step="0.5" placeholder="Required" value={draft.minutes} onChange={(e) => setStarDrafts((all) => ({ ...all, [draft.fix]: { ...draft, minutes: e.target.value } }))} /></td>
                 <td><input className="timing-source" placeholder="Timing source / planning reference" value={draft.source} onChange={(e) => setStarDrafts((all) => ({ ...all, [draft.fix]: { ...draft, source: e.target.value } }))} /></td>
                 <td><span className="timing-draft-state">PROVISIONAL</span></td>
@@ -253,7 +400,7 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
           </table>
         </div>
       )}
-      <div className="timing-note">Reference-fix names may be prepared from imported STAR data, but <strong>Nominal Min still requires a planning source</strong>. Sync creates browser drafts only; no timing is written until a valid time and source are saved. <strong>Verified</strong> should only be enabled after the timing source has been checked.</div>
+      <div className="timing-note">AIP waypoint lists can supply <strong>REF FIX names only</strong>. <strong>Nominal Min still requires a planning source</strong>; no timing row is written until both a valid time and source are saved. <strong>Verified</strong> should only be enabled after the timing source has been checked.</div>
     </section>
   )
 }
