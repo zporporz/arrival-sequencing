@@ -171,7 +171,7 @@ export default function AdminPanelV2() {
         {!loading && tab === 'airports' && <AirportEditor airports={data.airports} runwayConfigs={data.runwayConfigs} selectedAirportId={selectedAirportId} onAirportChange={setSelectedAirportId} saving={saving} act={act} />}
         {!loading && tab === 'stars' && <StarEditor airports={data.airports} runwayConfigs={data.runwayConfigs} starProcedures={data.starProcedures} selectedAirportId={selectedAirportId} onAirportChange={setSelectedAirportId} saving={saving} act={act} />}
         {!loading && tab === 'aip' && <AipImporter airports={data.airports} runwayConfigs={data.runwayConfigs} starProcedures={data.starProcedures} reload={reload} />}
-        {!loading && tab === 'timing' && <TimingEditor airports={data.airports} runwayConfigs={data.runwayConfigs} fixTimings={data.fixTimings} saving={saving} act={act} />}
+        {!loading && tab === 'timing' && <TimingEditor airports={data.airports} runwayConfigs={data.runwayConfigs} starProcedures={data.starProcedures} fixTimings={data.fixTimings} saving={saving} act={act} />}
         {!loading && tab === 'sessions' && <SessionsPanel sessions={data.sessions} />}
         {!loading && tab === 'history' && <HistoryPanel history={data.history} saving={saving} act={act} reload={reload} />}
       </main>
