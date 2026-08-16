@@ -1,10 +1,10 @@
-import { getBrowserIdentity } from './browserIdentity'
+import { getAuthenticatedVid, getBrowserIdentity } from './browserIdentity'
 import { supabase } from './lib/supabase'
 
 let installed = false
 
 function controllerLabel() {
-  return getBrowserIdentity().displayName.trim() || 'Controller'
+  return getAuthenticatedVid()?.trim() || getBrowserIdentity().displayName.trim() || 'Controller'
 }
 
 function withInsertIdentity(values: unknown) {
@@ -34,7 +34,7 @@ export function installAuditIdentity() {
   installed = true
 
   // Supabase's fluent builders are wrapped centrally so every current and future
-  // write to arrivals carries the browser controller display name into the audit log.
+  // write to arrivals carries the authenticated IVAO VID into the audit log.
   const client = supabase as any
   const originalFrom = client.from.bind(client)
 
