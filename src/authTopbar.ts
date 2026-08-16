@@ -118,11 +118,18 @@ function createProfile(user: AuthUser) {
       }
       menu.appendChild(positionWrap)
     }
+
+    const adminLink = document.createElement('a')
+    adminLink.className = 'auth-controller-signout auth-controller-admin-link'
+    adminLink.href = '/admin'
+    adminLink.textContent = 'Open Admin Console'
+    menu.appendChild(makeTextElement('div', 'auth-controller-divider', ''))
+    menu.appendChild(adminLink)
   } else {
     menu.appendChild(makeTextElement('div', 'auth-controller-role member', 'IVAO MEMBER'))
+    menu.appendChild(makeTextElement('div', 'auth-controller-divider', ''))
   }
 
-  menu.appendChild(makeTextElement('div', 'auth-controller-divider', ''))
   const signOut = document.createElement('a')
   signOut.className = 'auth-controller-signout'
   signOut.href = '/api/auth/logout'
