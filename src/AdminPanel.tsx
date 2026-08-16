@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuthUser } from './AuthGate'
+import TimingEditor, { type FixTiming } from './TimingEditor'
 import './admin.css'
 
 type Airport = {
@@ -48,7 +49,6 @@ type ConfigHistory = {
   changed_at: string
 }
 
-type FixTiming = { airport: string; flow: string; fix: string; nominal_seconds: number; verified: boolean; active: boolean }
 type SequenceSession = { id: string; airport: string; flow: string; runway_config: string | null; service_date: string; status: string; created_at: string }
 
 type Dashboard = {
@@ -232,7 +232,7 @@ export default function AdminPanel() {
         )}
 
         {!loading && tab === 'timing' && (
-          <section className="admin-card wide-card"><div className="admin-card-heading"><div><span className="admin-label">TIMING DATA</span><h2>Existing sequencing timings</h2><p>Read-only in Admin v1. Existing <code>fix_timings</code> remains the production source until the editor is versioned.</p></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>AIRPORT</th><th>FLOW</th><th>REF FIX</th><th>NOMINAL</th><th>VERIFIED</th><th>ACTIVE</th></tr></thead><tbody>{data.fixTimings.map((timing, index) => <tr key={`${timing.airport}-${timing.flow}-${timing.fix}-${index}`}><td>{timing.airport}</td><td>{timing.flow}</td><td><strong>{timing.fix}</strong></td><td>{Math.round(timing.nominal_seconds / 60)} min</td><td>{timing.verified ? 'YES' : 'NO'}</td><td>{timing.active ? 'YES' : 'NO'}</td></tr>)}</tbody></table></div></section>
+          <TimingEditor airports={data.airports} runwayConfigs={data.runwayConfigs} fixTimings={data.fixTimings} saving={saving} act={act} />
         )}
 
         {!loading && tab === 'sessions' && (
@@ -242,9 +242,9 @@ export default function AdminPanel() {
         {!loading && tab === 'history' && (
           <section className="admin-card wide-card"><div className="admin-card-heading"><div><span className="admin-label">CONFIGURATION HISTORY</span><h2>Revision trail</h2><p>Append-only history. Restore creates another revision instead of deleting the mistake.</p></div><button onClick={() => void reload()}>Refresh</button></div><div className="history-list">{data.history.map((item) => {
             const snapshot = item.new_row || item.old_row || {}
-            const title = String(snapshot.icao || snapshot.designator || snapshot.label || item.entity_id)
-            const canRestore = Boolean(item.old_row) && ['AIRPORT','RUNWAY_CONFIG','STAR_PROCEDURE'].includes(item.entity_type)
-            return <article key={item.id} className="history-row"><div className="history-marker" /><div className="history-main"><div className="history-title"><strong>{item.entity_type.replace('_', ' ')}</strong><span>{title}</span><span className={`history-action ${item.action.toLowerCase()}`}>{item.action}</span></div><p>{item.changed_by_name || 'TH Staff'} · {item.changed_by_vid || '—'} · {fmtTime(item.changed_at)}</p></div><button disabled={!canRestore || saving} onClick={() => { if (window.confirm(`Restore the state before revision #${item.id}?`)) void act({ action: 'history.restore', historyId: item.id }) }}>Restore previous</button></article>
+            const title = String(snapshot.icao || snapshot.designator || snapshot.fix || snapshot.label || item.entity_id)
+            const canRestore = Boolean(item.old_row) && ['AIRPORT','RUNWAY_CONFIG','STAR_PROCEDURE','FIX_TIMING'].includes(item.entity_type)
+            return <article key={item.id} className="history-row"><div className="history-marker" /><div className="history-main"><div className="history-title"><strong>{item.entity_type.replaceAll('_', ' ')}</strong><span>{title}</span><span className={`history-action ${item.action.toLowerCase()}`}>{item.action}</span></div><p>{item.changed_by_name || 'TH Staff'} · {item.changed_by_vid || '—'} · {fmtTime(item.changed_at)}</p></div><button disabled={!canRestore || saving} onClick={() => { if (window.confirm(`Restore the state before revision #${item.id}?`)) void act({ action: 'history.restore', historyId: item.id }) }}>Restore previous</button></article>
           })}</div></section>
         )}
       </main>
