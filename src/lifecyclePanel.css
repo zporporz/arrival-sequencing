@@ -101,7 +101,7 @@
   top: 0;
   right: 0;
   z-index: 120;
-  width: min(390px, 92vw);
+  width: min(420px, 94vw);
   height: 100vh;
   padding: 20px;
   background: #fff;
@@ -141,6 +141,30 @@
   line-height: 1.2;
 }
 
+.activity-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-refresh {
+  border: 1px solid #dce4ef;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: #fff;
+  color: #52627b;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.activity-refresh:hover {
+  border-color: #b8c9f4;
+  color: #2457d6;
+  background: #f8fbff;
+}
+
 .activity-close {
   border: 0;
   background: transparent;
@@ -151,54 +175,145 @@
 }
 
 .activity-state {
-  padding: 14px 0 4px;
+  padding: 12px 0 2px;
   color: #8792a5;
   font-size: 12px;
 }
 
 .activity-list {
   display: grid;
+  gap: 10px;
+  padding-top: 8px;
 }
 
-.activity-item {
-  padding: 13px 0;
-  border-bottom: 1px solid #eef2f7;
+.activity-group {
+  border: 1px solid #e3e9f2;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
 }
 
-.activity-item > div {
+.activity-group[open] {
+  border-color: #cad7ee;
+  box-shadow: 0 4px 14px rgba(29, 49, 83, .06);
+}
+
+.activity-group summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 62px;
+  padding: 11px 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-group summary::after {
+  content: '›';
+  flex: 0 0 auto;
+  color: #8b98ab;
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+
+.activity-group[open] summary::after {
+  transform: rotate(270deg);
+}
+
+.activity-group-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.activity-group-identity span {
+  color: #2457d6;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.activity-group-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #17233b;
+  font-size: 13px;
+}
+
+.activity-group-meta {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.activity-group-meta b {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #52627b;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.activity-group-meta time {
+  color: #94a0b2;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.activity-group-history {
+  border-top: 1px solid #edf1f6;
+  background: #fafbfd;
+}
+
+.activity-entry {
+  padding: 10px 13px;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.activity-entry:last-child {
+  border-bottom: 0;
+}
+
+.activity-entry > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.activity-item strong {
-  color: #17233b;
-  font-size: 12px;
+.activity-entry strong {
+  color: #52627b;
+  font-size: 10px;
 }
 
-.activity-item time {
-  color: #8a96a9;
-  font-size: 10px;
+.activity-entry time {
+  color: #9aa5b5;
+  font-size: 9px;
   font-weight: 700;
 }
 
-.activity-item p {
-  margin: 5px 0 4px;
-  color: #45556f;
-  font-size: 11px;
+.activity-entry p {
+  margin: 5px 0 0;
+  color: #34445d;
+  font-size: 10.5px;
   line-height: 1.45;
-}
-
-.activity-item small {
-  color: #9aa5b5;
-  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 /* Desktop board: fit the operational columns inside the card instead of
-   forcing readability.css's old 1780px prototype width. The explicit widths
-   keep labels and controls readable while avoiding a pointless scrollbar on
-   normal controller displays. */
+   forcing readability.css's old 1780px prototype width. */
 @media (min-width: 1500px) {
   .table-wrap {
     overflow-x: hidden !important;
