@@ -41,6 +41,7 @@ async function insertAirport(env, auth, payload) {
       city: cleanText(payload.city, 120),
       fir: cleanText(payload.fir, 80)?.toUpperCase() || "BANGKOK",
       active: payload.active !== false,
+      published: Boolean(payload.published),
       ...creatorPatch(auth),
     }]),
   });
@@ -53,9 +54,11 @@ async function updateAirport(env, auth, payload) {
   if (payload.name !== undefined) patch.name = cleanText(payload.name, 160);
   if (payload.city !== undefined) patch.city = cleanText(payload.city, 120);
   if (payload.fir !== undefined) patch.fir = cleanText(payload.fir, 80)?.toUpperCase() || "BANGKOK";
+  if (payload.published !== undefined) patch.published = Boolean(payload.published);
   if (payload.active !== undefined) {
     patch.active = Boolean(payload.active);
     patch.archived_at = patch.active ? null : new Date().toISOString();
+    if (!patch.active) patch.published = false;
   }
   return supabaseAdminRequest(env, `airports?id=eq.${encodeURIComponent(id)}&select=*`, {
     method: "PATCH",
@@ -79,6 +82,7 @@ async function insertRunway(env, auth, payload) {
       label,
       timing_status: timingStatus,
       active: payload.active !== false,
+      published: Boolean(payload.published),
       sort_order: Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 0,
       notes: cleanText(payload.notes, 500),
       ...creatorPatch(auth),
@@ -92,7 +96,11 @@ async function updateRunway(env, auth, payload) {
   const patch = { ...actorPatch(auth) };
   if (payload.label !== undefined) patch.label = cleanText(payload.label, 80);
   if (payload.timingStatus !== undefined && ["ACTIVE", "PENDING", "DISABLED"].includes(payload.timingStatus)) patch.timing_status = payload.timingStatus;
-  if (payload.active !== undefined) patch.active = Boolean(payload.active);
+  if (payload.published !== undefined) patch.published = Boolean(payload.published);
+  if (payload.active !== undefined) {
+    patch.active = Boolean(payload.active);
+    if (!patch.active) patch.published = false;
+  }
   if (payload.notes !== undefined) patch.notes = cleanText(payload.notes, 500);
   if (payload.sortOrder !== undefined) patch.sort_order = Number(payload.sortOrder) || 0;
   return supabaseAdminRequest(env, `runway_configs?id=eq.${encodeURIComponent(id)}&select=*`, {
