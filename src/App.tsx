@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
-import { getBrowserIdentity, saveBrowserDisplayName } from './browserIdentity'
+import { useAuthUser } from './AuthGate'
+import { getBrowserIdentity } from './browserIdentity'
 import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
 
@@ -76,14 +77,27 @@ const averageInterval = (rows: ArrivalView[]) => {
   return `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}`
 }
 
+const compactStaffPosition = (value: string) => {
+  const upper = value.trim().toUpperCase()
+  if (!upper) return ''
+  if (/^TH-[A-Z0-9]{1,10}$/.test(upper)) return upper
+  const ignored = new Set(['TH', 'DIVISION', 'DEPARTMENT', 'STAFF', 'TEAM', 'OF', 'THE'])
+  const words = upper
+    .split(/[\s/_-]+/)
+    .map((word) => word.replace(/[^A-Z0-9]/g, ''))
+    .filter((word) => word && !ignored.has(word))
+  const acronym = words.map((word) => word[0]).join('').slice(0, 6)
+  return acronym ? `TH-${acronym}` : ''
+}
+
 type EditingState = Record<string, { displayName: string }>
 
 function App() {
+  const authUser = useAuthUser()
   const identity = useMemo(() => getBrowserIdentity(), [])
   const [session, setSession] = useState<SequenceSession | null>(null)
   const [arrivals, setArrivals] = useState<ArrivalView[]>([])
   const [fixes, setFixes] = useState<FixTiming[]>([])
-  const [profileName, setProfileName] = useState(identity.displayName)
   const [onlineControllers, setOnlineControllers] = useState<string[]>([])
   const [editing, setEditing] = useState<EditingState>({})
   const [search, setSearch] = useState('')
@@ -92,9 +106,17 @@ function App() {
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [utcNow, setUtcNow] = useState(new Date())
   const channelRef = useRef<RealtimeChannel | null>(null)
-  const profileNameRef = useRef(profileName)
   const realtimePendingIdsRef = useRef<Set<string>>(new Set())
   const realtimeFlushTimerRef = useRef<number | null>(null)
+
+  const profileName = identity.displayName
+  const staffCodes = useMemo(() => {
+    if (!authUser.isThailandStaff) return []
+    const apiCodes = [...new Set((authUser.staffPositionCodes ?? []).map((code) => code.trim().toUpperCase()).filter(Boolean))]
+    if (apiCodes.length) return apiCodes
+    return [...new Set((authUser.staffPositions ?? []).map(compactStaffPosition).filter(Boolean))]
+  }, [authUser.isThailandStaff, authUser.staffPositionCodes, authUser.staffPositions])
+  const roleLabel = authUser.isThailandStaff ? (staffCodes.join(' / ') || 'TH STAFF') : 'IVAO MEMBER'
 
   const refreshArrivals = useCallback(async (sessionId: string) => {
     const { data, error: queryError } = await supabase
@@ -158,10 +180,6 @@ function App() {
     }
     setFixes([...byFix.values()].sort((a, b) => a.fix.localeCompare(b.fix)))
   }, [])
-
-  useEffect(() => {
-    profileNameRef.current = profileName
-  }, [profileName])
 
   useEffect(() => {
     const timer = window.setInterval(() => setUtcNow(new Date()), 1000)
@@ -276,7 +294,7 @@ function App() {
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
-              await realtimeChannel.track({ displayName: profileNameRef.current, onlineAt: new Date().toISOString() })
+              await realtimeChannel.track({ displayName: profileName, onlineAt: new Date().toISOString() })
             }
           })
 
@@ -300,7 +318,7 @@ function App() {
       if (channelRef.current) void supabase.removeChannel(channelRef.current)
       channelRef.current = null
     }
-  }, [identity.id, loadFixes, queueArrivalSync, refreshArrivals])
+  }, [identity.id, loadFixes, profileName, queueArrivalSync, refreshArrivals])
 
   const visibleArrivals = useMemo(() => {
     const needle = search.trim().toUpperCase()
@@ -434,15 +452,6 @@ function App() {
     if (deleteError) setError(deleteError.message)
   }
 
-  const saveProfileName = async () => {
-    const clean = saveBrowserDisplayName(profileName)
-    setProfileName(clean)
-    profileNameRef.current = clean
-    if (channelRef.current) {
-      await channelRef.current.track({ displayName: clean, onlineAt: new Date().toISOString() })
-    }
-  }
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -450,8 +459,8 @@ function App() {
           <div className="brand-mark">✈</div>
           <div>
             <div className="eyebrow">THAILAND APPROACH TOOLS</div>
-            <h1>BKK TMA Arrival Sequencing</h1>
-            <p>Flow {FLOW} · Shared realtime workspace</p>
+            <h1>Bangkok FIR Arrival Sequencing</h1>
+            <p>{AIRPORT} · RWY {DEFAULT_RUNWAY_CONFIG} · Shared realtime workspace</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -463,8 +472,24 @@ function App() {
               {onlineControllers.slice(0, 4).map((name) => <i key={name} title={name}>{name.slice(0, 2).toUpperCase()}</i>)}
             </div>
           </div>
-          <input className="controller-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} onBlur={() => void saveProfileName()} aria-label="Controller display name" />
-          <button className="primary-button" onClick={() => void addFlight()} disabled={!session || fixes.length === 0}>+ Add Flight</button>
+          <details className="react-account-menu">
+            <summary>
+              <strong>{authUser.name}</strong>
+              <span>{roleLabel} · {authUser.vid} <b>▾</b></span>
+            </summary>
+            <div className="react-account-popover">
+              <strong>{authUser.name}</strong>
+              <span>VID {authUser.vid}</span>
+              <small>{authUser.isThailandStaff ? 'THAILAND DIVISION STAFF' : 'IVAO MEMBER'}</small>
+              {authUser.isThailandStaff && authUser.staffPositions.length > 0 && (
+                <div className="react-account-roles">
+                  {authUser.staffPositions.map((position) => <span key={position}>{position}</span>)}
+                </div>
+              )}
+              {authUser.isThailandStaff && <a href="/admin">Open Admin Console</a>}
+              <a className="react-account-signout" href="/api/auth/logout">Sign out of IVAO</a>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -484,9 +509,9 @@ function App() {
               <h2>Arrival sequence</h2>
               <p>Click editable cells. Changes autosave and appear on every connected screen.</p>
             </div>
-            <div className="toolbar-controls">
+            <div className="toolbar-controls react-workspace-actions">
+              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || fixes.length === 0}>+ Add Flight</button>
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
-              <button className="secondary-button">Flow {FLOW}</button>
             </div>
           </div>
 
