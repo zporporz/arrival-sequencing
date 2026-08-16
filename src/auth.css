@@ -95,43 +95,156 @@
 
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 
-.auth-session-chip {
-  position: fixed;
-  left: 18px;
-  bottom: 18px;
-  z-index: 80;
+/* The old editable controller-name field remains as React's presence source,
+   but authenticated users interact with the fixed IVAO profile control instead. */
+.controller-name.auth-controller-source {
+  display: none !important;
+}
+
+.topbar-actions {
+  position: relative;
+}
+
+.auth-controller-profile {
+  position: relative;
+  z-index: 120;
+  min-width: 0;
+}
+
+.auth-controller-summary {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 7px;
-  padding: 6px 8px;
+  min-height: 34px;
+  max-width: 250px;
+  padding: 0 10px 0 12px;
   border: 1px solid #dbe3f0;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 8px 24px rgba(31, 51, 91, .10);
-  backdrop-filter: blur(12px);
-  color: #66728a;
+  border-radius: 8px;
+  background: #fff;
+  color: #17223d;
+  cursor: pointer;
+  list-style: none;
+  box-shadow: 0 2px 7px rgba(31, 51, 91, .04);
+}
+
+.auth-controller-summary::-webkit-details-marker { display: none; }
+
+.auth-controller-profile[open] .auth-controller-summary,
+.auth-controller-summary:hover {
+  border-color: #c8d5ee;
+  background: #f9fbff;
+}
+
+.auth-controller-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.auth-controller-chevron {
+  flex: 0 0 auto;
+  color: #7d8aa2;
+  font-size: 12px;
+  line-height: 1;
+  transition: transform .15s ease;
+}
+
+.auth-controller-profile[open] .auth-controller-chevron {
+  transform: rotate(180deg);
+}
+
+.auth-controller-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  padding: 13px;
+  border: 1px solid #dbe3f0;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(31, 51, 91, .16);
+}
+
+.auth-controller-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auth-controller-name {
+  color: #17223d;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.auth-controller-vid {
+  color: #8390a6;
   font-size: 10px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
-.auth-session-chip a {
-  color: #69758e;
-  text-decoration: none;
-}
-
-.auth-session-chip a:hover { color: #2448ba; }
-
-.auth-staff-badge {
-  padding: 3px 6px;
-  border-radius: 5px;
-  background: #edf3ff;
+.auth-controller-role {
+  margin-top: 11px;
   color: #3157c9;
   font-size: 9px;
   font-weight: 900;
-  letter-spacing: .04em;
+  letter-spacing: .08em;
 }
 
-.auth-session-name {
-  color: #17223d;
+.auth-controller-role.member {
+  color: #748198;
+}
+
+.auth-controller-positions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.auth-controller-position {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid #dbe5fb;
+  border-radius: 6px;
+  background: #f3f7ff;
+  color: #3157c9;
+  font-size: 10px;
   font-weight: 850;
+}
+
+.auth-controller-divider {
+  height: 1px;
+  margin: 12px 0 8px;
+  background: #e9eef7;
+}
+
+.auth-controller-signout {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: #66728a;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.auth-controller-signout:hover {
+  background: #f5f7fb;
+  color: #b23b32;
+}
+
+@media (max-width: 1180px) {
+  .auth-controller-summary {
+    max-width: 170px;
+  }
 }
