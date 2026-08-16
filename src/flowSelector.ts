@@ -37,27 +37,35 @@ let publishedFlows: FlowConfig[] = [FALLBACK]
 
 export function getSelectedFlow(): FlowConfig {
   const params = new URLSearchParams(window.location.search)
-  const requested = params.get('flow')
-  return publishedFlows.find((item) => item.flow === requested) ?? publishedFlows[0] ?? FALLBACK
+  const requestedAirport = params.get('airport')?.toUpperCase()
+  const requestedFlow = params.get('flow')
+  return publishedFlows.find((item) => item.airport === requestedAirport && item.flow === requestedFlow)
+    ?? publishedFlows.find((item) => item.flow === requestedFlow)
+    ?? publishedFlows[0]
+    ?? FALLBACK
 }
 
-function switchFlow(flow: string) {
+function switchWorkspace(item: FlowConfig) {
   const url = new URL(window.location.href)
-  url.searchParams.set('flow', flow)
+  url.searchParams.set('airport', item.airport)
+  url.searchParams.set('flow', item.flow)
+  url.searchParams.set('runway', item.runway)
   window.location.assign(url.toString())
 }
 
 function makeRunwayButton(item: FlowConfig, selected: FlowConfig) {
   const button = document.createElement('button')
   button.type = 'button'
+  const isSelected = item.airport === selected.airport && item.flow === selected.flow
   button.className = [
     'runway-workspace-button',
-    item.flow === selected.flow ? 'is-active' : '',
+    isSelected ? 'is-active' : '',
     item.timingReady ? 'is-ready' : 'is-pending',
   ].filter(Boolean).join(' ')
   button.dataset.flow = item.flow
+  button.dataset.airport = item.airport
   button.setAttribute('aria-label', `${item.airport} runway ${item.runway}${item.timingReady ? '' : ', timing pending'}`)
-  if (item.flow === selected.flow) button.setAttribute('aria-current', 'page')
+  if (isSelected) button.setAttribute('aria-current', 'page')
 
   const runway = document.createElement('span')
   runway.className = 'runway-workspace-runway'
@@ -69,7 +77,7 @@ function makeRunwayButton(item: FlowConfig, selected: FlowConfig) {
   state.textContent = item.timingReady ? 'TIMING ACTIVE' : 'TIMING PENDING'
   button.appendChild(state)
 
-  if (item.flow !== selected.flow) button.addEventListener('click', () => switchFlow(item.flow))
+  if (!isSelected) button.addEventListener('click', () => switchWorkspace(item))
   return button
 }
 
@@ -88,15 +96,19 @@ function buildWorkspaceNavigation(selected: FlowConfig) {
 
   const airportTabs = document.createElement('div')
   airportTabs.className = 'airport-workspace-tabs'
-  const airportButton = document.createElement('button')
-  airportButton.type = 'button'
-  airportButton.className = 'airport-workspace-button is-active'
-  airportButton.setAttribute('aria-current', 'page')
-  airportButton.innerHTML = `
-    <span class="airport-workspace-code">${selected.airport}</span>
-    <span class="airport-workspace-name">${selected.airportName}</span>
-  `
-  airportTabs.appendChild(airportButton)
+  const airportCodes = [...new Set(publishedFlows.map((item) => item.airport))]
+  for (const airportCode of airportCodes) {
+    const first = publishedFlows.find((item) => item.airport === airportCode)
+    if (!first) continue
+    const button = document.createElement('button')
+    button.type = 'button'
+    const isSelected = selected.airport === airportCode
+    button.className = `airport-workspace-button${isSelected ? ' is-active' : ''}`
+    if (isSelected) button.setAttribute('aria-current', 'page')
+    button.innerHTML = `<span class="airport-workspace-code">${first.airport}</span><span class="airport-workspace-name">${first.airportName}</span>`
+    if (!isSelected) button.addEventListener('click', () => switchWorkspace(first))
+    airportTabs.appendChild(button)
+  }
   airportRow.appendChild(airportTabs)
   section.appendChild(airportRow)
 
@@ -110,7 +122,7 @@ function buildWorkspaceNavigation(selected: FlowConfig) {
 
   const runwayTabs = document.createElement('div')
   runwayTabs.className = 'runway-workspace-tabs'
-  for (const item of publishedFlows) runwayTabs.appendChild(makeRunwayButton(item, selected))
+  for (const item of publishedFlows.filter((flow) => flow.airport === selected.airport)) runwayTabs.appendChild(makeRunwayButton(item, selected))
   runwayRow.appendChild(runwayTabs)
   section.appendChild(runwayRow)
 
@@ -130,7 +142,6 @@ function installSelectorUi() {
 
   const navigation = buildWorkspaceNavigation(selected)
   content.insertBefore(navigation, workspace)
-
   document.title = 'Bangkok FIR Arrival Sequencing'
 
   const existingBanner = content.querySelector<HTMLElement>('.timing-pending-banner')
@@ -157,27 +168,25 @@ async function loadPublishedFlows() {
     const response = await fetch('/api/workspaces', { credentials: 'same-origin', cache: 'no-store' })
     if (!response.ok) return
     const payload = await response.json() as WorkspacePayload
-    const vtbd = payload.airports.find((airport) => airport.icao === 'VTBD')
-    if (!vtbd) {
-      publishedFlows = []
-      return
-    }
-    const runways = payload.runwayConfigs
-      .filter((runway) => runway.airport_id === vtbd.id)
-      .map((runway) => ({
+    const airportById = new Map(payload.airports.map((airport) => [airport.id, airport]))
+    publishedFlows = payload.runwayConfigs.flatMap((runway) => {
+      const airport = airportById.get(runway.airport_id)
+      if (!airport) return []
+      return [{
         flow: runway.flow,
-        airport: vtbd.icao,
-        airportName: vtbd.name.replace(/ International Airport$| Airport$/i, ''),
+        airport: airport.icao,
+        airportName: airport.name.replace(/ International Airport$| Airport$/i, ''),
         runway: runway.label,
         timingReady: runway.timing_status === 'ACTIVE',
-      }))
-    publishedFlows = runways.length ? runways : []
+      }]
+    })
 
-    const requested = new URLSearchParams(window.location.search).get('flow')
-    if (publishedFlows.length && requested && !publishedFlows.some((item) => item.flow === requested)) {
-      const url = new URL(window.location.href)
-      url.searchParams.set('flow', publishedFlows[0].flow)
-      window.location.replace(url.toString())
+    const params = new URLSearchParams(window.location.search)
+    const requestedAirport = params.get('airport')?.toUpperCase()
+    const requestedFlow = params.get('flow')
+    const requestedValid = publishedFlows.some((item) => item.airport === requestedAirport && item.flow === requestedFlow)
+    if (publishedFlows.length && (requestedAirport || requestedFlow) && !requestedValid) {
+      switchWorkspace(publishedFlows[0])
     }
   } catch {
     // Keep the last known/fallback configuration if the public config endpoint is unavailable.
