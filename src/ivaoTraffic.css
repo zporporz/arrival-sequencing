@@ -1,0 +1,142 @@
+.ivao-traffic-menu { position: relative; }
+.ivao-traffic-menu > summary { list-style: none; }
+.ivao-traffic-menu > summary::-webkit-details-marker { display: none; }
+.ivao-traffic-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #dfe5ee;
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: #fff;
+  color: #26344c;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ivao-traffic-trigger:hover { border-color: #a9bfe9; background: #f8fbff; }
+.ivao-traffic-trigger b {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: #eaf1ff;
+  color: #2d69cf;
+  font-size: 9px;
+}
+.ivao-traffic-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(760px, calc(100vw - 70px));
+  max-height: 620px;
+  overflow: auto;
+  border: 1px solid #dfe5ef;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(23, 36, 59, .18);
+}
+.ivao-traffic-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px 17px;
+  border-bottom: 1px solid #edf0f5;
+  background: rgba(255,255,255,.97);
+  backdrop-filter: blur(10px);
+}
+.ivao-traffic-heading strong { display: block; font-size: 13px; }
+.ivao-traffic-heading span { display: block; margin-top: 2px; color: #7f899a; font-size: 10px; }
+.ivao-traffic-heading button {
+  border: 1px solid #dfe5ee;
+  background: #fff;
+  border-radius: 9px;
+  padding: 7px 10px;
+  color: #33415a;
+  font-size: 10px;
+  font-weight: 750;
+}
+.ivao-traffic-error { padding: 11px 16px; background: #fff2ef; color: #a34538; border-bottom: 1px solid #f4d9d4; font-size: 11px; }
+.ivao-traffic-empty { padding: 30px 18px; text-align: center; color: #8590a3; font-size: 11px; }
+.ivao-traffic-list { display: grid; }
+.ivao-traffic-flight {
+  display: grid;
+  grid-template-columns: 46px minmax(0,1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 15px;
+  border-bottom: 1px solid #eef1f5;
+}
+.ivao-traffic-flight:last-child { border-bottom: 0; }
+.ivao-traffic-flight:hover { background: #fafcff; }
+.ivao-traffic-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  border: 1px solid #e2e7ef;
+  background: #f8faff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #356aca;
+  font-size: 10px;
+  font-weight: 850;
+}
+.ivao-traffic-logo img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.ivao-traffic-call { display: flex; align-items: baseline; gap: 8px; }
+.ivao-traffic-call strong { font-size: 13px; letter-spacing: -.01em; }
+.ivao-traffic-call span { color: #66748a; font-size: 10px; font-weight: 750; }
+.ivao-traffic-route { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: #627087; font-size: 10px; }
+.ivao-traffic-route strong { color: #34425a; }
+.ivao-traffic-route small { margin-left: 4px; color: #9aa3b2; }
+.ivao-traffic-track { display: block; margin-top: 3px; color: #7d8797; font-size: 9px; }
+.ivao-traffic-fpl {
+  display: block;
+  max-width: 420px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9aa3b2;
+  font-size: 8px;
+}
+.ivao-traffic-plan { display: flex; align-items: end; gap: 7px; }
+.ivao-traffic-plan label span { display: block; margin: 0 0 3px 2px; color: #8791a3; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+.ivao-traffic-plan select,
+.ivao-traffic-plan input {
+  height: 32px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #fff;
+  color: #28364d;
+  padding: 0 8px;
+  font-size: 10px;
+  outline: none;
+}
+.ivao-traffic-plan select { width: 100px; }
+.ivao-traffic-plan input { width: 72px; font-variant-numeric: tabular-nums; }
+.ivao-traffic-plan select:focus,
+.ivao-traffic-plan input:focus { border-color: #8aacef; box-shadow: 0 0 0 3px rgba(45, 105, 207, .08); }
+.ivao-traffic-add {
+  height: 32px;
+  border: 1px solid #2d6fd8;
+  border-radius: 8px;
+  padding: 0 11px;
+  background: #2d6fd8;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+.ivao-traffic-footer { display: flex; justify-content: space-between; gap: 16px; padding: 10px 15px; border-top: 1px solid #edf0f5; background: #fafbfd; color: #8c96a7; font-size: 9px; }
+
+@media (max-width: 1300px) {
+  .ivao-traffic-popover { right: -40px; width: 700px; }
+}
