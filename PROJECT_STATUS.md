@@ -13,6 +13,7 @@ Last reviewed: 2026-08-16
 - Airport and runway configuration master data.
 - Published / Not Published / Archived states are separate.
 - STAR procedures are optional and editable from Admin.
+- AIP STAR Importer can auto-detect the current CAAT eAIP or parse an uploaded AIP PDF, preview differences and require staff approval before changing master data.
 - Fix timing editor uses the same `fix_timings` dataset as live sequencing.
 - Configuration history is append-only with field-level diff and rollback.
 - Session history supports close, reopen, archive and restore.
@@ -37,6 +38,23 @@ Last reviewed: 2026-08-16
 - 01 / 02L / 02R: Not Published, Timing Pending
 - 19 / 20L / 20R: Not Published, Timing Pending
 - The live core is multi-airport capable, but VTBS must not be enabled for sequencing until source-backed nominal timing is configured and Timing status is Active.
+
+## AIP STAR Importer
+
+Completed for v1.
+
+- Admin tab: `AIP Import`.
+- Auto mode checks CAAT Published eAIPs, resolves the latest effective AIRAC issue, reads `GEN 3.2` and extracts Standard Arrival Chart (STAR) metadata.
+- PDF mode uses PDF.js in the browser, searches the AIP for the STAR chart-list section and extracts STAR designators, runway applicability, chart references and chart dates.
+- Parsed procedures are mapped to existing Admin airport/runway configurations by ICAO + runway label.
+- Preview statuses: NEW, CHANGED, SAME, REVIEW and UNMAPPED.
+- Entry-fix candidates are derived from the STAR designator and remain editable in the review table.
+- Rows without a source-backed chart effective date are marked REVIEW and cannot be approved until staff supplies/checks the date.
+- Staff selects rows and explicitly approves the import before any database write.
+- Import writes use the protected Admin API and therefore receive normal actor/history audit fields.
+- Import never changes `fix_timings`.
+- Import does not automatically archive procedures missing from the scanned source; removal stays an explicit staff action.
+- Unknown airports/runway configurations are shown as UNMAPPED rather than created with guessed master data.
 
 ## Multi-airport live core
 
@@ -90,7 +108,7 @@ These items are intentionally not fabricated or auto-enabled:
 
 1. VTBD RWY 03 nominal timing dataset.
 2. VTBS nominal timing datasets.
-3. Automated AIP/STAR import and source reconciliation.
+3. Automatic creation of unknown airport/runway master records from AIP imports; v1 deliberately requires master-data mapping instead of guessing.
 4. Fine-grained staff roles (view/edit/publish permissions) beyond Thailand Division staff access.
 5. Further product-level hardening such as rate limiting, CSRF tokens for state-changing API calls, and formal operational authorization if the tool is ever promoted beyond training/prototype use.
 
