@@ -5,10 +5,42 @@ import { getBrowserIdentity } from './browserIdentity'
 import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
 
-const AIRPORT = 'VTBD' as const
-const requestedFlow = new URLSearchParams(window.location.search).get('flow')
-const FLOW = requestedFlow === '03' ? '03' : '21'
-const DEFAULT_RUNWAY_CONFIG = FLOW === '03' ? '03L / 03R' : '21L / 21R'
+type PublishedAirport = {
+  id: string
+  icao: string
+  name: string
+}
+
+type PublishedRunway = {
+  id: string
+  airport_id: string
+  flow: string
+  label: string
+  timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'
+}
+
+type WorkspacePayload = {
+  airports: PublishedAirport[]
+  runwayConfigs: PublishedRunway[]
+}
+
+type LiveWorkspace = {
+  airport: string
+  airportName: string
+  airportId: string
+  flow: string
+  runway: string
+  runwayId: string
+  timingReady: boolean
+}
+
+const requestedParams = new URLSearchParams(window.location.search)
+const REQUESTED_AIRPORT = requestedParams.get('airport')?.trim().toUpperCase() || null
+const REQUESTED_FLOW = requestedParams.get('flow')?.trim() || null
+
+function airportShortName(name: string) {
+  return name.replace(/ International Airport$| Airport$/i, '')
+}
 
 const timeOnly = (value: string | null | undefined) => {
   if (!value) return '—'
@@ -105,6 +137,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [utcNow, setUtcNow] = useState(new Date())
+  const [workspace, setWorkspace] = useState<LiveWorkspace | null>(null)
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspacePayload>({ airports: [], runwayConfigs: [] })
   const channelRef = useRef<RealtimeChannel | null>(null)
   const realtimePendingIdsRef = useRef<Set<string>>(new Set())
   const realtimeFlushTimerRef = useRef<number | null>(null)
@@ -193,15 +227,50 @@ function App() {
       try {
         setLoading(true)
         setError(null)
+
+        const workspaceResponse = await fetch('/api/workspaces', { credentials: 'same-origin', cache: 'no-store' })
+        if (!workspaceResponse.ok) throw new Error('Unable to load published workspaces')
+        const config = await workspaceResponse.json() as WorkspacePayload
+        const airportById = new Map(config.airports.map((airport) => [airport.id, airport]))
+        const candidates: LiveWorkspace[] = config.runwayConfigs.flatMap((runway) => {
+          const airport = airportById.get(runway.airport_id)
+          if (!airport) return []
+          return [{
+            airport: airport.icao,
+            airportName: airportShortName(airport.name),
+            airportId: airport.id,
+            flow: runway.flow,
+            runway: runway.label,
+            runwayId: runway.id,
+            timingReady: runway.timing_status === 'ACTIVE',
+          }]
+        })
+        const selectedWorkspace = candidates.find((item) => item.airport === REQUESTED_AIRPORT && item.flow === REQUESTED_FLOW)
+          ?? candidates.find((item) => item.airport === REQUESTED_AIRPORT)
+          ?? candidates[0]
+        if (!selectedWorkspace) throw new Error('No published arrival workspace is available')
+        if (disposed) return
+        setWorkspaceConfig(config)
+        setWorkspace(selectedWorkspace)
+
+        const canonicalUrl = new URL(window.location.href)
+        if (canonicalUrl.searchParams.get('airport') !== selectedWorkspace.airport || canonicalUrl.searchParams.get('flow') !== selectedWorkspace.flow || canonicalUrl.searchParams.get('runway') !== selectedWorkspace.runway) {
+          canonicalUrl.searchParams.set('airport', selectedWorkspace.airport)
+          canonicalUrl.searchParams.set('flow', selectedWorkspace.flow)
+          canonicalUrl.searchParams.set('runway', selectedWorkspace.runway)
+          window.history.replaceState(null, '', canonicalUrl.toString())
+        }
+
         const todayUtc = new Date().toISOString().slice(0, 10)
 
         const { data: existingSession, error: sessionQueryError } = await supabase
           .from('sequence_sessions')
           .select('*')
-          .eq('airport', AIRPORT)
-          .eq('flow', FLOW)
+          .eq('airport', selectedWorkspace.airport)
+          .eq('flow', selectedWorkspace.flow)
           .eq('service_date', todayUtc)
           .eq('status', 'ACTIVE')
+          .eq('archived', false)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
@@ -213,16 +282,32 @@ function App() {
           const { data: createdSession, error: createSessionError } = await supabase
             .from('sequence_sessions')
             .insert({
-              airport: AIRPORT,
-              flow: FLOW,
-              runway_config: DEFAULT_RUNWAY_CONFIG,
+              airport: selectedWorkspace.airport,
+              flow: selectedWorkspace.flow,
+              runway_config: selectedWorkspace.runway,
               service_date: todayUtc,
               status: 'ACTIVE',
             })
             .select('*')
             .single()
-          if (createSessionError) throw createSessionError
-          activeSession = createdSession as SequenceSession
+          if (createSessionError) {
+            if (createSessionError.code !== '23505') throw createSessionError
+            const { data: racedSession, error: racedSessionError } = await supabase
+              .from('sequence_sessions')
+              .select('*')
+              .eq('airport', selectedWorkspace.airport)
+              .eq('flow', selectedWorkspace.flow)
+              .eq('service_date', todayUtc)
+              .eq('status', 'ACTIVE')
+              .eq('archived', false)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+            if (racedSessionError) throw racedSessionError
+            activeSession = racedSession as SequenceSession | null
+          } else {
+            activeSession = createdSession as SequenceSession
+          }
         }
 
         if (disposed || !activeSession) return
@@ -452,6 +537,14 @@ function App() {
     if (deleteError) setError(deleteError.message)
   }
 
+  const switchWorkspace = (airport: PublishedAirport, runway: PublishedRunway) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('airport', airport.icao)
+    url.searchParams.set('flow', runway.flow)
+    url.searchParams.set('runway', runway.label)
+    window.location.assign(url.toString())
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -460,7 +553,7 @@ function App() {
           <div>
             <div className="eyebrow">THAILAND APPROACH TOOLS</div>
             <h1>Bangkok FIR Arrival Sequencing</h1>
-            <p>{AIRPORT} · RWY {DEFAULT_RUNWAY_CONFIG} · Shared realtime workspace</p>
+            <p>{workspace ? `${workspace.airport} · RWY ${workspace.runway} · Shared realtime workspace` : 'Loading published workspace…'}</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -503,6 +596,44 @@ function App() {
           <article className="summary-card"><span>Controllers online</span><strong>{onlineControllers.length || 1}</strong><small>Presence channel</small></article>
         </section>
 
+        {workspace && (
+          <section className="sequence-destination-nav" aria-label="Arrival sequencing workspace navigation">
+            <div className="destination-nav-row airport-nav-row">
+              <div className="destination-nav-heading"><span>AIRPORT</span><strong>Select workspace</strong></div>
+              <div className="airport-workspace-tabs">
+                {workspaceConfig.airports.map((airport) => {
+                  const airportRunways = workspaceConfig.runwayConfigs.filter((runway) => runway.airport_id === airport.id)
+                  const firstRunway = airportRunways[0]
+                  if (!firstRunway) return null
+                  const selected = workspace.airport === airport.icao
+                  return <button key={airport.id} type="button" className={`airport-workspace-button${selected ? ' is-active' : ''}`} aria-current={selected ? 'page' : undefined} onClick={() => { if (!selected) switchWorkspace(airport, firstRunway) }}>
+                    <span className="airport-workspace-code">{airport.icao}</span>
+                    <span className="airport-workspace-name">{airportShortName(airport.name)}</span>
+                  </button>
+                })}
+              </div>
+            </div>
+            <div className="destination-nav-row runway-nav-row">
+              <div className="destination-nav-heading"><span>RUNWAY CONFIGURATION</span><strong>{workspace.airport} arrivals</strong></div>
+              <div className="runway-workspace-tabs">
+                {workspaceConfig.runwayConfigs.filter((runway) => runway.airport_id === workspace.airportId).map((runway) => {
+                  const selected = runway.id === workspace.runwayId
+                  const airport = workspaceConfig.airports.find((item) => item.id === runway.airport_id)
+                  if (!airport) return null
+                  return <button key={runway.id} type="button" className={`runway-workspace-button ${selected ? 'is-active ' : ''}${runway.timing_status === 'ACTIVE' ? 'is-ready' : 'is-pending'}`} aria-current={selected ? 'page' : undefined} onClick={() => { if (!selected) switchWorkspace(airport, runway) }}>
+                    <span className="runway-workspace-runway">{runway.label}</span>
+                    <small className="runway-workspace-state">{runway.timing_status === 'ACTIVE' ? 'TIMING ACTIVE' : runway.timing_status === 'PENDING' ? 'TIMING PENDING' : 'TIMING DISABLED'}</small>
+                  </button>
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {workspace && !workspace.timingReady && (
+          <div className="timing-pending-banner"><strong>{workspace.airport} {workspace.runway} timing unavailable</strong><span>This published workspace does not have an active timing dataset. Add Flight is disabled until timing is activated in Admin.</span></div>
+        )}
+
         <section className="workspace-card">
           <div className="workspace-toolbar">
             <div>
@@ -510,7 +641,7 @@ function App() {
               <p>Click editable cells. Changes autosave and appear on every connected screen.</p>
             </div>
             <div className="toolbar-controls react-workspace-actions">
-              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || fixes.length === 0}>+ Add Flight</button>
+              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
           </div>
@@ -576,7 +707,7 @@ function App() {
 
           <footer className="workspace-footer">
             <div className="legend"><span><i className="dot editable-dot" /> Editable / autosave</span><span><i className="dot computed-dot" /> ELDT + CTO calculated</span></div>
-            <div>{fixes.some((fix) => !fix.verified) ? '⚠ VTBD timing values are provisional' : 'Timing dataset verified'} · <strong className="live">● LIVE</strong></div>
+            <div>{fixes.some((fix) => !fix.verified) ? `⚠ ${workspace?.airport ?? 'Workspace'} timing values are provisional` : 'Timing dataset verified'} · <strong className="live">● LIVE</strong></div>
           </footer>
         </section>
       </main>

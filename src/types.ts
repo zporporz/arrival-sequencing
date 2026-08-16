@@ -2,7 +2,7 @@ export type ArrivalStatus = 'INBOUND' | 'SEQUENCED' | 'LANDING' | 'LANDED' | 'CA
 
 export type SequenceSession = {
   id: string
-  airport: 'VTBD' | 'VTBS'
+  airport: string
   flow: string
   runway_config: string | null
   service_date: string
@@ -14,7 +14,7 @@ export type SequenceSession = {
 
 export type FixTiming = {
   id: number
-  airport: 'VTBD' | 'VTBS'
+  airport: string
   flow: string
   fix: string
   nominal_seconds: number
@@ -28,7 +28,7 @@ export type FixTiming = {
 export type ArrivalView = {
   id: string
   session_id: string
-  airport: 'VTBD' | 'VTBS'
+  airport: string
   flow: string
   runway_config: string | null
   service_date: string

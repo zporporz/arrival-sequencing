@@ -32,8 +32,12 @@ let activityLoading = false
 
 const completedStatuses = new Set(['LANDED', 'CANCELLED'])
 
-function currentFlow() {
-  return new URLSearchParams(window.location.search).get('flow') === '03' ? '03' : '21'
+function currentWorkspaceSelection() {
+  const params = new URLSearchParams(window.location.search)
+  return {
+    airport: params.get('airport')?.trim().toUpperCase() || 'VTBD',
+    flow: params.get('flow')?.trim() || '21',
+  }
 }
 
 function statusForRow(row: HTMLTableRowElement) {
@@ -209,13 +213,15 @@ function utcLabel(value: string) {
 
 async function resolveSessionId() {
   const todayUtc = new Date().toISOString().slice(0, 10)
+  const selected = currentWorkspaceSelection()
   const { data, error } = await supabase
     .from('sequence_sessions')
     .select('id')
-    .eq('airport', 'VTBD')
-    .eq('flow', currentFlow())
+    .eq('airport', selected.airport)
+    .eq('flow', selected.flow)
     .eq('service_date', todayUtc)
     .eq('status', 'ACTIVE')
+    .eq('archived', false)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
