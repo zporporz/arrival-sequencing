@@ -14,6 +14,7 @@ export type AuthUser = {
   isThailandStaff: boolean
   role: 'MEMBER' | 'STAFF'
   staffPositions: string[]
+  staffPositionCodes?: string[]
   createdAt: string
 }
 
@@ -39,7 +40,34 @@ function loginMessage() {
 }
 
 function normalizedPositions(user: AuthUser) {
-  return [...new Set(user.staffPositions.map((position) => position.trim()).filter(Boolean))]
+  return [...new Set((user.staffPositions ?? []).map((position) => position.trim()).filter(Boolean))]
+}
+
+function compactStaffPosition(value: string) {
+  const original = value.trim()
+  if (!original) return 'TH STAFF'
+
+  const upper = original.toUpperCase()
+  if (/^TH-[A-Z0-9]{1,10}$/.test(upper)) return upper
+
+  const body = upper
+    .replace(/^TH[-\s]+/, '')
+    .replace(/^DIVISION[-\s]+/, '')
+
+  const ignored = new Set(['DIVISION', 'DEPARTMENT', 'STAFF', 'TEAM', 'OF', 'THE'])
+  const words = body
+    .split(/[\s/_-]+/)
+    .map((word) => word.replace(/[^A-Z0-9]/g, ''))
+    .filter((word) => word && !ignored.has(word))
+
+  if (words.length === 1 && words[0].length <= 8) return `TH-${words[0]}`
+
+  const acronym = words
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 6)
+
+  return acronym ? `TH-${acronym}` : 'TH STAFF'
 }
 
 function controllerIdentity(user: AuthUser) {
@@ -49,20 +77,24 @@ function controllerIdentity(user: AuthUser) {
     return {
       displayName: `${user.name} · ${user.vid}`,
       tooltip: `${user.name} · VID ${user.vid}`,
-      positions,
     }
   }
 
+  const apiCodes = [...new Set((user.staffPositionCodes ?? []).map((code) => code.trim().toUpperCase()).filter(Boolean))]
+  const compactPositions = apiCodes.length ? apiCodes : positions.map(compactStaffPosition)
+
   let positionLabel = 'TH STAFF'
-  if (positions.length === 1) positionLabel = positions[0]
-  if (positions.length === 2) positionLabel = positions.join(' / ')
-  if (positions.length > 2) positionLabel = `${positions.slice(0, 2).join(' / ')} +${positions.length - 2}`
+  if (compactPositions.length === 1) positionLabel = compactPositions[0]
+  if (compactPositions.length === 2) {
+    const joined = compactPositions.join(' / ')
+    positionLabel = joined.length <= 24 ? joined : 'TH STAFF · 2 roles'
+  }
+  if (compactPositions.length > 2) positionLabel = `TH STAFF · ${compactPositions.length} roles`
 
   const positionDetail = positions.length ? positions.join(' · ') : 'Thailand Division Staff'
   return {
     displayName: `${positionLabel} · ${user.vid}`,
     tooltip: `${user.name} · VID ${user.vid} · ${positionDetail}`,
-    positions,
   }
 }
 
@@ -98,7 +130,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           tooltip: identity.tooltip,
           name: payload.user.name,
           isThailandStaff: payload.user.isThailandStaff,
-          staffPositions: identity.positions,
+          staffPositions: payload.user.staffPositions,
         })
         document.documentElement.dataset.authRole = payload.user.role
         document.documentElement.dataset.authVid = payload.user.vid
@@ -134,7 +166,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       <main className="auth-page">
         <section className="auth-card">
           <div className="auth-eyebrow">THAILAND APPROACH TOOLS</div>
-          <h1>BKK TMA Arrival Sequencing</h1>
+          <h1>Bangkok FIR Arrival Sequencing</h1>
           <p className="auth-copy">Sign in with your IVAO account to open the shared arrival sequencing workspace.</p>
           {error && <div className="auth-error">{error}</div>}
           <a className="auth-login-button" href="/api/auth/login">Sign in with IVAO</a>
