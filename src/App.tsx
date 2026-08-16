@@ -545,7 +545,7 @@ function App() {
       aircraftType: flight.aircraft,
       departure: flight.departure,
       refFix,
-      eto: isoFromClock(session.service_date, eto),
+      eto: isoFromClock(session.service_date, eto, new Date().toISOString()),
     })
   }
 
