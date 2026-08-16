@@ -1,0 +1,70 @@
+.auth-controller-summary {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.auth-controller-summary:hover,
+.auth-controller-profile[open] .auth-controller-summary {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.auth-controller-label-wrap {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 3px !important;
+  min-width: max-content !important;
+  line-height: 1.05 !important;
+}
+
+.auth-controller-label-primary {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  color: #17223d !important;
+  font-size: 12px !important;
+  font-weight: 850 !important;
+  letter-spacing: -.01em;
+}
+
+.auth-controller-meta-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.auth-controller-label-secondary {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  color: #748198 !important;
+  font-size: 10px !important;
+  font-weight: 750 !important;
+}
+
+.auth-controller-chevron {
+  display: inline-block !important;
+  margin: 0 !important;
+  color: #748198 !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+}
+
+.auth-controller-summary:hover .auth-controller-label-primary,
+.auth-controller-profile[open] .auth-controller-label-primary {
+  color: #3157c9 !important;
+}
