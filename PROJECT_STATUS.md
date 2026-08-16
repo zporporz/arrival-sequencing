@@ -19,6 +19,8 @@ Last reviewed: 2026-08-16
 - Session detail includes stored arrivals, statistics and CSV export.
 - Live sequencing core resolves the selected Published airport + flow + runway configuration dynamically from Admin master data.
 - Session lookup/creation, timing lookup, realtime presence, header context and workspace navigation all follow the selected live workspace.
+- Live sequence writes are server-side only through authenticated Cloudflare API routes.
+- Browser Supabase access is read/realtime only for `arrivals` and `sequence_sessions`; direct INSERT/UPDATE/DELETE grants and RLS policies are removed.
 - VTBD RWY 21L/21R is currently the only Published workspace with Timing Active.
 - VTBD RWY 21 timing data is linked to its runway configuration and remains marked provisional unless explicitly verified.
 
@@ -57,6 +59,21 @@ The live App now:
 
 The old DOM-based workspace selector has been removed from runtime and its source file deleted. `flowSelector.css` remains because the React workspace navigation reuses those styles.
 
+## Security boundary
+
+Completed for v1 live writes.
+
+- IVAO login is stored in an HMAC-signed, HttpOnly, SameSite cookie.
+- `/api/sequence/*` requires a valid IVAO session before any live write is accepted.
+- Session creation validates that the requested airport and runway configuration are Active + Published.
+- Arrival create/update/delete validates that the target sequence session is ACTIVE and not archived.
+- Editable arrival fields and statuses are allow-listed server-side.
+- Actor VID is stamped from the signed server session rather than trusted browser text.
+- Cloudflare uses the Supabase server secret/service-role key for live writes.
+- Browser roles keep SELECT access required for realtime and shared reads, but direct INSERT/UPDATE/DELETE access to `arrivals` and `sequence_sessions` is revoked.
+- Staff Admin routes remain protected separately by Thailand Division staff middleware.
+- Staff diagnostic endpoint: `/api/admin/health`.
+
 ## Data safety
 
 - Airport/runway/STAR records use Archive/Restore rather than destructive deletion.
@@ -75,7 +92,7 @@ These items are intentionally not fabricated or auto-enabled:
 2. VTBS nominal timing datasets.
 3. Automated AIP/STAR import and source reconciliation.
 4. Fine-grained staff roles (view/edit/publish permissions) beyond Thailand Division staff access.
-5. Additional security hardening of the prototype browser-side Supabase RLS policies before treating the application as a controlled production service.
+5. Further product-level hardening such as rate limiting, CSRF tokens for state-changing API calls, and formal operational authorization if the tool is ever promoted beyond training/prototype use.
 
 ## Deployment
 
@@ -92,4 +109,5 @@ Before declaring a new live workspace ready, verify:
 5. STAR records are present only when the aerodrome/procedure actually has STARs.
 6. The selected workspace opens with the correct airport/flow in the URL and creates/loads the matching session.
 7. Add Flight is enabled only when active timing records are available.
-8. GitHub Build check is green.
+8. `/api/admin/health` reports the Published Timing Active workspaces as ready.
+9. GitHub Build check is green.
