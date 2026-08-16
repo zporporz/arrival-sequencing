@@ -49,6 +49,7 @@ function controllerIdentity(user: AuthUser) {
     return {
       displayName: `${user.name} · ${user.vid}`,
       tooltip: `${user.name} · VID ${user.vid}`,
+      positions,
     }
   }
 
@@ -61,6 +62,7 @@ function controllerIdentity(user: AuthUser) {
   return {
     displayName: `${positionLabel} · ${user.vid}`,
     tooltip: `${user.name} · VID ${user.vid} · ${positionDetail}`,
+    positions,
   }
 }
 
@@ -94,6 +96,9 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           vid: payload.user.vid,
           displayName: identity.displayName,
           tooltip: identity.tooltip,
+          name: payload.user.name,
+          isThailandStaff: payload.user.isThailandStaff,
+          staffPositions: identity.positions,
         })
         document.documentElement.dataset.authRole = payload.user.role
         document.documentElement.dataset.authVid = payload.user.vid
