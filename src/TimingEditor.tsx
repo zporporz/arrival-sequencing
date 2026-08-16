@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-type Airport = { id: string; icao: string; name: string }
+type Airport = { id: string; icao: string; name: string; active: boolean }
 type RunwayConfig = { id: string; airport_id: string; flow: string; label: string; timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'; active: boolean }
 export type FixTiming = {
   id: number
