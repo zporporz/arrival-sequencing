@@ -5,6 +5,19 @@ const SPACING_CLASS = 'spacing-gap-cell'
 const ORDER_CLASS = 'order-conflict-cell'
 const BADGE_CLASS = 'spacing-warning-badge'
 
+type SpacingItem = {
+  input: HTMLInputElement
+  minutes: number
+  sequence: string
+  callsign: string
+}
+
+type Conflict = {
+  gapMinutes: number
+  partner: SpacingItem
+  minimumClock: string
+}
+
 function parseClock(value: string) {
   const match = value.match(/^([01]\d|2[0-3]):([0-5]\d)$/)
   if (!match) return null
@@ -16,6 +29,15 @@ function formatClock(totalMinutes: number) {
   const hours = Math.floor(normalized / 60)
   const minutes = normalized % 60
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function rowMeta(input: HTMLInputElement) {
+  const row = input.closest('tr')
+  const sequence = row?.querySelector<HTMLElement>('.seq-cell')?.textContent?.trim() || '?'
+  const callsign = row?.querySelector<HTMLInputElement>('td:nth-child(2) input')?.value.trim()
+    || row?.querySelector<HTMLElement>('td:nth-child(2)')?.textContent?.trim()
+    || 'FLIGHT'
+  return { sequence, callsign }
 }
 
 function clearConflict(input: HTMLInputElement) {
@@ -33,14 +55,20 @@ function isActiveForSpacing(input: HTMLInputElement) {
   return status !== 'LANDED' && status !== 'CANCELLED'
 }
 
-function applySpacingConflict(input: HTMLInputElement, gapMinutes: number, minimumClock: string) {
+function applySpacingConflict(input: HTMLInputElement, conflict: Conflict) {
   const cell = input.closest('td')
   if (!cell) return
 
-  const warningLabel = `⚠ SPACING · GAP ${gapMinutes}m · MIN ${minimumClock}`
+  const { partner, gapMinutes, minimumClock } = conflict
+  const relationship = gapMinutes === 0 ? 'SAME CLDT' : `GAP ${gapMinutes}m`
+  const warningLabel = `↔ SEQ ${partner.sequence} ${partner.callsign} · ${relationship}`
+  const title = gapMinutes === 0
+    ? `Same CLDT as SEQ ${partner.sequence} ${partner.callsign}. Adjust the landing plan as required.`
+    : `${gapMinutes}-minute CLDT gap with SEQ ${partner.sequence} ${partner.callsign}. Planning target is ${TARGET_GAP_MINUTES} minutes; earliest target from the earlier flight is ${minimumClock}.`
+
   cell.classList.add(CONFLICT_CLASS, SPACING_CLASS)
   cell.setAttribute('data-spacing-warning', warningLabel)
-  cell.setAttribute('title', `${warningLabel} — below the ${TARGET_GAP_MINUTES}-minute planning target, not a universal separation minimum.`)
+  cell.setAttribute('title', title)
   cell.style.position = 'relative'
 
   let badge = cell.querySelector<HTMLSpanElement>(`.${BADGE_CLASS}`)
@@ -52,30 +80,58 @@ function applySpacingConflict(input: HTMLInputElement, gapMinutes: number, minim
   badge.textContent = warningLabel
 }
 
+function setNearestConflict(
+  conflicts: Map<HTMLInputElement, Conflict>,
+  item: SpacingItem,
+  partner: SpacingItem,
+  gapMinutes: number,
+  minimumClock: string,
+) {
+  const existing = conflicts.get(item.input)
+  if (existing && existing.gapMinutes <= gapMinutes) return
+  conflicts.set(item.input, { gapMinutes, partner, minimumClock })
+}
+
 function recalculateSpacing() {
   const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(CLDT_SELECTOR))
 
   for (const input of inputs) clearConflict(input)
 
-  const ordered = inputs
-    .filter(isActiveForSpacing)
-    .map((input) => ({ input, minutes: parseClock(input.value.trim()) }))
-    .filter((item): item is { input: HTMLInputElement; minutes: number } => item.minutes !== null)
-    .sort((a, b) => a.minutes - b.minutes)
+  // Rows are already ordered by the database sequence (which follows the full CLDT timestamp).
+  // Preserve that order instead of sorting only by HH:MM, then unwrap midnight so 23:59 → 00:00
+  // is treated as a one-minute gap rather than almost 24 hours apart.
+  const ordered: SpacingItem[] = []
+  let previousUnwrapped: number | null = null
+
+  for (const input of inputs.filter(isActiveForSpacing)) {
+    const rawMinutes = parseClock(input.value.trim())
+    if (rawMinutes === null) continue
+
+    let minutes = rawMinutes
+    if (previousUnwrapped !== null) {
+      while (minutes < previousUnwrapped - 720) minutes += 1440
+    }
+
+    const meta = rowMeta(input)
+    ordered.push({ input, minutes, sequence: meta.sequence, callsign: meta.callsign })
+    previousUnwrapped = minutes
+  }
+
+  const conflicts = new Map<HTMLInputElement, Conflict>()
 
   for (let index = 1; index < ordered.length; index += 1) {
     const previous = ordered[index - 1]
     const current = ordered[index]
     const gapMinutes = current.minutes - previous.minutes
 
-    if (gapMinutes < TARGET_GAP_MINUTES) {
-      applySpacingConflict(
-        current.input,
-        gapMinutes,
-        formatClock(previous.minutes + TARGET_GAP_MINUTES),
-      )
+    if (gapMinutes >= 0 && gapMinutes < TARGET_GAP_MINUTES) {
+      const minimumClock = formatClock(previous.minutes + TARGET_GAP_MINUTES)
+      setNearestConflict(conflicts, current, previous, gapMinutes, minimumClock)
+      setNearestConflict(conflicts, previous, current, gapMinutes, minimumClock)
     }
   }
+
+  for (const [input, conflict] of conflicts) applySpacingConflict(input, conflict)
 }
 
 export function installSpacingGuard() {
