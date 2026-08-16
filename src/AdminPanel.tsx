@@ -10,6 +10,7 @@ type Airport = {
   city: string | null
   fir: string
   active: boolean
+  published: boolean
   archived_at: string | null
 }
 
@@ -20,6 +21,7 @@ type RunwayConfig = {
   label: string
   timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'
   active: boolean
+  published: boolean
   sort_order: number
   notes: string | null
 }
@@ -79,6 +81,12 @@ async function adminRequest(body?: Record<string, unknown>) {
 
 function fmtTime(value: string) {
   return new Date(value).toLocaleString('en-GB', { hour12: false, timeZone: 'UTC' }) + ' UTC'
+}
+
+function publishState(active: boolean, published: boolean) {
+  if (!active) return { label: 'ARCHIVED', className: 'archived' }
+  if (published) return { label: 'PUBLISHED', className: 'published' }
+  return { label: 'NOT PUBLISHED', className: 'draft' }
 }
 
 export default function AdminPanel() {
@@ -152,8 +160,8 @@ export default function AdminPanel() {
         {error && <div className="admin-error"><strong>Admin:</strong> {error}</div>}
 
         <section className="admin-overview">
-          <article><span>Airports</span><strong>{data.airports.length}</strong><small>{data.airports.filter((x) => x.active).length} active</small></article>
-          <article><span>Runway configs</span><strong>{data.runwayConfigs.length}</strong><small>{data.runwayConfigs.filter((x) => x.timing_status === 'ACTIVE').length} timing active</small></article>
+          <article><span>Airports</span><strong>{data.airports.length}</strong><small>{data.airports.filter((x) => x.active && x.published).length} published</small></article>
+          <article><span>Runway configs</span><strong>{data.runwayConfigs.length}</strong><small>{data.runwayConfigs.filter((x) => x.active && x.published).length} published</small></article>
           <article><span>STAR records</span><strong>{data.starProcedures.length}</strong><small>Optional per airport</small></article>
           <article><span>History revisions</span><strong>{data.history.length}</strong><small>Latest 150 loaded</small></article>
         </section>
@@ -168,16 +176,17 @@ export default function AdminPanel() {
                 if (!icao) return
                 const name = window.prompt('Airport name')?.trim()
                 if (!name) return
-                void act({ action: 'airport.create', icao, name, fir: 'BANGKOK' })
+                void act({ action: 'airport.create', icao, name, fir: 'BANGKOK', published: false })
               }} disabled={saving}>+ Add airport</button></div>
               <div className="admin-airport-list">
-                {data.airports.map((airport) => (
-                  <button key={airport.id} className={`admin-airport-row ${selectedAirportId === airport.id ? 'selected' : ''}`} onClick={() => setSelectedAirportId(airport.id)}>
+                {data.airports.map((airport) => {
+                  const state = publishState(airport.active, airport.published)
+                  return <button key={airport.id} className={`admin-airport-row ${selectedAirportId === airport.id ? 'selected' : ''}`} onClick={() => setSelectedAirportId(airport.id)}>
                     <span className="airport-code">{airport.icao}</span>
                     <span className="airport-copy"><strong>{airport.name}</strong><small>{airport.city || '—'} · {airport.fir} FIR</small></span>
-                    <span className={`admin-state ${airport.active ? 'live' : 'archived'}`}>{airport.active ? 'ACTIVE' : 'ARCHIVED'}</span>
+                    <span className={`admin-state ${state.className}`}>{state.label}</span>
                   </button>
-                ))}
+                })}
               </div>
             </div>
 
@@ -185,7 +194,10 @@ export default function AdminPanel() {
               {selectedAirport ? <>
                 <div className="admin-card-heading">
                   <div><span className="admin-label">{selectedAirport.icao}</span><h2>{selectedAirport.name}</h2><p>{selectedAirport.city || 'No city set'} · {selectedAirport.fir} FIR</p></div>
-                  <button className={selectedAirport.active ? 'danger-soft' : ''} onClick={() => void act({ action: 'airport.update', id: selectedAirport.id, active: !selectedAirport.active })} disabled={saving}>{selectedAirport.active ? 'Archive airport' : 'Restore airport'}</button>
+                  <div className="admin-publish-actions">
+                    {selectedAirport.active && <button className={selectedAirport.published ? 'unpublish-soft' : 'publish-soft'} onClick={() => void act({ action: 'airport.update', id: selectedAirport.id, published: !selectedAirport.published })} disabled={saving}>{selectedAirport.published ? 'Unpublish' : 'Publish'}</button>}
+                    <button className={selectedAirport.active ? 'danger-soft' : 'restore-soft'} onClick={() => void act({ action: 'airport.update', id: selectedAirport.id, active: !selectedAirport.active })} disabled={saving}>{selectedAirport.active ? 'Archive airport' : 'Restore airport'}</button>
+                  </div>
                 </div>
 
                 <div className="admin-section-title"><div><span className="admin-label">RUNWAY CONFIGURATIONS</span><h3>{selectedRunways.length} configured</h3></div><button onClick={() => {
@@ -193,19 +205,23 @@ export default function AdminPanel() {
                   if (!flow) return
                   const label = window.prompt('Runway label (example: 21L / 21R)')?.trim()
                   if (!label) return
-                  void act({ action: 'runway.create', airportId: selectedAirport.id, flow, label, timingStatus: 'PENDING', sortOrder: selectedRunways.length * 10 + 10 })
+                  void act({ action: 'runway.create', airportId: selectedAirport.id, flow, label, timingStatus: 'PENDING', published: false, sortOrder: selectedRunways.length * 10 + 10 })
                 }} disabled={saving}>+ Add configuration</button></div>
 
                 <div className="runway-config-list">
-                  {selectedRunways.length === 0 ? <div className="admin-empty">No runway configurations. Add one to create a sequencing workspace.</div> : selectedRunways.map((runway) => (
-                    <div className="runway-config-row" key={runway.id}>
-                      <div><strong>{runway.label}</strong><small>flow: {runway.flow}</small></div>
+                  {selectedRunways.length === 0 ? <div className="admin-empty">No runway configurations. Add one to create a sequencing workspace.</div> : selectedRunways.map((runway) => {
+                    const state = publishState(runway.active, runway.published)
+                    return <div className="runway-config-row" key={runway.id}>
+                      <div><strong>{runway.label}</strong><small>flow: {runway.flow} · <span className={`inline-publish-state ${state.className}`}>{state.label}</span></small></div>
                       <select value={runway.timing_status} onChange={(event) => void act({ action: 'runway.update', id: runway.id, timingStatus: event.target.value })} disabled={saving}>
                         <option value="ACTIVE">TIMING ACTIVE</option><option value="PENDING">TIMING PENDING</option><option value="DISABLED">TIMING DISABLED</option>
                       </select>
-                      <button className={runway.active ? 'danger-link' : 'restore-link'} onClick={() => void act({ action: 'runway.update', id: runway.id, active: !runway.active })} disabled={saving}>{runway.active ? 'Archive' : 'Restore'}</button>
+                      <div className="runway-actions">
+                        {runway.active && <button className={runway.published ? 'unpublish-link' : 'publish-link'} onClick={() => void act({ action: 'runway.update', id: runway.id, published: !runway.published })} disabled={saving}>{runway.published ? 'Unpublish' : 'Publish'}</button>}
+                        <button className={runway.active ? 'danger-link' : 'restore-link'} onClick={() => void act({ action: 'runway.update', id: runway.id, active: !runway.active })} disabled={saving}>{runway.active ? 'Archive' : 'Restore'}</button>
+                      </div>
                     </div>
-                  ))}
+                  })}
                 </div>
               </> : <div className="admin-empty">Select an airport.</div>}
             </div>
