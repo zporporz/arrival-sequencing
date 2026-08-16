@@ -9,12 +9,12 @@ function makeTextElement(tag: string, className: string, text: string) {
   return element
 }
 
-function splitDisplayName(displayName: string, vid: string) {
+function staffRoleLabel(displayName: string, vid: string, isThailandStaff?: boolean) {
+  if (!isThailandStaff) return ''
   const suffix = ` · ${vid}`
-  if (displayName.endsWith(suffix)) {
-    return { primary: displayName.slice(0, -suffix.length), secondary: `VID ${vid}` }
-  }
-  return { primary: displayName, secondary: `VID ${vid}` }
+  return displayName.endsWith(suffix)
+    ? displayName.slice(0, -suffix.length)
+    : displayName
 }
 
 function buildProfile() {
@@ -30,13 +30,16 @@ function buildProfile() {
   const actions = input.parentElement
   if (!actions) return
 
-  const display = splitDisplayName(identity.displayName, identity.vid)
+  const fullName = identity.name || `VID ${identity.vid}`
+  const roles = staffRoleLabel(identity.displayName, identity.vid, identity.isThailandStaff)
+  const meta = roles ? `${roles} · ${identity.vid}` : `${identity.vid}`
+
   let details = actions.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
   if (details) {
-    const primary = details.querySelector<HTMLElement>('.auth-controller-label-primary')
+    const name = details.querySelector<HTMLElement>('.auth-controller-label-primary')
     const secondary = details.querySelector<HTMLElement>('.auth-controller-label-secondary')
-    if (primary) primary.textContent = display.primary
-    if (secondary) secondary.textContent = display.secondary
+    if (name) name.textContent = fullName
+    if (secondary) secondary.textContent = meta
     details.title = identity.tooltip
     return
   }
@@ -49,19 +52,17 @@ function buildProfile() {
   summary.className = 'auth-controller-summary'
   summary.setAttribute('aria-label', 'Open IVAO account menu')
 
-  const avatar = makeTextElement(
-    'span',
-    'auth-controller-avatar',
-    identity.isThailandStaff ? 'TH' : (identity.name || identity.vid).slice(0, 2).toUpperCase(),
-  )
-  summary.appendChild(avatar)
-
   const labelWrap = document.createElement('span')
   labelWrap.className = 'auth-controller-label-wrap'
-  labelWrap.appendChild(makeTextElement('span', 'auth-controller-label-primary', display.primary))
-  labelWrap.appendChild(makeTextElement('span', 'auth-controller-label-secondary', display.secondary))
+  labelWrap.appendChild(makeTextElement('span', 'auth-controller-label-primary', fullName))
+
+  const metaRow = document.createElement('span')
+  metaRow.className = 'auth-controller-meta-row'
+  metaRow.appendChild(makeTextElement('span', 'auth-controller-label-secondary', meta))
+  metaRow.appendChild(makeTextElement('span', 'auth-controller-chevron', '▾'))
+  labelWrap.appendChild(metaRow)
+
   summary.appendChild(labelWrap)
-  summary.appendChild(makeTextElement('span', 'auth-controller-chevron', '▾'))
   details.appendChild(summary)
 
   const menu = document.createElement('div')
@@ -69,7 +70,7 @@ function buildProfile() {
 
   const heading = document.createElement('div')
   heading.className = 'auth-controller-heading'
-  heading.appendChild(makeTextElement('strong', 'auth-controller-name', identity.name || `VID ${identity.vid}`))
+  heading.appendChild(makeTextElement('strong', 'auth-controller-name', fullName))
   heading.appendChild(makeTextElement('span', 'auth-controller-vid', `VID ${identity.vid}`))
   menu.appendChild(heading)
 
