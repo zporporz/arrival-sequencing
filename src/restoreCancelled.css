@@ -1,0 +1,21 @@
+.quick-cancel-button.hidden-for-restore {
+  display: none !important;
+}
+
+.restore-cancelled-button {
+  border: 1px solid #bfd0f5;
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #f5f8ff;
+  color: #2457d6;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.restore-cancelled-button:hover {
+  border-color: #9db7ef;
+  background: #edf3ff;
+}
