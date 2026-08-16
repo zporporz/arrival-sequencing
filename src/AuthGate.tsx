@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { setAuthenticatedVid } from './browserIdentity'
 
 export type AuthUser = {
@@ -20,6 +20,14 @@ export type AuthUser = {
 type AuthResponse = {
   authenticated: boolean
   user?: AuthUser
+}
+
+const AuthUserContext = createContext<AuthUser | null>(null)
+
+export function useAuthUser() {
+  const user = useContext(AuthUserContext)
+  if (!user) throw new Error('useAuthUser must be used inside an authenticated AuthGate')
+  return user
 }
 
 function loginMessage() {
@@ -101,13 +109,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="auth-root">
-      {children}
-      <div className="auth-session-chip" title={user.staffPositions.join(', ') || user.name}>
-        {user.isThailandStaff && <span className="auth-staff-badge">TH STAFF</span>}
-        <span className="auth-session-name">{user.vid}</span>
-        <a href="/api/auth/logout">Sign out</a>
-      </div>
-    </div>
+    <AuthUserContext.Provider value={user}>
+      <div className="auth-root">{children}</div>
+    </AuthUserContext.Provider>
   )
 }
