@@ -4,28 +4,49 @@
 .ivao-traffic-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  border: 1px solid #dfe5ee;
+  gap: 8px;
+  border: 1px solid #8fb2f2;
   border-radius: 10px;
-  padding: 9px 11px;
-  background: #fff;
-  color: #26344c;
+  padding: 9px 12px;
+  background: #eef5ff;
+  color: #174f9f;
+  box-shadow: 0 4px 14px rgba(45,105,207,.10);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 850;
   cursor: pointer;
   white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-.ivao-traffic-trigger:hover { border-color: #a9bfe9; background: #f8fbff; }
+.ivao-traffic-trigger::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #20a765;
+  box-shadow: 0 0 0 3px rgba(32,167,101,.12);
+  flex: 0 0 auto;
+}
+.ivao-traffic-trigger:hover {
+  border-color: #5f91e8;
+  background: #e4efff;
+  box-shadow: 0 6px 18px rgba(45,105,207,.16);
+}
+.ivao-traffic-menu[open] .ivao-traffic-trigger {
+  border-color: #2d69cf;
+  background: #dceaff;
+  color: #174985;
+}
 .ivao-traffic-trigger b {
-  min-width: 20px;
+  min-width: 22px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: 999px;
   display: inline-grid;
   place-items: center;
-  background: #eaf1ff;
-  color: #2d69cf;
+  background: #2d69cf;
+  color: #fff;
   font-size: 9px;
+  box-shadow: 0 2px 7px rgba(45,105,207,.22);
 }
 .ivao-traffic-popover {
   position: absolute;

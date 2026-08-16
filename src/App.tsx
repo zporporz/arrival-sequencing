@@ -683,7 +683,6 @@ function App() {
               <p>Click editable cells. Changes autosave and appear on every connected screen.</p>
             </div>
             <div className="toolbar-controls react-workspace-actions">
-              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>
               {workspace && <IvaoTrafficPanel
                 airport={workspace.airport}
                 fixes={fixes.map((fix) => fix.fix)}
@@ -691,6 +690,7 @@ function App() {
                 disabled={!session || !workspace.timingReady || fixes.length === 0}
                 onAdd={addIvaoFlight}
               />}
+              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
           </div>
