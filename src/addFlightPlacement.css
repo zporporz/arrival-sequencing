@@ -1,0 +1,36 @@
+.topbar .primary-button.add-flight-source-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+}
+
+.workspace-add-flight-button {
+  position: fixed !important;
+  z-index: 40 !important;
+  width: auto !important;
+  min-width: 104px !important;
+  height: 36px !important;
+  padding: 0 16px !important;
+  white-space: nowrap !important;
+  box-shadow: 0 6px 16px rgba(47, 87, 207, .18) !important;
+}
+
+.workspace-add-flight-button[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .workspace-add-flight-button {
+    min-width: 94px !important;
+    padding: 0 12px !important;
+  }
+}
