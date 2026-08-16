@@ -1,0 +1,29 @@
+.aip-importer { overflow: hidden; }
+.aip-import-heading { align-items: flex-start; }
+.aip-import-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.aip-hidden-file { display: none; }
+.aip-source-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: #e7edf7; border-bottom: 1px solid #e3e9f2; }
+.aip-source-strip > div { background: #f8faff; padding: 12px 18px; display: flex; flex-direction: column; gap: 4px; }
+.aip-source-strip span { color: #8190aa; font-size: 8px; font-weight: 900; letter-spacing: .11em; }
+.aip-source-strip strong { color: #1d2b48; font-size: 12px; }
+.aip-message { margin: 14px 18px 0; padding: 10px 12px; border: 1px solid #cbd9f6; border-radius: 9px; background: #f5f8ff; color: #3152a3; font-size: 12px; font-weight: 700; }
+.aip-diff-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid #e8edf4; }
+.aip-diff-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.aip-diff-filters button { padding: 7px 9px; font-size: 9px; font-weight: 900; letter-spacing: .05em; }
+.aip-diff-filters button.active { border-color: #9bb1f3; background: #f1f5ff; color: #3157d5; }
+.aip-import-table th { white-space: nowrap; }
+.aip-import-table td { vertical-align: middle; }
+.aip-import-table td small { display: block; margin-top: 3px; color: #8794a9; font-size: 9px; }
+.aip-import-table td input[type='text'], .aip-import-table td input:not([type]) { min-width: 90px; }
+.aip-import-table input[type='date'] { min-width: 132px; }
+.aip-status { display: inline-flex; align-items: center; justify-content: center; min-width: 66px; padding: 4px 7px; border-radius: 999px; font-size: 8px; font-weight: 900; letter-spacing: .06em; }
+.aip-status.new { background: #ecf8ef; color: #397b4d; }
+.aip-status.changed { background: #fff4df; color: #94641f; }
+.aip-status.same { background: #eef2f7; color: #748095; }
+.aip-status.review { background: #fff0ed; color: #a84f42; }
+.aip-status.unmapped { background: #f3edff; color: #7353a7; }
+.aip-row.aip-unmapped td, .aip-row.aip-review td { background: #fffcfb; }
+@media (max-width: 900px) {
+  .aip-source-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aip-diff-toolbar { align-items: flex-start; flex-direction: column; }
+}
