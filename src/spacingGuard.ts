@@ -16,7 +16,6 @@ type SpacingItem = {
 type Conflict = {
   gapMinutes: number
   partner: SpacingItem
-  minimumClock: string
 }
 
 function parseClock(value: string) {
@@ -25,11 +24,9 @@ function parseClock(value: string) {
   return Number(match[1]) * 60 + Number(match[2])
 }
 
-function formatClock(totalMinutes: number) {
-  const normalized = ((totalMinutes % 1440) + 1440) % 1440
-  const hours = Math.floor(normalized / 60)
-  const minutes = normalized % 60
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+function circularGap(leftMinutes: number, rightMinutes: number) {
+  const direct = Math.abs(leftMinutes - rightMinutes)
+  return Math.min(direct, 1440 - direct)
 }
 
 function rowMeta(input: HTMLInputElement) {
@@ -60,12 +57,12 @@ function applySpacingConflict(input: HTMLInputElement, conflict: Conflict) {
   const cell = input.closest('td')
   if (!cell) return
 
-  const { partner, gapMinutes, minimumClock } = conflict
+  const { partner, gapMinutes } = conflict
   const relationship = gapMinutes === 0 ? 'SAME CLDT' : `GAP ${gapMinutes}m`
   const warningLabel = `↔ SEQ ${partner.sequence} ${partner.callsign} · ${relationship}`
   const title = gapMinutes === 0
     ? `Same CLDT as SEQ ${partner.sequence} ${partner.callsign}. Adjust the landing plan as required.`
-    : `${gapMinutes}-minute CLDT gap with SEQ ${partner.sequence} ${partner.callsign}. Planning target is ${TARGET_GAP_MINUTES} minutes; earliest target from the earlier flight is ${minimumClock}.`
+    : `${gapMinutes}-minute CLDT gap with SEQ ${partner.sequence} ${partner.callsign}. This is below the ${TARGET_GAP_MINUTES}-minute planning target.`
 
   cell.classList.add(CONFLICT_CLASS, SPACING_CLASS)
   if (gapMinutes === 0) cell.classList.add(EXACT_CLASS)
@@ -87,11 +84,10 @@ function setNearestConflict(
   item: SpacingItem,
   partner: SpacingItem,
   gapMinutes: number,
-  minimumClock: string,
 ) {
   const existing = conflicts.get(item.input)
   if (existing && existing.gapMinutes <= gapMinutes) return
-  conflicts.set(item.input, { gapMinutes, partner, minimumClock })
+  conflicts.set(item.input, { gapMinutes, partner })
 }
 
 function recalculateSpacing() {
@@ -99,37 +95,32 @@ function recalculateSpacing() {
 
   for (const input of inputs) clearConflict(input)
 
-  // Rows are already ordered by the database sequence (which follows the full CLDT timestamp).
-  // Preserve that order instead of sorting only by HH:MM, then unwrap midnight so 23:59 → 00:00
-  // is treated as a one-minute gap rather than almost 24 hours apart.
-  const ordered: SpacingItem[] = []
-  let previousUnwrapped: number | null = null
-
-  for (const input of inputs.filter(isActiveForSpacing)) {
-    const rawMinutes = parseClock(input.value.trim())
-    if (rawMinutes === null) continue
-
-    let minutes = rawMinutes
-    if (previousUnwrapped !== null) {
-      while (minutes < previousUnwrapped - 720) minutes += 1440
-    }
-
-    const meta = rowMeta(input)
-    ordered.push({ input, minutes, sequence: meta.sequence, callsign: meta.callsign })
-    previousUnwrapped = minutes
-  }
+  const activeItems: SpacingItem[] = inputs
+    .filter(isActiveForSpacing)
+    .map((input) => {
+      const minutes = parseClock(input.value.trim())
+      if (minutes === null) return null
+      const meta = rowMeta(input)
+      return { input, minutes, sequence: meta.sequence, callsign: meta.callsign }
+    })
+    .filter((item): item is SpacingItem => item !== null)
 
   const conflicts = new Map<HTMLInputElement, Conflict>()
 
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1]
-    const current = ordered[index]
-    const gapMinutes = current.minutes - previous.minutes
+  // Compare every active flight against every other active flight. CLDT sequence numbers
+  // can temporarily place a later row between two flights with the same time, so only
+  // checking adjacent table rows misses real conflicts such as SEQ 1 03:14 / SEQ 3 03:14.
+  // circularGap also treats 23:59 / 00:00 as a one-minute gap.
+  for (let leftIndex = 0; leftIndex < activeItems.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < activeItems.length; rightIndex += 1) {
+      const left = activeItems[leftIndex]
+      const right = activeItems[rightIndex]
+      const gapMinutes = circularGap(left.minutes, right.minutes)
 
-    if (gapMinutes >= 0 && gapMinutes < TARGET_GAP_MINUTES) {
-      const minimumClock = formatClock(previous.minutes + TARGET_GAP_MINUTES)
-      setNearestConflict(conflicts, current, previous, gapMinutes, minimumClock)
-      setNearestConflict(conflicts, previous, current, gapMinutes, minimumClock)
+      if (gapMinutes < TARGET_GAP_MINUTES) {
+        setNearestConflict(conflicts, left, right, gapMinutes)
+        setNearestConflict(conflicts, right, left, gapMinutes)
+      }
     }
   }
 
