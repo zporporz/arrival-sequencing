@@ -65,15 +65,7 @@ async function loadUser() {
   return loadingUser
 }
 
-function renderProfile(user: AuthUser, input: HTMLInputElement) {
-  input.readOnly = true
-  input.tabIndex = -1
-  input.setAttribute('aria-hidden', 'true')
-  input.classList.add('auth-controller-source')
-
-  const actions = input.parentElement
-  if (!actions) return
-
+function renderProfile(user: AuthUser, actions: HTMLElement) {
   const role = roleLabel(user)
   let details = actions.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
 
@@ -151,10 +143,23 @@ function renderProfile(user: AuthUser, input: HTMLInputElement) {
 
 async function buildProfile() {
   const input = document.querySelector<HTMLInputElement>('input.controller-name')
-  if (!input) return
+  const existing = document.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
+
+  let actions: HTMLElement | null = existing?.parentElement ?? null
+  if (input) {
+    actions = input.parentElement
+    input.disabled = true
+    input.readOnly = true
+    input.setAttribute('aria-hidden', 'true')
+    input.style.display = 'none'
+    input.remove()
+  }
+
+  if (!actions) return
+
   const user = await loadUser()
   if (!user) return
-  renderProfile(user, input)
+  renderProfile(user, actions)
 }
 
 export function installAuthTopbar() {
