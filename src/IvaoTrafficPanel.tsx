@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './ivaoTraffic.css'
 
 type TrafficFlight = {
@@ -33,6 +33,10 @@ type TrafficPayload = {
 
 type Draft = { refFix: string; eto: string }
 
+const AUTO_REFRESH_MS = 30_000
+const IDLE_TIMEOUT_MS = 10 * 60_000
+const IDLE_CHECK_MS = 15_000
+
 const validTime = (value: string) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
 
 function suggestedFix(route: string | null, fixes: string[]) {
@@ -66,11 +70,17 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   const [adding, setAdding] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [idle, setIdle] = useState(false)
+  const lastActivityRef = useRef(Date.now())
+  const idleRef = useRef(false)
+  const refreshInFlightRef = useRef(false)
 
   const existing = useMemo(() => new Set(existingCallsigns.map((item) => item.toUpperCase())), [existingCallsigns])
 
   const refresh = useCallback(async () => {
-    if (!airport) return
+    if (!airport || refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
     setLoading(true)
     setError(null)
     try {
@@ -96,15 +106,70 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
+      refreshInFlightRef.current = false
       setLoading(false)
     }
   }, [airport, fixes])
 
+  const markActivity = useCallback(() => {
+    lastActivityRef.current = Date.now()
+    if (!idleRef.current) return
+    idleRef.current = false
+    setIdle(false)
+    if (open) void refresh()
+  }, [open, refresh])
+
   useEffect(() => {
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'mousemove', 'touchstart', 'wheel']
+    for (const eventName of activityEvents) window.addEventListener(eventName, markActivity, { passive: true })
+    return () => {
+      for (const eventName of activityEvents) window.removeEventListener(eventName, markActivity)
+    }
+  }, [markActivity])
+
+  useEffect(() => {
+    if (!open) return
+
+    const autoRefreshTimer = window.setInterval(() => {
+      if (idleRef.current) return
+      if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
+        idleRef.current = true
+        setIdle(true)
+        return
+      }
+      void refresh()
+    }, AUTO_REFRESH_MS)
+
+    const idleCheckTimer = window.setInterval(() => {
+      if (idleRef.current) return
+      if (Date.now() - lastActivityRef.current >= IDLE_TIMEOUT_MS) {
+        idleRef.current = true
+        setIdle(true)
+      }
+    }, IDLE_CHECK_MS)
+
+    return () => {
+      window.clearInterval(autoRefreshTimer)
+      window.clearInterval(idleCheckTimer)
+    }
+  }, [open, refresh])
+
+  const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>) => {
+    const nextOpen = event.currentTarget.open
+    setOpen(nextOpen)
+    if (!nextOpen) return
+    lastActivityRef.current = Date.now()
+    idleRef.current = false
+    setIdle(false)
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 20000)
-    return () => window.clearInterval(timer)
-  }, [refresh])
+  }
+
+  const manualRefresh = () => {
+    lastActivityRef.current = Date.now()
+    idleRef.current = false
+    setIdle(false)
+    void refresh()
+  }
 
   const add = async (flight: TrafficFlight) => {
     const draft = drafts[flight.sessionId]
@@ -121,7 +186,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   }
 
   return (
-    <details className="ivao-traffic-menu">
+    <details className="ivao-traffic-menu" onToggle={handleToggle}>
       <summary className="ivao-traffic-trigger" title={`IVAO inbound traffic for ${airport}`}>
         IVAO Traffic <b>{flights.length}</b>
       </summary>
@@ -131,7 +196,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
             <strong>IVAO inbound · {airport}</strong>
             <span>Live network traffic. Set REF FIX and ETO before adding.</span>
           </div>
-          <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+          <button type="button" onClick={manualRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
         </div>
 
         {error && <div className="ivao-traffic-error">{error}</div>}
@@ -165,7 +230,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
 
         <div className="ivao-traffic-footer">
           <span>{fetchedAt ? `Updated ${new Date(fetchedAt).toISOString().slice(11, 19)}Z` : 'Waiting for IVAO data'}</span>
-          <span>Auto-refresh 20s</span>
+          <span>{idle ? 'Auto-refresh paused · idle 10 min' : 'Auto-refresh 30s · panel open only'}</span>
         </div>
       </div>
     </details>
