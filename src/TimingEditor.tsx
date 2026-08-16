@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 
 type Airport = { id: string; icao: string; name: string; active: boolean }
 type RunwayConfig = { id: string; airport_id: string; flow: string; label: string; timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'; active: boolean }
+type StarProcedure = {
+  id: string
+  runway_config_id: string
+  designator: string
+  entry_fix: string | null
+  effective_from: string | null
+  active: boolean
+}
 export type FixTiming = {
   id: number
   airport: string
@@ -19,17 +27,26 @@ export type FixTiming = {
 type Props = {
   airports: Airport[]
   runwayConfigs: RunwayConfig[]
+  starProcedures: StarProcedure[]
   fixTimings: FixTiming[]
   saving: boolean
   act: (body: Record<string, unknown>) => Promise<void>
 }
 
 type Draft = { minutes: string; source: string; verified: boolean; active: boolean }
+type StarTimingDraft = {
+  fix: string
+  minutes: string
+  source: string
+  effectiveFrom: string
+  designators: string[]
+}
 
-export default function TimingEditor({ airports, runwayConfigs, fixTimings, saving, act }: Props) {
+export default function TimingEditor({ airports, runwayConfigs, starProcedures, fixTimings, saving, act }: Props) {
   const [airportId, setAirportId] = useState('')
   const [runwayId, setRunwayId] = useState('')
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
+  const [starDrafts, setStarDrafts] = useState<Record<string, StarTimingDraft>>({})
 
   useEffect(() => {
     if (!airportId && airports.length) setAirportId(airports.find((a) => a.active)?.id || airports[0].id)
@@ -54,6 +71,32 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
     return fixTimings.filter((t) => t.runway_config_id === runway.id || (!t.runway_config_id && t.airport === airport?.icao && t.flow === runway.flow))
   }, [fixTimings, runway, airport])
 
+  const starFixSuggestions = useMemo(() => {
+    if (!runway) return [] as StarTimingDraft[]
+    const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
+    const grouped = new Map<string, StarTimingDraft>()
+    for (const star of starProcedures) {
+      if (star.runway_config_id !== runway.id || !star.active || !star.entry_fix) continue
+      const fix = star.entry_fix.trim().toUpperCase()
+      if (!fix || existingFixes.has(fix)) continue
+      const current = grouped.get(fix)
+      const effectiveFrom = star.effective_from || new Date().toISOString().slice(0, 10)
+      if (current) {
+        if (!current.designators.includes(star.designator)) current.designators.push(star.designator)
+        if (effectiveFrom > current.effectiveFrom) current.effectiveFrom = effectiveFrom
+      } else {
+        grouped.set(fix, {
+          fix,
+          minutes: '',
+          source: '',
+          effectiveFrom,
+          designators: [star.designator],
+        })
+      }
+    }
+    return [...grouped.values()].sort((left, right) => left.fix.localeCompare(right.fix))
+  }, [runway, timings, starProcedures])
+
   useEffect(() => {
     const next: Record<number, Draft> = {}
     for (const timing of timings) {
@@ -66,6 +109,10 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
     }
     setDrafts(next)
   }, [timings])
+
+  useEffect(() => {
+    setStarDrafts({})
+  }, [runwayId])
 
   const changed = (timing: FixTiming) => {
     const draft = drafts[timing.id]
@@ -113,6 +160,46 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
     })
   }
 
+  const syncStarFixes = () => {
+    const next: Record<string, StarTimingDraft> = {}
+    for (const suggestion of starFixSuggestions) next[suggestion.fix] = { ...suggestion, designators: [...suggestion.designators] }
+    setStarDrafts(next)
+  }
+
+  const starDraftReady = (draft: StarTimingDraft) => {
+    const minutes = Number(draft.minutes)
+    return Number.isFinite(minutes) && minutes > 0 && minutes <= 180 && draft.source.trim().length > 0
+  }
+
+  const saveStarDraft = async (draft: StarTimingDraft) => {
+    if (!airport || !runway || !starDraftReady(draft)) return
+    await act({
+      action: 'timing.create',
+      runwayConfigId: runway.id,
+      airport: airport.icao,
+      flow: runway.flow,
+      fix: draft.fix,
+      nominalMinutes: Number(draft.minutes),
+      source: draft.source.trim(),
+      verified: false,
+      active: true,
+      effectiveFrom: draft.effectiveFrom,
+    })
+    setStarDrafts((current) => {
+      const next = { ...current }
+      delete next[draft.fix]
+      return next
+    })
+  }
+
+  const saveAllStarDrafts = async () => {
+    const ready = Object.values(starDrafts).filter(starDraftReady)
+    for (const draft of ready) await saveStarDraft(draft)
+  }
+
+  const starDraftList = Object.values(starDrafts)
+  const readyStarDraftCount = starDraftList.filter(starDraftReady).length
+
   return (
     <section className="admin-card wide-card timing-editor">
       <div className="admin-card-heading timing-heading">
@@ -121,7 +208,11 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
           <h2>Reference fix timing editor</h2>
           <p>Edits here change the same master timing dataset used by new arrivals. Existing flights keep their timing snapshot.</p>
         </div>
-        <button disabled={saving || !runway} onClick={() => void addTiming()}>+ Add timing</button>
+        <div className="timing-heading-actions">
+          {starFixSuggestions.length > 0 && starDraftList.length === 0 && <button disabled={saving || !runway} onClick={syncStarFixes}>Sync reference fixes from STAR ({starFixSuggestions.length})</button>}
+          {starDraftList.length > 0 && <button className="primary-admin-action" disabled={saving || readyStarDraftCount === 0} onClick={() => void saveAllStarDrafts()}>Save ready drafts ({readyStarDraftCount})</button>}
+          <button disabled={saving || !runway} onClick={() => void addTiming()}>+ Add timing</button>
+        </div>
       </div>
 
       <div className="timing-workspace-bar">
@@ -135,7 +226,7 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
           <table className="admin-table timing-table">
             <thead><tr><th>REF FIX</th><th>NOMINAL MIN</th><th>SOURCE</th><th>VERIFIED</th><th>STATUS</th><th>EFFECTIVE</th><th /></tr></thead>
             <tbody>
-              {timings.length === 0 ? <tr><td colSpan={7} className="admin-empty-cell">No timing records for this configuration. Add one only when a planning timing is available.</td></tr> : timings.map((timing) => {
+              {timings.length === 0 && starDraftList.length === 0 ? <tr><td colSpan={7} className="admin-empty-cell">No timing records for this configuration. {starFixSuggestions.length > 0 ? `${starFixSuggestions.length} reference fixes are available from imported STAR data.` : 'Add one only when a planning timing is available.'}</td></tr> : timings.map((timing) => {
                 const draft = drafts[timing.id]
                 if (!draft) return null
                 const isChanged = changed(timing)
@@ -149,11 +240,20 @@ export default function TimingEditor({ airports, runwayConfigs, fixTimings, savi
                   <td><button className={isChanged ? 'timing-save changed' : 'timing-save'} disabled={saving || !isChanged} onClick={() => void save(timing)}>{saving && isChanged ? 'Saving…' : 'Save'}</button></td>
                 </tr>
               })}
+              {starDraftList.map((draft) => <tr key={`star-draft-${draft.fix}`} className="timing-star-draft">
+                <td><strong>{draft.fix}</strong><small>From STAR: {draft.designators.join(', ')}</small></td>
+                <td><input className="timing-minutes" type="number" min="0.1" max="180" step="0.5" placeholder="Required" value={draft.minutes} onChange={(e) => setStarDrafts((all) => ({ ...all, [draft.fix]: { ...draft, minutes: e.target.value } }))} /></td>
+                <td><input className="timing-source" placeholder="Timing source / planning reference" value={draft.source} onChange={(e) => setStarDrafts((all) => ({ ...all, [draft.fix]: { ...draft, source: e.target.value } }))} /></td>
+                <td><span className="timing-draft-state">PROVISIONAL</span></td>
+                <td><span className="timing-draft-state">DRAFT</span></td>
+                <td><input className="timing-effective-input" type="date" value={draft.effectiveFrom} onChange={(e) => setStarDrafts((all) => ({ ...all, [draft.fix]: { ...draft, effectiveFrom: e.target.value } }))} /></td>
+                <td><button className={starDraftReady(draft) ? 'timing-save changed' : 'timing-save'} disabled={saving || !starDraftReady(draft)} onClick={() => void saveStarDraft(draft)}>Save</button></td>
+              </tr>)}
             </tbody>
           </table>
         </div>
       )}
-      <div className="timing-note">Changes are audit logged with the signed-in IVAO staff identity. <strong>Verified</strong> should only be enabled after the timing source has been checked.</div>
+      <div className="timing-note">Reference-fix names may be prepared from imported STAR data, but <strong>Nominal Min still requires a planning source</strong>. Sync creates browser drafts only; no timing is written until a valid time and source are saved. <strong>Verified</strong> should only be enabled after the timing source has been checked.</div>
     </section>
   )
 }
