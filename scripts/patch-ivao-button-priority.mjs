@@ -1,0 +1,18 @@
+import fs from 'node:fs'
+
+const appPath = 'src/App.tsx'
+let app = fs.readFileSync(appPath, 'utf8')
+
+const oldBlock = `            <div className="toolbar-controls react-workspace-actions">\n              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>\n              {workspace && <IvaoTrafficPanel\n                airport={workspace.airport}\n                fixes={fixes.map((fix) => fix.fix)}\n                existingCallsigns={arrivals.map((row) => row.callsign)}\n                disabled={!session || !workspace.timingReady || fixes.length === 0}\n                onAdd={addIvaoFlight}\n              />}\n              <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />\n            </div>`
+
+const newBlock = `            <div className="toolbar-controls react-workspace-actions">\n              {workspace && <IvaoTrafficPanel\n                airport={workspace.airport}\n                fixes={fixes.map((fix) => fix.fix)}\n                existingCallsigns={arrivals.map((row) => row.callsign)}\n                disabled={!session || !workspace.timingReady || fixes.length === 0}\n                onAdd={addIvaoFlight}\n              />}\n              <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>\n              <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />\n            </div>`
+
+if (!app.includes(oldBlock)) throw new Error('Toolbar block not found')
+app = app.replace(oldBlock, newBlock)
+fs.writeFileSync(appPath, app)
+
+const cssPath = 'src/ivaoTraffic.css'
+let css = fs.readFileSync(cssPath, 'utf8')
+css = css.replace(`.ivao-traffic-trigger {\n  display: inline-flex;\n  align-items: center;\n  gap: 7px;\n  border: 1px solid #dfe5ee;\n  border-radius: 10px;\n  padding: 9px 11px;\n  background: #fff;\n  color: #26344c;\n  font-size: 11px;\n  font-weight: 800;\n  cursor: pointer;\n  white-space: nowrap;\n}\n.ivao-traffic-trigger:hover { border-color: #a9bfe9; background: #f8fbff; }\n.ivao-traffic-trigger b {\n  min-width: 20px;\n  height: 20px;\n  padding: 0 6px;\n  border-radius: 999px;\n  display: inline-grid;\n  place-items: center;\n  background: #eaf1ff;\n  color: #2d69cf;\n  font-size: 9px;\n}`,
+`.ivao-traffic-trigger {\n  display: inline-flex;\n  align-items: center;\n  gap: 8px;\n  border: 1px solid #8fb2f2;\n  border-radius: 10px;\n  padding: 9px 12px;\n  background: #eef5ff;\n  color: #174f9f;\n  box-shadow: 0 4px 14px rgba(45,105,207,.10);\n  font-size: 11px;\n  font-weight: 850;\n  cursor: pointer;\n  white-space: nowrap;\n  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;\n}\n.ivao-traffic-trigger::before {\n  content: '';\n  width: 7px;\n  height: 7px;\n  border-radius: 50%;\n  background: #20a765;\n  box-shadow: 0 0 0 3px rgba(32,167,101,.12);\n  flex: 0 0 auto;\n}\n.ivao-traffic-trigger:hover {\n  border-color: #5f91e8;\n  background: #e4efff;\n  box-shadow: 0 6px 18px rgba(45,105,207,.16);\n}\n.ivao-traffic-menu[open] .ivao-traffic-trigger {\n  border-color: #2d69cf;\n  background: #dceaff;\n  color: #174985;\n}\n.ivao-traffic-trigger b {\n  min-width: 22px;\n  height: 20px;\n  padding: 0 7px;\n  border-radius: 999px;\n  display: inline-grid;\n  place-items: center;\n  background: #2d69cf;\n  color: #fff;\n  font-size: 9px;\n  box-shadow: 0 2px 7px rgba(45,105,207,.22);\n}`)
+fs.writeFileSync(cssPath, css)
