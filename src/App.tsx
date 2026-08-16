@@ -136,6 +136,21 @@ async function sequenceApi(path: string, body: Record<string, unknown>) {
 }
 
 type EditingState = Record<string, { displayName: string }>
+type OnlineController = {
+  key: string
+  displayName: string
+  vid: string | null
+  roleLabel: string | null
+  staffCodes: string[]
+  onlineAt: string | null
+}
+
+const onlineSince = (value: string | null) => {
+  if (!value) return 'Online now'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Online now'
+  return `Since ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}Z`
+}
 
 function App() {
   const authUser = useAuthUser()
@@ -143,7 +158,7 @@ function App() {
   const [session, setSession] = useState<SequenceSession | null>(null)
   const [arrivals, setArrivals] = useState<ArrivalView[]>([])
   const [fixes, setFixes] = useState<FixTiming[]>([])
-  const [onlineControllers, setOnlineControllers] = useState<string[]>([])
+  const [onlineControllers, setOnlineControllers] = useState<OnlineController[]>([])
   const [editing, setEditing] = useState<EditingState>({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -325,12 +340,31 @@ function App() {
             },
           )
           .on('presence', { event: 'sync' }, () => {
-            const state = realtimeChannel.presenceState<{ displayName?: string }>()
-            const names = Object.values(state)
-              .flat()
-              .map((presence) => presence.displayName)
-              .filter((name): name is string => Boolean(name))
-            setOnlineControllers([...new Set(names)])
+            const state = realtimeChannel.presenceState<{
+              displayName?: string
+              vid?: string
+              roleLabel?: string
+              staffCodes?: string[]
+              onlineAt?: string
+            }>()
+            const byController = new Map<string, OnlineController>()
+            for (const presence of Object.values(state).flat()) {
+              if (!presence.displayName) continue
+              const key = presence.vid?.trim() || presence.displayName.trim().toUpperCase()
+              const current = byController.get(key)
+              const candidate: OnlineController = {
+                key,
+                displayName: presence.displayName,
+                vid: presence.vid?.trim() || null,
+                roleLabel: presence.roleLabel?.trim() || null,
+                staffCodes: Array.isArray(presence.staffCodes) ? presence.staffCodes.filter(Boolean) : [],
+                onlineAt: presence.onlineAt || null,
+              }
+              if (!current || (candidate.onlineAt && (!current.onlineAt || candidate.onlineAt < current.onlineAt))) {
+                byController.set(key, candidate)
+              }
+            }
+            setOnlineControllers([...byController.values()].sort((left, right) => left.displayName.localeCompare(right.displayName)))
           })
           .on('broadcast', { event: 'editing' }, ({ payload }) => {
             if (!payload || payload.userId === identity.id) return
@@ -348,7 +382,13 @@ function App() {
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
-              await realtimeChannel.track({ displayName: profileName, onlineAt: new Date().toISOString() })
+              await realtimeChannel.track({
+                displayName: profileName,
+                vid: authUser.vid,
+                roleLabel,
+                staffCodes,
+                onlineAt: new Date().toISOString(),
+              })
             }
           })
 
@@ -372,7 +412,7 @@ function App() {
       if (channelRef.current) void supabase.removeChannel(channelRef.current)
       channelRef.current = null
     }
-  }, [identity.id, loadFixes, profileName, queueArrivalSync, refreshArrivals])
+  }, [authUser.vid, identity.id, loadFixes, profileName, queueArrivalSync, refreshArrivals, roleLabel, staffCodes])
 
   const visibleArrivals = useMemo(() => {
     const needle = search.trim().toUpperCase()
@@ -524,12 +564,33 @@ function App() {
         <div className="topbar-actions">
           <div className="clock-card"><span>UTC</span><strong>{utcNow.toISOString().slice(11, 19)}</strong></div>
           <div className="connection-pill"><span className="live-dot" /> REALTIME</div>
-          <div className="controller-stack">
-            <span>{onlineControllers.length || 1} online</span>
-            <div className="avatar-row">
-              {onlineControllers.slice(0, 4).map((name) => <i key={name} title={name}>{name.slice(0, 2).toUpperCase()}</i>)}
+          <details className="controller-presence-menu">
+            <summary className="controller-stack" title="Show controllers in this workspace">
+              <span>{onlineControllers.length || 1} online</span>
+              <div className="avatar-row" aria-hidden="true">
+                {onlineControllers.slice(0, 4).map((controller) => <i key={controller.key} title={controller.displayName}>{controller.displayName.slice(0, 2).toUpperCase()}</i>)}
+              </div>
+            </summary>
+            <div className="controller-presence-popover">
+              <div className="controller-presence-heading">
+                <div><strong>Controllers online</strong><span>{workspace?.airport ?? 'Workspace'} · RWY {workspace?.runway ?? '—'}</span></div>
+                <b>{onlineControllers.length || 1}</b>
+              </div>
+              <div className="controller-presence-list">
+                {(onlineControllers.length ? onlineControllers : [{ key: authUser.vid, displayName: profileName, vid: authUser.vid, roleLabel, staffCodes, onlineAt: null }]).map((controller) => (
+                  <div className="controller-presence-item" key={controller.key}>
+                    <i>{controller.displayName.slice(0, 2).toUpperCase()}</i>
+                    <div className="controller-presence-identity">
+                      <strong>{controller.displayName}</strong>
+                      <span>{[controller.staffCodes.join(' / ') || controller.roleLabel, controller.vid ? `VID ${controller.vid}` : null].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <small>{onlineSince(controller.onlineAt)}</small>
+                  </div>
+                ))}
+              </div>
+              <div className="controller-presence-note">Presence is scoped to this arrival sequencing workspace.</div>
             </div>
-          </div>
+          </details>
           <details className="react-account-menu">
             <summary>
               <strong>{authUser.name}</strong>
