@@ -1,3 +1,7 @@
+.controller-name {
+  display: none !important;
+}
+
 .auth-controller-summary,
 .auth-controller-summary-exact {
   display: inline-flex !important;
