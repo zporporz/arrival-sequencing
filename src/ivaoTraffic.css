@@ -53,7 +53,7 @@
   z-index: 50;
   top: calc(100% + 10px);
   right: 0;
-  width: min(760px, calc(100vw - 70px));
+  width: min(820px, calc(100vw - 70px));
   max-height: 620px;
   overflow: auto;
   border: 1px solid #dfe5ef;
@@ -119,10 +119,26 @@
 .ivao-traffic-route strong { color: #34425a; }
 .ivao-traffic-route small { margin-left: 4px; color: #9aa3b2; }
 .ivao-traffic-track { display: block; margin-top: 3px; color: #7d8797; font-size: 9px; }
+.ivao-auto-eto {
+  display: block;
+  width: fit-content;
+  max-width: 430px;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #f1f4f8;
+  color: #66748a;
+  font-size: 8px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.ivao-auto-eto.is-ready { background: #eaf8ef; color: #167647; }
+.ivao-auto-eto.is-waiting { background: #fff6df; color: #8a6418; }
+.ivao-auto-eto.is-manual { background: #f0f2f6; color: #626d7e; }
 .ivao-traffic-fpl {
   display: block;
-  max-width: 420px;
-  margin-top: 3px;
+  max-width: 430px;
+  margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,7 +146,17 @@
   font-size: 8px;
 }
 .ivao-traffic-plan { display: flex; align-items: end; gap: 7px; }
-.ivao-traffic-plan label span { display: block; margin: 0 0 3px 2px; color: #8791a3; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+.ivao-traffic-plan label { position: relative; }
+.ivao-traffic-plan label span { display: flex; align-items: center; gap: 4px; margin: 0 0 3px 2px; color: #8791a3; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+.ivao-traffic-plan label span em {
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #e8f6ed;
+  color: #16824c;
+  font-size: 6px;
+  font-style: normal;
+  letter-spacing: .04em;
+}
 .ivao-traffic-plan select,
 .ivao-traffic-plan input {
   height: 32px;
@@ -144,8 +170,23 @@
 }
 .ivao-traffic-plan select { width: 100px; }
 .ivao-traffic-plan input { width: 72px; font-variant-numeric: tabular-nums; }
+.ivao-traffic-plan input.is-auto { border-color: #7cc99c; background: #f3fbf6; color: #176f46; font-weight: 800; }
 .ivao-traffic-plan select:focus,
 .ivao-traffic-plan input:focus { border-color: #8aacef; box-shadow: 0 0 0 3px rgba(45, 105, 207, .08); }
+.ivao-eto-label { padding-bottom: 0; }
+.ivao-use-auto {
+  position: absolute;
+  top: 100%;
+  left: 2px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2d69cf;
+  font-size: 7px;
+  font-weight: 800;
+  white-space: nowrap;
+}
 .ivao-traffic-add {
   height: 32px;
   border: 1px solid #2d6fd8;
@@ -159,5 +200,5 @@
 .ivao-traffic-footer { display: flex; justify-content: space-between; gap: 16px; padding: 10px 15px; border-top: 1px solid #edf0f5; background: #fafbfd; color: #8c96a7; font-size: 9px; }
 
 @media (max-width: 1300px) {
-  .ivao-traffic-popover { right: -40px; width: 700px; }
+  .ivao-traffic-popover { right: -40px; width: 760px; }
 }
