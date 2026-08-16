@@ -47,3 +47,21 @@
   text-overflow: ellipsis;
   pointer-events: none;
 }
+
+.same-cldt-conflict {
+  background: linear-gradient(90deg, rgba(254, 232, 229, .96), rgba(255, 247, 246, .42)) !important;
+  box-shadow: inset 4px 0 0 #c9382d !important;
+}
+
+.same-cldt-conflict .cell-input.strong {
+  border-color: #dc746b !important;
+  background: #fff5f4 !important;
+  color: #8f241c !important;
+  font-weight: 900 !important;
+}
+
+.same-cldt-conflict .spacing-warning-badge {
+  background: #f8d2ce !important;
+  color: #8f241c !important;
+  font-weight: 900 !important;
+}
