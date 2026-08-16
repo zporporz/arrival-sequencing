@@ -32,7 +32,7 @@ type ArrivalHistory = {
 
 type Props = {
   sessions: SequenceSession[]
-  onChanged: () => Promise<void>
+  onChanged?: () => Promise<void>
 }
 
 function fmtTime(value: string | null | undefined) {
@@ -104,7 +104,7 @@ export default function SessionsPanel({ sessions, onChanged }: Props) {
     setError(null)
     try {
       await changeSession(detail.session.id, action)
-      await onChanged()
+      if (onChanged) await onChanged()
       const refreshed = await loadSession(detail.session.id)
       setDetail(refreshed)
     } catch (err) {
