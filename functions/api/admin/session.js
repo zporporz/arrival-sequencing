@@ -31,6 +31,8 @@ async function updateSession(env, auth, payload) {
     patch.archived = false;
   } else if (action === "archive") {
     patch.archived = true;
+    patch.status = "CLOSED";
+    patch.closed_at = new Date().toISOString();
   } else if (action === "restore") {
     patch.archived = false;
   } else {
