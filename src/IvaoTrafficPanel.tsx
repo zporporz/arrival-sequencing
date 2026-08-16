@@ -191,13 +191,17 @@ function autoEstimate(
   }
 
   const remainingNm = Math.max(0, targetDistance - progress.progressNm) + progress.offRouteNm
-  const minutes = remainingNm / groundSpeed * 60
+  const minutesToFix = remainingNm / groundSpeed * 60
+  const finalSegment = geometry.segments[geometry.segments.length - 1]
+  const routeEndDistance = geometry.totalDistance ?? finalSegment?.cumulativeDistance ?? targetDistance
+  const remainingToDestinationNm = Math.max(0, routeEndDistance - progress.progressNm) + progress.offRouteNm
+  const minutes = remainingToDestinationNm / groundSpeed * 60
   const baseTime = new Date(baseTimeIso).getTime()
   const safeBaseTime = Number.isFinite(baseTime) ? baseTime : Date.now()
-  const eto = formatUtcHhmm(safeBaseTime + minutes * 60_000)
+  const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
 
   if (minutes > AUTO_ETO_LOOKAHEAD_MIN) {
-    return { status: 'waiting', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${AUTO_ETO_LOOKAHEAD_MIN} min auto-fill window` }
+    return { status: 'waiting', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${AUTO_ETO_LOOKAHEAD_MIN} min ETA window` }
   }
   return { status: 'ready', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
 }
@@ -212,7 +216,7 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean) {
     return `AUTO ETO · ${estimate.refFix} ${estimate.eto}Z · ${Math.round(estimate.remainingNm || 0)} NM · GS ${Math.round(estimate.groundSpeed || 0)}`
   }
   if (estimate.status === 'waiting') {
-    return `AUTO ETO waiting · ${Math.ceil(estimate.minutes || 0)} min to ${estimate.refFix} · auto-fill starts ≤${AUTO_ETO_LOOKAHEAD_MIN} min`
+    return `AUTO ETO waiting · ~${Math.ceil(estimate.minutes || 0)} min to destination · auto-fill starts ETA ≤${AUTO_ETO_LOOKAHEAD_MIN} min`
   }
   if (estimate.status === 'calculating') return `AUTO ETO · ${estimate.reason || 'calculating'}`
   return `AUTO ETO unavailable · ${estimate.reason || 'insufficient data'}`
@@ -275,7 +279,6 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         geometryCacheRef.current.set(key, payload)
         return payload
       } catch {
-        geometryCacheRef.current.set(key, null)
         return null
       } finally {
         geometryPendingRef.current.delete(key)
@@ -458,7 +461,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         <div className="ivao-traffic-heading">
           <div>
             <strong>IVAO inbound · {airport}</strong>
-            <span>AUTO ETO uses filed-route distance + live GS inside the final {AUTO_ETO_LOOKAHEAD_MIN} minutes. Manual override remains available.</span>
+            <span>AUTO ETO uses filed-route distance + live GS when estimated arrival is within {AUTO_ETO_LOOKAHEAD_MIN} minutes. Manual override remains available.</span>
           </div>
           <button type="button" onClick={manualRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
         </div>
