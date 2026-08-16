@@ -11,6 +11,15 @@ function cleanAirport(value) {
   return /^[A-Z0-9]{4}$/.test(airport) ? airport : null;
 }
 
+function finiteNumber(...values) {
+  for (const value of values) {
+    if (value == null || value === '') continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
 function airlineIcaoFromCallsign(value) {
   const callsign = String(value || '').trim().toUpperCase();
   const match = callsign.match(/^([A-Z]{3})[A-Z0-9]/);
@@ -56,8 +65,11 @@ export async function onRequestGet(context) {
           arrival: airport,
           route: fp.route ? String(fp.route).trim().toUpperCase() : null,
           state: track.state ? String(track.state).trim() : null,
-          altitude: Number.isFinite(Number(track.altitude)) ? Number(track.altitude) : null,
-          groundSpeed: Number.isFinite(Number(track.groundSpeed)) ? Number(track.groundSpeed) : null,
+          altitude: finiteNumber(track.altitude, pilot.altitude),
+          groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
+          latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
+          longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
+          heading: finiteNumber(track.heading, track.course, pilot.heading),
           connectedAt: pilot.createdAt || null,
           airlineIcao: airlineIcaoFromCallsign(pilot.callsign),
         };
