@@ -118,7 +118,6 @@ export default function AipImporter({ airports, runwayConfigs, starProcedures, r
           || !sameValue(existing.runway_applicability, record.runwayApplicability)
           || !sameValue(existing.chart_reference, record.chartReference)
           || !sameValue(existing.effective_from, record.effectiveFrom)
-          || !sameValue(existing.source, source)
           || existing.active !== true
         status = changed ? 'CHANGED' : 'SAME'
       }
