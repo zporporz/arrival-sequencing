@@ -102,7 +102,6 @@ function installSelectorUi() {
   const toolbar = document.querySelector<HTMLElement>('.toolbar-controls')
   if (!content || !workspace || !toolbar) return false
 
-  // Remove the old form-like flow controls. Airport/runway selection is now page navigation.
   toolbar.querySelector('.flow-selector-wrap')?.remove()
   toolbar.querySelector('.secondary-button')?.remove()
 
@@ -111,12 +110,6 @@ function installSelectorUi() {
     navigation = buildWorkspaceNavigation(selected)
     content.insertBefore(navigation, workspace)
   }
-
-  const title = document.querySelector<HTMLElement>('.brand-block h1')
-  if (title) title.textContent = 'Bangkok FIR Arrival Sequencing'
-
-  const subtitle = document.querySelector<HTMLElement>('.brand-block p')
-  if (subtitle) subtitle.textContent = `${selected.airport} · RWY ${selected.runway} · Shared realtime workspace`
 
   document.title = 'Bangkok FIR Arrival Sequencing'
 
@@ -131,7 +124,7 @@ function installSelectorUi() {
   }
 
   if (!selected.timingReady) {
-    const addButton = document.querySelector<HTMLButtonElement>('.primary-button')
+    const addButton = document.querySelector<HTMLButtonElement>('.react-workspace-actions .primary-button')
     if (addButton) {
       addButton.disabled = true
       addButton.title = 'VTBD RWY 03 timing dataset is not configured yet.'
