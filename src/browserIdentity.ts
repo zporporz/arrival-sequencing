@@ -4,6 +4,9 @@ export type AuthenticatedIdentity = {
   vid: string
   displayName: string
   tooltip: string
+  name?: string
+  isThailandStaff?: boolean
+  staffPositions?: string[]
 }
 
 const ID_KEY = 'arrival-sequencing-controller-id'
@@ -11,6 +14,7 @@ const NAME_KEY = 'arrival-sequencing-controller-name'
 const AUTH_VID_KEY = 'arrival-sequencing-auth-vid'
 const AUTH_DISPLAY_KEY = 'arrival-sequencing-auth-display'
 const AUTH_TOOLTIP_KEY = 'arrival-sequencing-auth-tooltip'
+const AUTH_META_KEY = 'arrival-sequencing-auth-meta'
 
 export function getAuthenticatedVid() {
   try {
@@ -32,10 +36,22 @@ export function getAuthenticatedIdentity(): AuthenticatedIdentity | null {
   try {
     const vid = sessionStorage.getItem(AUTH_VID_KEY)
     if (!vid) return null
+
+    let metadata: Partial<AuthenticatedIdentity> = {}
+    const rawMetadata = sessionStorage.getItem(AUTH_META_KEY)
+    if (rawMetadata) {
+      try {
+        metadata = JSON.parse(rawMetadata) as Partial<AuthenticatedIdentity>
+      } catch {
+        metadata = {}
+      }
+    }
+
     return {
+      ...metadata,
       vid,
-      displayName: sessionStorage.getItem(AUTH_DISPLAY_KEY) || vid,
-      tooltip: sessionStorage.getItem(AUTH_TOOLTIP_KEY) || `VID ${vid}`,
+      displayName: sessionStorage.getItem(AUTH_DISPLAY_KEY) || metadata.displayName || vid,
+      tooltip: sessionStorage.getItem(AUTH_TOOLTIP_KEY) || metadata.tooltip || `VID ${vid}`,
     }
   } catch {
     return null
@@ -48,11 +64,13 @@ export function setAuthenticatedIdentity(identity: AuthenticatedIdentity | null)
       sessionStorage.setItem(AUTH_VID_KEY, identity.vid)
       sessionStorage.setItem(AUTH_DISPLAY_KEY, identity.displayName)
       sessionStorage.setItem(AUTH_TOOLTIP_KEY, identity.tooltip)
+      sessionStorage.setItem(AUTH_META_KEY, JSON.stringify(identity))
       localStorage.setItem(NAME_KEY, identity.displayName)
     } else {
       sessionStorage.removeItem(AUTH_VID_KEY)
       sessionStorage.removeItem(AUTH_DISPLAY_KEY)
       sessionStorage.removeItem(AUTH_TOOLTIP_KEY)
+      sessionStorage.removeItem(AUTH_META_KEY)
     }
   } catch {
     // Storage can be unavailable in hardened/private browser modes.
