@@ -21,5 +21,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Check Pages Functions syntax
+        run: find functions -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
       - name: Build
         run: npm run build

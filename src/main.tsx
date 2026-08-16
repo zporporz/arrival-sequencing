@@ -10,6 +10,7 @@ import './flowSelector.css'
 import './workflowControls.css'
 import './lifecyclePanel.css'
 import './restoreCancelled.css'
+import './auth.css'
 import { installSpreadsheetNavigation } from './spreadsheetNavigation'
 import { installSpacingGuard } from './spacingGuard'
 import { installFieldGuide } from './fieldGuide'
@@ -18,6 +19,7 @@ import { installFlowSelector } from './flowSelector'
 import { installLifecyclePanel } from './lifecyclePanel'
 import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
+import AuthGate from './AuthGate'
 import App from './App'
 
 installAuditIdentity()
@@ -31,6 +33,8 @@ installRestoreCancelled()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AuthGate>
+      <App />
+    </AuthGate>
   </StrictMode>,
 )
