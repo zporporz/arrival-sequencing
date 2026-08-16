@@ -32,18 +32,17 @@ async function insertAirport(env, auth, payload) {
   const name = cleanText(payload.name, 160);
   if (!icao || !/^[A-Z]{4}$/.test(icao)) throw new Error("ICAO must be 4 letters");
   if (!name) throw new Error("Airport name is required");
-  const body = [{
-    icao,
-    name,
-    city: cleanText(payload.city, 120),
-    fir: cleanText(payload.fir, 80)?.toUpperCase() || "BANGKOK",
-    active: payload.active !== false,
-    ...creatorPatch(auth),
-  }];
   return supabaseAdminRequest(env, "airports?select=*", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify(body),
+    body: JSON.stringify([{
+      icao,
+      name,
+      city: cleanText(payload.city, 120),
+      fir: cleanText(payload.fir, 80)?.toUpperCase() || "BANGKOK",
+      active: payload.active !== false,
+      ...creatorPatch(auth),
+    }]),
   });
 }
 
@@ -71,20 +70,19 @@ async function insertRunway(env, auth, payload) {
   const label = cleanText(payload.label, 80);
   if (!airportId || !flow || !label) throw new Error("Airport, flow and label are required");
   const timingStatus = ["ACTIVE", "PENDING", "DISABLED"].includes(payload.timingStatus) ? payload.timingStatus : "PENDING";
-  const body = [{
-    airport_id: airportId,
-    flow,
-    label,
-    timing_status: timingStatus,
-    active: payload.active !== false,
-    sort_order: Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 0,
-    notes: cleanText(payload.notes, 500),
-    ...creatorPatch(auth),
-  }];
   return supabaseAdminRequest(env, "runway_configs?select=*", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify(body),
+    body: JSON.stringify([{
+      airport_id: airportId,
+      flow,
+      label,
+      timing_status: timingStatus,
+      active: payload.active !== false,
+      sort_order: Number.isFinite(Number(payload.sortOrder)) ? Number(payload.sortOrder) : 0,
+      notes: cleanText(payload.notes, 500),
+      ...creatorPatch(auth),
+    }]),
   });
 }
 
@@ -108,22 +106,21 @@ async function insertStar(env, auth, payload) {
   const runwayConfigId = cleanText(payload.runwayConfigId, 64);
   const designator = cleanText(payload.designator, 40)?.toUpperCase();
   if (!runwayConfigId || !designator) throw new Error("Runway configuration and STAR designator are required");
-  const body = [{
-    runway_config_id: runwayConfigId,
-    designator,
-    entry_fix: cleanText(payload.entryFix, 20)?.toUpperCase(),
-    runway_applicability: cleanText(payload.runwayApplicability, 120),
-    chart_reference: cleanText(payload.chartReference, 200),
-    source: cleanText(payload.source, 300),
-    effective_from: cleanText(payload.effectiveFrom, 10),
-    effective_to: cleanText(payload.effectiveTo, 10),
-    active: payload.active !== false,
-    ...creatorPatch(auth),
-  }];
   return supabaseAdminRequest(env, "star_procedures?select=*", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify(body),
+    body: JSON.stringify([{
+      runway_config_id: runwayConfigId,
+      designator,
+      entry_fix: cleanText(payload.entryFix, 20)?.toUpperCase(),
+      runway_applicability: cleanText(payload.runwayApplicability, 120),
+      chart_reference: cleanText(payload.chartReference, 200),
+      source: cleanText(payload.source, 300),
+      effective_from: cleanText(payload.effectiveFrom, 10),
+      effective_to: cleanText(payload.effectiveTo, 10),
+      active: payload.active !== false,
+      ...creatorPatch(auth),
+    }]),
   });
 }
 
@@ -153,6 +150,59 @@ async function updateStar(env, auth, payload) {
   });
 }
 
+async function insertTiming(env, auth, payload) {
+  const runwayConfigId = cleanText(payload.runwayConfigId, 64);
+  const airport = cleanText(payload.airport, 4)?.toUpperCase();
+  const flow = cleanText(payload.flow, 32);
+  const fix = cleanText(payload.fix, 20)?.toUpperCase();
+  const minutes = Number(payload.nominalMinutes);
+  if (!runwayConfigId || !airport || !flow || !fix) throw new Error("Runway configuration, airport, flow and reference fix are required");
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180) throw new Error("Nominal minutes must be between 0 and 180");
+  const effectiveFrom = cleanText(payload.effectiveFrom, 10) || new Date().toISOString().slice(0, 10);
+  const source = cleanText(payload.source, 500) || "Manual admin entry; provisional planning timing";
+  return supabaseAdminRequest(env, "fix_timings?select=*", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify([{
+      runway_config_id: runwayConfigId,
+      airport,
+      flow,
+      fix,
+      nominal_seconds: Math.round(minutes * 60),
+      source,
+      verified: Boolean(payload.verified),
+      effective_from: effectiveFrom,
+      effective_to: cleanText(payload.effectiveTo, 10),
+      active: payload.active !== false,
+      ...creatorPatch(auth),
+    }]),
+  });
+}
+
+async function updateTiming(env, auth, payload) {
+  const id = Number(payload.id);
+  if (!Number.isFinite(id)) throw new Error("Timing id is required");
+  const patch = { ...actorPatch(auth) };
+  if (payload.nominalMinutes !== undefined) {
+    const minutes = Number(payload.nominalMinutes);
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180) throw new Error("Nominal minutes must be between 0 and 180");
+    patch.nominal_seconds = Math.round(minutes * 60);
+  }
+  if (payload.source !== undefined) {
+    const source = cleanText(payload.source, 500);
+    if (!source) throw new Error("Timing source is required");
+    patch.source = source;
+  }
+  if (payload.verified !== undefined) patch.verified = Boolean(payload.verified);
+  if (payload.active !== undefined) patch.active = Boolean(payload.active);
+  if (payload.effectiveTo !== undefined) patch.effective_to = cleanText(payload.effectiveTo, 10);
+  return supabaseAdminRequest(env, `fix_timings?id=eq.${encodeURIComponent(id)}&select=*`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(patch),
+  });
+}
+
 async function restoreHistory(env, auth, payload) {
   const historyId = Number(payload.historyId);
   if (!Number.isFinite(historyId)) throw new Error("History id is required");
@@ -165,12 +215,13 @@ async function restoreHistory(env, auth, payload) {
     AIRPORT: "airports",
     RUNWAY_CONFIG: "runway_configs",
     STAR_PROCEDURE: "star_procedures",
+    FIX_TIMING: "fix_timings",
   };
   const table = tableByType[item.entity_type];
   if (!table) throw new Error("Restore is not supported for this entity type yet");
 
   const snapshot = { ...item.old_row };
-  for (const key of ["id", "created_at", "created_by_vid", "created_by_name", "updated_at"]) delete snapshot[key];
+  for (const key of ["id", "created_at", "created_by_vid", "created_by_name", "updated_at", "updated_by_vid", "updated_by_name"]) delete snapshot[key];
   Object.assign(snapshot, actorPatch(auth));
   if (table === "airports" && snapshot.active === true) snapshot.archived_at = null;
 
@@ -201,6 +252,8 @@ export async function onRequestPost(context) {
     else if (action === "runway.update") result = await updateRunway(context.env, auth, payload);
     else if (action === "star.create") result = await insertStar(context.env, auth, payload);
     else if (action === "star.update") result = await updateStar(context.env, auth, payload);
+    else if (action === "timing.create") result = await insertTiming(context.env, auth, payload);
+    else if (action === "timing.update") result = await updateTiming(context.env, auth, payload);
     else if (action === "history.restore") result = await restoreHistory(context.env, auth, payload);
     else return json({ error: "Unsupported admin action" }, 400);
     return json({ ok: true, data: result.data });
