@@ -27,7 +27,7 @@ export type FixTiming = {
 type Props = {
   airports: Airport[]
   runwayConfigs: RunwayConfig[]
-  starProcedures: StarProcedure[]
+  starProcedures?: StarProcedure[]
   fixTimings: FixTiming[]
   saving: boolean
   act: (body: Record<string, unknown>) => Promise<void>
@@ -42,7 +42,7 @@ type StarTimingDraft = {
   designators: string[]
 }
 
-export default function TimingEditor({ airports, runwayConfigs, starProcedures, fixTimings, saving, act }: Props) {
+export default function TimingEditor({ airports, runwayConfigs, starProcedures = [], fixTimings, saving, act }: Props) {
   const [airportId, setAirportId] = useState('')
   const [runwayId, setRunwayId] = useState('')
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
