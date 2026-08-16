@@ -83,11 +83,8 @@ function controllerIdentity(user: AuthUser) {
   const apiCodes = [...new Set((user.staffPositionCodes ?? []).map((code) => code.trim().toUpperCase()).filter(Boolean))]
   const compactPositions = apiCodes.length ? apiCodes : positions.map(compactStaffPosition)
 
-  // Keep the topbar calm: show one role only, with a count when the member has more.
-  // The account menu still exposes every full staff position.
-  let positionLabel = 'TH STAFF'
-  if (compactPositions.length === 1) positionLabel = compactPositions[0]
-  if (compactPositions.length > 1) positionLabel = `${compactPositions[0]} +${compactPositions.length - 1}`
+  // Show every compact role in the topbar. Full position names remain in the account menu.
+  const positionLabel = compactPositions.length ? compactPositions.join(' / ') : 'TH STAFF'
 
   const positionDetail = positions.length ? positions.join(' · ') : 'Thailand Division Staff'
   return {
