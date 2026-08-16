@@ -215,7 +215,7 @@ export default function StarEditor({ airports, runwayConfigs, starProcedures, se
 
       <div className="admin-table-wrap">
         <table className="admin-table star-edit-table">
-          <thead><tr><th>STAR</th><th>ENTRY FIX</th><th>APPLICABILITY</th><th>CHART</th><th>EFFECTIVE</th><th>SOURCE</th><th>STATUS</th><th /></tr></thead>
+          <thead><tr><th>STAR</th><th>ENTRY FIX</th><th>APPLICABILITY</th><th>CHART</th><th>EFFECTIVE FROM</th><th>SOURCE</th><th>STATUS</th><th /></tr></thead>
           <tbody>
             {visibleStars.length === 0 ? <tr><td colSpan={8} className="admin-empty-cell">No STAR records for this runway configuration. This is valid.</td></tr> : visibleStars.map((star) => {
               const draft = drafts[star.id]
@@ -226,7 +226,7 @@ export default function StarEditor({ airports, runwayConfigs, starProcedures, se
                 <td><input className="star-fix-input" value={draft.entryFix} onChange={(event) => updateDraft(star.id, { entryFix: event.target.value.toUpperCase() })} /></td>
                 <td><input value={draft.runwayApplicability} onChange={(event) => updateDraft(star.id, { runwayApplicability: event.target.value })} /></td>
                 <td><input value={draft.chartReference} onChange={(event) => updateDraft(star.id, { chartReference: event.target.value })} /></td>
-                <td><div className="star-date-stack"><input type="date" value={draft.effectiveFrom} onChange={(event) => updateDraft(star.id, { effectiveFrom: event.target.value })} /><input type="date" value={draft.effectiveTo} onChange={(event) => updateDraft(star.id, { effectiveTo: event.target.value })} /></div></td>
+                <td><input type="date" value={draft.effectiveFrom} onChange={(event) => updateDraft(star.id, { effectiveFrom: event.target.value })} /></td>
                 <td><input className="star-source-input" value={draft.source} onChange={(event) => updateDraft(star.id, { source: event.target.value })} /></td>
                 <td><label className="admin-check"><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft(star.id, { active: event.target.checked })} /><span>{draft.active ? 'ACTIVE' : 'ARCHIVED'}</span></label></td>
                 <td><button className={isChanged ? 'timing-save changed' : 'timing-save'} disabled={saving || !isChanged} onClick={() => void saveStar(star)}>{saving && isChanged ? 'Saving…' : 'Save'}</button></td>
