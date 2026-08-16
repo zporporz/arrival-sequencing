@@ -41,8 +41,18 @@ function extractDesignators(value) {
   return [...new Set(matches)];
 }
 
+function starSection(value) {
+  const cleaned = normalizeAipText(value);
+  const startMatch = cleaned.match(/\b5\.9\s+Standard\s+Arrival\s+Chart\s*-?\s*Instrument\s*\(STAR\)\s*-?\s*ICAO/i);
+  if (!startMatch || startMatch.index == null) return cleaned;
+  const start = startMatch.index + startMatch[0].length;
+  const remainder = cleaned.slice(start);
+  const endMatch = remainder.match(/\b5\.10\s+Instrument\s+Approach\s+Chart\s*-?\s*ICAO/i);
+  return endMatch?.index == null ? remainder : remainder.slice(0, endMatch.index);
+}
+
 export function parseStarText(text, options = {}) {
-  const cleaned = normalizeAipText(text);
+  const cleaned = starSection(text);
   const records = [];
   const seen = new Set();
   const rowPattern = /\b(?:RNAV\s+)?RWY\s*([0-9]{2}[LRC]?(?:\s*\/\s*[0-9]{2}[LRC]?){0,3})\s*-\s*([\s\S]{1,700}?)\s+AD\s*2-(VT[A-Z0-9]{2})-7-(\d+)\b/gi;
