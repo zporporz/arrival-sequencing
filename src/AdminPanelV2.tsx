@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuthUser } from './AuthGate'
+import AipImporter from './AipImporter'
 import AirportEditor from './AirportEditor'
 import HistoryPanel from './HistoryPanel'
 import SessionsPanel from './SessionsPanel'
@@ -74,7 +75,7 @@ type Dashboard = {
   sessions: SequenceSession[]
 }
 
-type Tab = 'airports' | 'stars' | 'timing' | 'sessions' | 'history'
+type Tab = 'airports' | 'stars' | 'aip' | 'timing' | 'sessions' | 'history'
 
 const EMPTY: Dashboard = { airports: [], runwayConfigs: [], starProcedures: [], history: [], fixTimings: [], sessions: [] }
 
@@ -149,9 +150,9 @@ export default function AdminPanelV2() {
 
       <main className="admin-main">
         <nav className="admin-tabs" aria-label="Admin sections">
-          {(['airports', 'stars', 'timing', 'sessions', 'history'] as Tab[]).map((item) => (
+          {(['airports', 'stars', 'aip', 'timing', 'sessions', 'history'] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>
-              {item === 'stars' ? 'STAR Procedures' : item[0].toUpperCase() + item.slice(1)}
+              {item === 'stars' ? 'STAR Procedures' : item === 'aip' ? 'AIP Import' : item[0].toUpperCase() + item.slice(1)}
             </button>
           ))}
         </nav>
@@ -169,6 +170,7 @@ export default function AdminPanelV2() {
 
         {!loading && tab === 'airports' && <AirportEditor airports={data.airports} runwayConfigs={data.runwayConfigs} selectedAirportId={selectedAirportId} onAirportChange={setSelectedAirportId} saving={saving} act={act} />}
         {!loading && tab === 'stars' && <StarEditor airports={data.airports} runwayConfigs={data.runwayConfigs} starProcedures={data.starProcedures} selectedAirportId={selectedAirportId} onAirportChange={setSelectedAirportId} saving={saving} act={act} />}
+        {!loading && tab === 'aip' && <AipImporter airports={data.airports} runwayConfigs={data.runwayConfigs} starProcedures={data.starProcedures} reload={reload} />}
         {!loading && tab === 'timing' && <TimingEditor airports={data.airports} runwayConfigs={data.runwayConfigs} fixTimings={data.fixTimings} saving={saving} act={act} />}
         {!loading && tab === 'sessions' && <SessionsPanel sessions={data.sessions} />}
         {!loading && tab === 'history' && <HistoryPanel history={data.history} saving={saving} act={act} reload={reload} />}
