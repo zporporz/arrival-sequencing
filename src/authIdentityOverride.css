@@ -1,5 +1,28 @@
+.controller-name.auth-controller-anchor,
 .controller-name {
-  display: none !important;
+  display: block !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+  width: 250px !important;
+  min-width: 250px !important;
+  max-width: 250px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.auth-controller-floating {
+  position: fixed !important;
+  z-index: 1200 !important;
+  width: max-content !important;
+  max-width: none !important;
+  margin: 0 !important;
 }
 
 .auth-controller-summary,
