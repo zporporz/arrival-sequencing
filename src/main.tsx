@@ -22,6 +22,7 @@ import { installAuditIdentity } from './auditIdentity'
 import { installRestoreCancelled } from './restoreCancelled'
 import { installAuthTopbar } from './authTopbar'
 import AuthGate from './AuthGate'
+import AdminPanel from './AdminPanel'
 import App from './App'
 
 installAuditIdentity()
@@ -34,10 +35,12 @@ installLifecyclePanel()
 installRestoreCancelled()
 installAuthTopbar()
 
+const isAdminRoute = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthGate>
-      <App />
+      {isAdminRoute ? <AdminPanel /> : <App />}
     </AuthGate>
   </StrictMode>,
 )
