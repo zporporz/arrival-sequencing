@@ -12,8 +12,10 @@ type AuthResponse = {
 }
 
 const PROFILE_CLASS = 'auth-controller-profile'
+const FLOATING_PROFILE_ID = 'auth-controller-floating-profile'
 let cachedUser: AuthUser | null = null
 let loadingUser: Promise<AuthUser | null> | null = null
+let outsideClickBound = false
 
 function makeTextElement(tag: string, className: string, text: string) {
   const element = document.createElement(tag)
@@ -65,115 +67,120 @@ async function loadUser() {
   return loadingUser
 }
 
-function renderProfile(user: AuthUser, actions: HTMLElement) {
-  const role = roleLabel(user)
-  let details = actions.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
+function positionProfile(input: HTMLInputElement, details: HTMLDetailsElement) {
+  const rect = input.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
 
-  if (!details) {
-    details = document.createElement('details')
-    details.className = PROFILE_CLASS
+  details.style.left = `${Math.round(rect.left)}px`
+  details.style.top = `${Math.round(rect.top + Math.max(0, (rect.height - details.offsetHeight) / 2))}px`
+}
 
-    const summary = document.createElement('summary')
-    summary.className = 'auth-controller-summary auth-controller-summary-exact'
-    summary.setAttribute('aria-label', 'Open IVAO account menu')
+function createProfile(user: AuthUser) {
+  const details = document.createElement('details')
+  details.id = FLOATING_PROFILE_ID
+  details.className = `${PROFILE_CLASS} auth-controller-floating`
 
-    const labelWrap = document.createElement('span')
-    labelWrap.className = 'auth-controller-exact-wrap'
-    labelWrap.appendChild(makeTextElement('strong', 'auth-controller-exact-name', user.name))
+  const summary = document.createElement('summary')
+  summary.className = 'auth-controller-summary auth-controller-summary-exact'
+  summary.setAttribute('aria-label', 'Open IVAO account menu')
 
-    const meta = document.createElement('span')
-    meta.className = 'auth-controller-exact-meta'
-    meta.appendChild(makeTextElement('span', 'auth-controller-exact-role', role))
-    meta.appendChild(makeTextElement('span', 'auth-controller-exact-separator', '·'))
-    meta.appendChild(makeTextElement('span', 'auth-controller-exact-vid', user.vid))
-    meta.appendChild(makeTextElement('span', 'auth-controller-chevron', '▾'))
-    labelWrap.appendChild(meta)
-    summary.appendChild(labelWrap)
-    details.appendChild(summary)
+  const labelWrap = document.createElement('span')
+  labelWrap.className = 'auth-controller-exact-wrap'
+  labelWrap.appendChild(makeTextElement('strong', 'auth-controller-exact-name', user.name))
 
-    const menu = document.createElement('div')
-    menu.className = 'auth-controller-menu'
+  const meta = document.createElement('span')
+  meta.className = 'auth-controller-exact-meta'
+  meta.appendChild(makeTextElement('span', 'auth-controller-exact-role', roleLabel(user)))
+  meta.appendChild(makeTextElement('span', 'auth-controller-exact-separator', '·'))
+  meta.appendChild(makeTextElement('span', 'auth-controller-exact-vid', user.vid))
+  meta.appendChild(makeTextElement('span', 'auth-controller-chevron', '▾'))
+  labelWrap.appendChild(meta)
+  summary.appendChild(labelWrap)
+  details.appendChild(summary)
 
-    const heading = document.createElement('div')
-    heading.className = 'auth-controller-heading'
-    heading.appendChild(makeTextElement('strong', 'auth-controller-name', user.name))
-    heading.appendChild(makeTextElement('span', 'auth-controller-vid', `VID ${user.vid}`))
-    menu.appendChild(heading)
+  const menu = document.createElement('div')
+  menu.className = 'auth-controller-menu'
 
-    if (user.isThailandStaff) {
-      menu.appendChild(makeTextElement('div', 'auth-controller-role', 'THAILAND DIVISION STAFF'))
-      const positions = user.staffPositions ?? []
-      if (positions.length) {
-        const positionWrap = document.createElement('div')
-        positionWrap.className = 'auth-controller-positions'
-        for (const position of positions) {
-          positionWrap.appendChild(makeTextElement('span', 'auth-controller-position', position))
-        }
-        menu.appendChild(positionWrap)
+  const heading = document.createElement('div')
+  heading.className = 'auth-controller-heading'
+  heading.appendChild(makeTextElement('strong', 'auth-controller-name', user.name))
+  heading.appendChild(makeTextElement('span', 'auth-controller-vid', `VID ${user.vid}`))
+  menu.appendChild(heading)
+
+  if (user.isThailandStaff) {
+    menu.appendChild(makeTextElement('div', 'auth-controller-role', 'THAILAND DIVISION STAFF'))
+    const positions = user.staffPositions ?? []
+    if (positions.length) {
+      const positionWrap = document.createElement('div')
+      positionWrap.className = 'auth-controller-positions'
+      for (const position of positions) {
+        positionWrap.appendChild(makeTextElement('span', 'auth-controller-position', position))
       }
-    } else {
-      menu.appendChild(makeTextElement('div', 'auth-controller-role member', 'IVAO MEMBER'))
+      menu.appendChild(positionWrap)
     }
-
-    menu.appendChild(makeTextElement('div', 'auth-controller-divider', ''))
-    const signOut = document.createElement('a')
-    signOut.className = 'auth-controller-signout'
-    signOut.href = '/api/auth/logout'
-    signOut.textContent = 'Sign out of IVAO'
-    menu.appendChild(signOut)
-    details.appendChild(menu)
-
-    const addFlightButton = actions.querySelector('.primary-button')
-    actions.insertBefore(details, addFlightButton ?? null)
-
-    document.addEventListener('click', (event) => {
-      if (!details?.open) return
-      const target = event.target
-      if (target instanceof Node && !details.contains(target)) details.open = false
-    })
   } else {
-    const name = details.querySelector<HTMLElement>('.auth-controller-exact-name')
-    const roleNode = details.querySelector<HTMLElement>('.auth-controller-exact-role')
-    const vid = details.querySelector<HTMLElement>('.auth-controller-exact-vid')
-    if (name) name.textContent = user.name
-    if (roleNode) roleNode.textContent = role
-    if (vid) vid.textContent = user.vid
+    menu.appendChild(makeTextElement('div', 'auth-controller-role member', 'IVAO MEMBER'))
   }
+
+  menu.appendChild(makeTextElement('div', 'auth-controller-divider', ''))
+  const signOut = document.createElement('a')
+  signOut.className = 'auth-controller-signout'
+  signOut.href = '/api/auth/logout'
+  signOut.textContent = 'Sign out of IVAO'
+  menu.appendChild(signOut)
+  details.appendChild(menu)
+
+  document.body.appendChild(details)
+  return details
+}
+
+function updateProfile(details: HTMLDetailsElement, user: AuthUser) {
+  const name = details.querySelector<HTMLElement>('.auth-controller-exact-name')
+  const role = details.querySelector<HTMLElement>('.auth-controller-exact-role')
+  const vid = details.querySelector<HTMLElement>('.auth-controller-exact-vid')
+  if (name) name.textContent = user.name
+  if (role) role.textContent = roleLabel(user)
+  if (vid) vid.textContent = user.vid
 }
 
 async function buildProfile() {
   const input = document.querySelector<HTMLInputElement>('input.controller-name')
-  const existing = document.querySelector<HTMLDetailsElement>(`.${PROFILE_CLASS}`)
+  if (!input) return
 
-  let actions: HTMLElement | null = existing?.parentElement ?? null
-  if (input) {
-    actions = input.parentElement
-    input.disabled = true
-    input.readOnly = true
-    input.setAttribute('aria-hidden', 'true')
-    input.style.display = 'none'
-    input.remove()
-  }
-
-  if (!actions) return
+  input.disabled = true
+  input.readOnly = true
+  input.tabIndex = -1
+  input.setAttribute('aria-hidden', 'true')
+  input.classList.add('auth-controller-anchor')
 
   const user = await loadUser()
   if (!user) return
-  renderProfile(user, actions)
+
+  let details = document.getElementById(FLOATING_PROFILE_ID) as HTMLDetailsElement | null
+  if (!details) details = createProfile(user)
+  else updateProfile(details, user)
+
+  positionProfile(input, details)
+
+  if (!outsideClickBound) {
+    outsideClickBound = true
+    document.addEventListener('click', (event) => {
+      const profile = document.getElementById(FLOATING_PROFILE_ID) as HTMLDetailsElement | null
+      if (!profile?.open) return
+      const target = event.target
+      if (target instanceof Node && !profile.contains(target)) profile.open = false
+    })
+  }
 }
 
 export function installAuthTopbar() {
-  let frame = 0
-  const schedule = () => {
-    window.cancelAnimationFrame(frame)
-    frame = window.requestAnimationFrame(() => { void buildProfile() })
-  }
+  const schedule = () => { void buildProfile() }
 
   const start = () => {
     schedule()
-    const observer = new MutationObserver(schedule)
-    observer.observe(document.body, { childList: true, subtree: true })
-    window.setInterval(schedule, 1000)
+    window.setInterval(schedule, 500)
+    window.addEventListener('resize', schedule)
+    window.addEventListener('scroll', schedule, { passive: true })
   }
 
   if (document.readyState === 'loading') {
