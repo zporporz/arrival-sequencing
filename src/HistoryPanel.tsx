@@ -47,25 +47,55 @@ function changedFields(item: ConfigHistory) {
 
 function titleFor(item: ConfigHistory) {
   const snapshot = item.new_row || item.old_row || {}
-  return String(snapshot.icao || snapshot.designator || snapshot.fix || snapshot.label || item.entity_id)
+  return String(snapshot.icao || snapshot.designator || snapshot.fix || snapshot.label || snapshot.runway_config || snapshot.callsign || item.entity_id)
+}
+
+function searchableText(item: ConfigHistory) {
+  return [item.entity_type, item.action, item.changed_by_name, item.changed_by_vid, titleFor(item), JSON.stringify(item.old_row), JSON.stringify(item.new_row)]
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase()
 }
 
 export default function HistoryPanel({ history, saving, act, reload }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [search, setSearch] = useState('')
+  const [entityFilter, setEntityFilter] = useState('ALL')
+  const [actionFilter, setActionFilter] = useState('ALL')
   const restoreTypes = useMemo(() => new Set(['AIRPORT', 'RUNWAY_CONFIG', 'STAR_PROCEDURE', 'FIX_TIMING']), [])
+  const entityTypes = useMemo(() => [...new Set(history.map((item) => item.entity_type))].sort(), [history])
+  const actions = useMemo(() => [...new Set(history.map((item) => item.action))].sort(), [history])
+
+  const filteredHistory = useMemo(() => {
+    const needle = search.trim().toUpperCase()
+    return history.filter((item) => {
+      if (entityFilter !== 'ALL' && item.entity_type !== entityFilter) return false
+      if (actionFilter !== 'ALL' && item.action !== actionFilter) return false
+      if (needle && !searchableText(item).includes(needle)) return false
+      return true
+    })
+  }, [history, search, entityFilter, actionFilter])
 
   return (
     <section className="admin-card wide-card history-panel">
-      <div className="admin-card-heading">
+      <div className="admin-card-heading history-heading">
         <div>
           <span className="admin-label">CONFIGURATION HISTORY</span>
           <h2>Revision trail</h2>
-          <p>Append-only history. Expand a revision to review exactly what changed before restoring it.</p>
+          <p>Append-only history. Search by airport, fix, STAR, staff name or VID, then expand a revision before restoring it.</p>
         </div>
         <button onClick={() => void reload()}>Refresh</button>
       </div>
+
+      <div className="history-filter-bar">
+        <label><span>SEARCH</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Airport, fix, STAR, staff or VID…" /></label>
+        <label><span>ENTITY</span><select value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)}><option value="ALL">All entities</option>{entityTypes.map((value) => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></label>
+        <label><span>ACTION</span><select value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}><option value="ALL">All actions</option>{actions.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="history-result-count"><strong>{filteredHistory.length}</strong><span>of {history.length} revisions</span></div>
+      </div>
+
       <div className="history-list">
-        {history.length === 0 ? <div className="admin-empty">No configuration history yet.</div> : history.map((item) => {
+        {filteredHistory.length === 0 ? <div className="admin-empty">No history matches these filters.</div> : filteredHistory.map((item) => {
           const fields = changedFields(item)
           const isExpanded = expanded === item.id
           const canRestore = Boolean(item.old_row) && restoreTypes.has(item.entity_type)
