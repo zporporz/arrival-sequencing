@@ -1,4 +1,5 @@
-.auth-controller-summary {
+.auth-controller-summary,
+.auth-controller-summary-exact {
   display: inline-flex !important;
   align-items: center !important;
   min-height: 0 !important;
@@ -19,52 +20,48 @@
   box-shadow: none !important;
 }
 
-.auth-controller-label-wrap {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  gap: 3px !important;
-  min-width: max-content !important;
-  line-height: 1.05 !important;
+.auth-controller-exact-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: max-content;
+  line-height: 1.05;
 }
 
-.auth-controller-label-primary {
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: nowrap !important;
-  color: #17223d !important;
-  font-size: 12px !important;
-  font-weight: 850 !important;
+.auth-controller-exact-name {
+  white-space: nowrap;
+  color: #17223d;
+  font-size: 12px;
+  font-weight: 850;
   letter-spacing: -.01em;
 }
 
-.auth-controller-meta-row {
+.auth-controller-exact-meta {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   white-space: nowrap;
+  color: #748198;
+  font-size: 10px;
+  font-weight: 750;
 }
 
-.auth-controller-label-secondary {
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: nowrap !important;
-  color: #748198 !important;
-  font-size: 10px !important;
-  font-weight: 750 !important;
+.auth-controller-exact-role,
+.auth-controller-exact-vid,
+.auth-controller-exact-separator {
+  display: inline;
 }
 
 .auth-controller-chevron {
   display: inline-block !important;
-  margin: 0 !important;
+  margin: 0 0 0 1px !important;
   color: #748198 !important;
   font-size: 10px !important;
   line-height: 1 !important;
 }
 
-.auth-controller-summary:hover .auth-controller-label-primary,
-.auth-controller-profile[open] .auth-controller-label-primary {
-  color: #3157c9 !important;
+.auth-controller-summary:hover .auth-controller-exact-name,
+.auth-controller-profile[open] .auth-controller-exact-name {
+  color: #3157c9;
 }
