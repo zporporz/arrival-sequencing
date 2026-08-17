@@ -1,0 +1,34 @@
+name: Patch editing presence cleanup
+
+on:
+  push:
+    paths:
+      - 'scripts/patch-editing-presence.cjs'
+      - '.github/workflows/patch-editing-presence.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply patch
+        run: node scripts/patch-editing-presence.cjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Clear stale realtime editing badges"
+          git push
