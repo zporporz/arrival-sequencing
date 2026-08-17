@@ -285,6 +285,29 @@ The selected value is stored locally in the browser.
 
 The trigger is based on estimated time remaining to the **destination**, while the ETO value itself is calculated for the selected **REF FIX**.
 
+### Thailand domestic EET-after-takeoff trigger
+
+For Thailand domestic flights (`departure.countryId = TH` and `arrival.countryId = TH`), the look-ahead trigger uses IVAO Tracker data instead of deriving destination ETA only from the aircraft's current groundspeed:
+
+```text
+IVAO latest flight plan → filed EET
+IVAO track history → first onGround true → false transition
+tracked wheels-off timestamp + filed EET
+        ↓
+filed destination ETA baseline
+        ↓
+ETA ≤ selected 30 / 45 / 60 / 90 / 120 min window
+        ↓
+AUTO ETO uses current route geometry + current smoothed live GS to the REF FIX
+```
+
+- The takeoff anchor is the first tracked airborne sample after a confirmed on-ground sample.
+- The application does **not** treat FPL `departureTime` as actual takeoff time.
+- Tracker `actualDepartureTime` is not used as the primary wheels-off source because observed track history can differ from that value.
+- Once a tracked takeoff is found, it is cached so the full track history does not need to be fetched on every refresh.
+- Before takeoff, the panel shows that the domestic flight is waiting for tracked wheels-off.
+- If domestic EET / takeoff enrichment is unavailable, the existing live-route calculation remains available as a fallback once usable live data exists.
+
 ## 16. Passed REF FIX back-estimation
 
 If the selected REF FIX exists in the resolved filed route but the aircraft has already passed it, the system can estimate the past crossing time instead of leaving ETO blank.

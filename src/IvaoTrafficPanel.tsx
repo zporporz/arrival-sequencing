@@ -17,6 +17,13 @@ type TrafficFlight = {
   heading: number | null
   connectedAt: string | null
   airlineIcao: string | null
+  departureCountryId: string | null
+  arrivalCountryId: string | null
+  isDomesticThailand: boolean
+  filedEetSeconds: number | null
+  trackedTakeoffAt: string | null
+  filedDestinationEtaAt: string | null
+  domesticTriggerStatus: 'READY' | 'WAITING_TAKEOFF' | 'EET_UNAVAILABLE' | 'TAKEOFF_UNAVAILABLE' | 'NOT_DOMESTIC' | 'UNKNOWN'
 }
 
 type Props = {
@@ -71,6 +78,8 @@ type AutoEstimate = {
   pastCrossing?: boolean
   crossingAgeMin?: number | null
   assumedDirect?: boolean
+  triggerSource?: 'live-route' | 'domestic-eet'
+  triggerEta?: string | null
 }
 
 type RouteProgress = { progressNm: number; offRouteNm: number }
@@ -195,8 +204,19 @@ function autoEstimate(
   baseTimeIso: string,
   lookaheadMin: number,
 ): AutoEstimate {
+  const baseTime = new Date(baseTimeIso).getTime()
+  const safeBaseTime = Number.isFinite(baseTime) ? baseTime : Date.now()
+
   if (!refFix) return { status: 'unavailable', refFix: null, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'No REF FIX' }
   if (!flight.route || !flight.departure) return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'Filed route unavailable' }
+
+  if (flight.isDomesticThailand && flight.domesticTriggerStatus === 'WAITING_TAKEOFF') {
+    return {
+      status: 'waiting', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null,
+      reason: 'Domestic flight waiting for tracked takeoff', triggerSource: 'domestic-eet', triggerEta: null,
+    }
+  }
+
   if (flight.latitude == null || flight.longitude == null) return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'Live position unavailable' }
   if (!geometry) return { status: 'calculating', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'Resolving filed route' }
   if (groundSpeed == null || groundSpeed < MIN_AUTO_GS_KT) return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'Ground speed too low' }
@@ -210,9 +230,20 @@ function autoEstimate(
   const finalSegment = geometry.segments[geometry.segments.length - 1]
   const routeEndDistance = geometry.totalDistance ?? finalSegment?.cumulativeDistance ?? progress.progressNm
   const remainingToDestinationNm = Math.max(0, routeEndDistance - progress.progressNm) + progress.offRouteNm
-  const minutesToDestination = remainingToDestinationNm / groundSpeed * 60
-  const baseTime = new Date(baseTimeIso).getTime()
-  const safeBaseTime = Number.isFinite(baseTime) ? baseTime : Date.now()
+  const liveMinutesToDestination = remainingToDestinationNm / groundSpeed * 60
+
+  let triggerMinutesToDestination = liveMinutesToDestination
+  let triggerSource: 'live-route' | 'domestic-eet' = 'live-route'
+  let triggerEta: string | null = null
+
+  if (flight.isDomesticThailand && flight.domesticTriggerStatus === 'READY' && flight.filedDestinationEtaAt) {
+    const domesticEtaMs = new Date(flight.filedDestinationEtaAt).getTime()
+    if (Number.isFinite(domesticEtaMs)) {
+      triggerMinutesToDestination = (domesticEtaMs - safeBaseTime) / 60_000
+      triggerSource = 'domestic-eet'
+      triggerEta = flight.filedDestinationEtaAt
+    }
+  }
 
   const targetDistance = fixDistanceAlongRoute(geometry, refFix, progress.progressNm)
   if (targetDistance != null) {
@@ -220,62 +251,89 @@ function autoEstimate(
     const minutesToFix = remainingNm / groundSpeed * 60
     const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
 
-    if (minutesToDestination > lookaheadMin) {
-      return { status: 'waiting', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Outside ' + lookaheadMin + ' min ETA window' }
+    if (triggerMinutesToDestination > lookaheadMin) {
+      return {
+        status: 'waiting', refFix, eto, remainingNm, minutes: triggerMinutesToDestination,
+        groundSpeed, offRouteNm: progress.offRouteNm,
+        reason: triggerSource === 'domestic-eet' ? 'Domestic tracked-takeoff + filed-EET ETA outside window' : 'Outside ' + lookaheadMin + ' min ETA window',
+        triggerSource, triggerEta,
+      }
     }
-    return { status: 'ready', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
+    return {
+      status: 'ready', refFix, eto, remainingNm, minutes: triggerMinutesToDestination,
+      groundSpeed, offRouteNm: progress.offRouteNm, reason: null, triggerSource, triggerEta,
+    }
   }
 
   const routeFixDistances = fixDistancesAlongRoute(geometry, refFix)
   if (!routeFixDistances.length) {
-    return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not in filed route' }
+    return {
+      status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: triggerMinutesToDestination,
+      groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not in filed route', triggerSource, triggerEta,
+    }
   }
 
   const passedDistance = passedFixDistanceAlongRoute(geometry, refFix, progress.progressNm)
   if (passedDistance == null) {
-    return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not ahead in resolved route' }
+    return {
+      status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: triggerMinutesToDestination,
+      groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not ahead in resolved route', triggerSource, triggerEta,
+    }
   }
 
   const distanceSinceFix = Math.max(0, progress.progressNm - passedDistance) + progress.offRouteNm
   const crossingAgeMin = distanceSinceFix / groundSpeed * 60
   const eto = formatUtcHhmm(safeBaseTime - crossingAgeMin * 60_000)
 
-  if (minutesToDestination > lookaheadMin) {
+  if (triggerMinutesToDestination > lookaheadMin) {
     return {
-      status: 'waiting', refFix, eto, remainingNm: distanceSinceFix, minutes: minutesToDestination,
-      groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX already passed; outside ' + lookaheadMin + ' min ETA window',
-      pastCrossing: true, crossingAgeMin,
+      status: 'waiting', refFix, eto, remainingNm: distanceSinceFix, minutes: triggerMinutesToDestination,
+      groundSpeed, offRouteNm: progress.offRouteNm,
+      reason: triggerSource === 'domestic-eet' ? 'REF FIX already passed; domestic filed-EET ETA outside window' : 'REF FIX already passed; outside ' + lookaheadMin + ' min ETA window',
+      pastCrossing: true, crossingAgeMin, triggerSource, triggerEta,
     }
   }
 
   return {
-    status: 'ready', refFix, eto, remainingNm: distanceSinceFix, minutes: minutesToDestination,
+    status: 'ready', refFix, eto, remainingNm: distanceSinceFix, minutes: triggerMinutesToDestination,
     groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Estimated past REF FIX crossing',
-    pastCrossing: true, crossingAgeMin,
+    pastCrossing: true, crossingAgeMin, triggerSource, triggerEta,
   }
 }
 
 function estimateText(estimate: AutoEstimate | undefined, manual: boolean, lookaheadMin: number) {
   if (!estimate) return 'AUTO ETO · waiting for route data'
+  const domesticEta = estimate.triggerSource === 'domestic-eet' && estimate.triggerEta
+    ? ' · DOM EET ETA ' + formatUtcHhmm(new Date(estimate.triggerEta).getTime()) + 'Z'
+    : ''
+
   if (manual) {
     if (estimate.status === 'ready') {
-      if (estimate.assumedDirect) return 'MANUAL ETO · assumed-DCT auto estimate ' + estimate.refFix + ' ' + estimate.eto + 'Z available'
-      if (estimate.pastCrossing) return 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available'
-      return 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available'
+      if (estimate.assumedDirect) return 'MANUAL ETO · assumed-DCT auto estimate ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + domesticEta
+      if (estimate.pastCrossing) return 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + domesticEta
+      return 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available' + domesticEta
     }
     return 'MANUAL ETO · automatic estimate not applied'
   }
   if (estimate.status === 'ready') {
     if (estimate.assumedDirect) {
       const past = estimate.pastCrossing ? ' · EST PAST XING' : ''
-      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · REF FIX NOT FILED · ASSUMED DCT' + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0)
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · REF FIX NOT FILED · ASSUMED DCT' + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
     }
     if (estimate.pastCrossing) {
-      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0)
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
     }
-    return 'AUTO ETO · ' + estimate.refFix + ' ' + estimate.eto + 'Z · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0)
+    return 'AUTO ETO · ' + estimate.refFix + ' ' + estimate.eto + 'Z · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
   }
   if (estimate.status === 'waiting') {
+    if (estimate.reason === 'Domestic flight waiting for tracked takeoff') {
+      return 'AUTO ETO waiting · TH DOMESTIC · waiting for tracked wheels-off + filed EET'
+    }
+    if (estimate.triggerSource === 'domestic-eet' && estimate.triggerEta) {
+      const minutes = Math.max(0, Math.ceil(estimate.minutes || 0))
+      const assumed = estimate.assumedDirect ? ' · REF FIX NOT FILED · ASSUMED DCT' : ''
+      return 'AUTO ETO waiting · DOM EET ETA ' + formatUtcHhmm(new Date(estimate.triggerEta).getTime()) + 'Z · ~' + minutes + ' min' + assumed + ' · auto-fill starts ETA ≤' + lookaheadMin + ' min'
+    }
     if (estimate.assumedDirect) return 'AUTO ETO waiting · REF FIX NOT FILED · ASSUMED DCT · ETA >' + lookaheadMin + ' min'
     if (estimate.pastCrossing) return 'AUTO ETO waiting · ' + estimate.refFix + ' already passed ~' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · ETA >' + lookaheadMin + ' min'
     return 'AUTO ETO waiting · ~' + Math.ceil(estimate.minutes || 0) + ' min to destination · auto-fill starts ETA ≤' + lookaheadMin + ' min'
@@ -595,7 +653,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         <div className="ivao-traffic-heading">
           <div>
             <strong>IVAO inbound · {airport}</strong>
-            <span>AUTO ETO uses filed-route distance + live GS. If the selected REF FIX is not filed, the system may extend the filed route with an assumed DCT to that fix and labels the estimate accordingly.</span>
+            <span>AUTO ETO uses filed-route distance + live GS. Thailand domestic flights use tracked wheels-off + filed EET for the look-ahead trigger. If the selected REF FIX is not filed, the system may extend the filed route with an assumed DCT to that fix and labels the estimate accordingly.</span>
           </div>
           <div className="ivao-traffic-heading-actions">
             <label className="ivao-lookahead-control"><span>START AUTO ETO</span><select value={lookaheadMin} onChange={(event) => changeLookahead(Number(event.target.value))}>{AUTO_ETO_LOOKAHEAD_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>ETA ≤ {minutes} min</option>)}</select></label>
