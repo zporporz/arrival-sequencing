@@ -95,6 +95,12 @@ const isoFromClock = (serviceDate: string, hhmm: string, anchor?: string | null)
   return candidate.toISOString()
 }
 
+const airlineIcaoFromCallsign = (value: string | null | undefined) => {
+  const callsign = String(value || '').trim().toUpperCase()
+  const match = callsign.match(/^([A-Z]{3})[A-Z0-9]/)
+  return match?.[1] || null
+}
+
 const sameInstant = (left: string, right: string) => {
   const leftTime = new Date(left).getTime()
   const rightTime = new Date(right).getTime()
@@ -756,7 +762,12 @@ function App() {
                   return (
                     <tr key={row.id} className={row.status === 'LANDED' ? 'landed-row' : 'active-row'}>
                       <td className="seq-cell">{row.sequence_no}</td>
-                      <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} bold /></td>
+                      <td>
+                        <div className="sequence-callsign-cell">
+                          {airlineIcaoFromCallsign(row.callsign) && <span className="sequence-airline-logo" aria-hidden="true"><img src={`/api/sequence/airline-logo?icao=${encodeURIComponent(airlineIcaoFromCallsign(row.callsign) || '')}`} alt="" onError={(event) => { event.currentTarget.closest('.sequence-airline-logo')?.classList.add('is-missing') }} /></span>}
+                          <EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} bold />
+                        </div>
+                      </td>
                       <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} /></td>
                       <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} /></td>
                       <td>

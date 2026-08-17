@@ -328,3 +328,34 @@ th:nth-child(14), td:nth-child(14) { width: 54px !important; min-width: 54px !im
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .brand-block::before { width: 92px !important; flex-basis: 92px !important; }
 }
+
+
+/* Airline logo in the live sequence callsign column. */
+.sequence-callsign-cell {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 150px !important;
+}
+.sequence-callsign-cell .cell-editor-wrap {
+  flex: 1 1 auto !important;
+  min-width: 105px !important;
+}
+.sequence-airline-logo {
+  width: 30px !important;
+  height: 30px !important;
+  flex: 0 0 30px !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: hidden !important;
+  border: 1px solid #e0e6ef !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+}
+.sequence-airline-logo img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  padding: 3px !important;
+}
+.sequence-airline-logo.is-missing { display: none !important; }
