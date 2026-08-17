@@ -26,6 +26,7 @@ import AdminPanel from './AdminPanelV2'
 import AmanShell from './AmanShell'
 import App from './App'
 
+// Deployment marker: AMAN V2 is the default live interface.
 installSpreadsheetNavigation()
 installSpacingGuard()
 installFieldGuide()
