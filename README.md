@@ -280,6 +280,8 @@ Controller can select when AUTO ETO starts filling the ETO field:
 - ETA ≤ 60 min
 - ETA ≤ 90 min
 - ETA ≤ 120 min
+- ETA ≤ 180 min
+- ETA ≤ 240 min (4 hours)
 
 The selected value is stored locally in the browser.
 
@@ -296,7 +298,7 @@ tracked wheels-off timestamp + filed EET
         ↓
 filed destination ETA baseline
         ↓
-ETA ≤ selected 30 / 45 / 60 / 90 / 120 min window
+ETA ≤ selected 30 / 45 / 60 / 90 / 120 / 180 / 240 min window
         ↓
 AUTO ETO uses current route geometry + current smoothed live GS to the REF FIX
 ```
