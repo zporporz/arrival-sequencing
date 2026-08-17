@@ -261,22 +261,26 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
       const tablePayload = await tableResponse.json() as { tables?: WaypointTable[]; transitionWaypoints?: string[]; error?: string }
       if (!tableResponse.ok) throw new Error(tablePayload.error || `Waypoint lookup returned ${tableResponse.status}`)
       const existingFixes = new Set(timings.map((timing) => timing.fix.toUpperCase()))
-      const transitionWaypoints = (tablePayload.transitionWaypoints || []).map((fix) => fix.toUpperCase()).filter((fix) => !existingFixes.has(fix))
+      const starEntryFixes = new Set(runwayStars.map((star) => star.entry_fix?.trim().toUpperCase()).filter((fix): fix is string => Boolean(fix)))
+      const transitionWaypoints = (tablePayload.transitionWaypoints || [])
+        .map((fix) => fix.toUpperCase())
+        .filter((fix) => starEntryFixes.has(fix) && !existingFixes.has(fix))
       if (transitionWaypoints.length) {
         const next = new Map<string, StarTimingDraft>()
         for (const fix of transitionWaypoints) {
+          const designators = runwayStars.filter((star) => star.entry_fix?.trim().toUpperCase() === fix).map((star) => star.designator)
           next.set(fix, {
             fix,
             minutes: '',
             source: '',
             effectiveFrom: defaultEffectiveFrom,
-            designators: [],
-            origin: 'AIP transition waypoint · AD 2.22 inbound routes',
+            designators,
+            origin: 'AIP STAR entry fix · AD 2.22',
           })
         }
         const sorted = [...next.values()].sort((left, right) => left.fix.localeCompare(right.fix))
         setStarDrafts(Object.fromEntries(sorted.map((draft) => [draft.fix, draft])))
-        setAipWaypointMessage(`${sorted.length} transition REF FIX candidates loaded from CAAT AD 2.22. Nominal Min is still required.`)
+        setAipWaypointMessage(`${sorted.length} missing STAR entry REF FIX ${sorted.length === 1 ? 'candidate' : 'candidates'} loaded from CAAT AD 2.22. Nominal Min is still required.`)
         return
       }
 
@@ -302,7 +306,7 @@ export default function TimingEditor({ airports, runwayConfigs, starProcedures =
         }
         const fixes = await extractWaypointFixes(await assetResponse.arrayBuffer())
         for (const fix of fixes) {
-          if (existingFixes.has(fix)) continue
+          if (!starEntryFixes.has(fix) || existingFixes.has(fix)) continue
           const entryStars = runwayStars.filter((star) => star.entry_fix?.toUpperCase() === fix).map((star) => star.designator)
           const current = next.get(fix)
           if (current) {
