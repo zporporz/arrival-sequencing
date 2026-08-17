@@ -91,7 +91,7 @@ const estimateFunctions = `function autoEstimate(
     const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
 
     if (minutesToDestination > lookaheadMin) {
-      return { status: 'waiting', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${lookaheadMin} min ETA window` }
+      return { status: 'waiting', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Outside ' + lookaheadMin + ' min ETA window' }
     }
     return { status: 'ready', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
   }
@@ -113,7 +113,7 @@ const estimateFunctions = `function autoEstimate(
   if (minutesToDestination > lookaheadMin) {
     return {
       status: 'waiting', refFix, eto, remainingNm: distanceSinceFix, minutes: minutesToDestination,
-      groundSpeed, offRouteNm: progress.offRouteNm, reason: `REF FIX already passed; outside ${lookaheadMin} min ETA window`,
+      groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX already passed; outside ' + lookaheadMin + ' min ETA window',
       pastCrossing: true, crossingAgeMin,
     }
   }
@@ -130,25 +130,25 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   if (manual) {
     if (estimate.status === 'ready') {
       return estimate.pastCrossing
-        ? `MANUAL ETO · estimated past crossing ${estimate.refFix} ${estimate.eto}Z available`
-        : `MANUAL ETO · auto estimate ${estimate.eto}Z available`
+        ? 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available'
+        : 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available'
     }
     return 'MANUAL ETO · automatic estimate not applied'
   }
   if (estimate.status === 'ready') {
     if (estimate.pastCrossing) {
-      return `AUTO ETO · ${estimate.refFix} ~${estimate.eto}Z · EST PAST XING · ~${Math.round(estimate.remainingNm || 0)} NM / ${Math.max(1, Math.round(estimate.crossingAgeMin || 0))} min ago · GS ${Math.round(estimate.groundSpeed || 0)}`
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0)
     }
-    return `AUTO ETO · ${estimate.refFix} ${estimate.eto}Z · ${Math.round(estimate.remainingNm || 0)} NM · GS ${Math.round(estimate.groundSpeed || 0)}`
+    return 'AUTO ETO · ' + estimate.refFix + ' ' + estimate.eto + 'Z · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0)
   }
   if (estimate.status === 'waiting') {
     if (estimate.pastCrossing) {
-      return `AUTO ETO waiting · ${estimate.refFix} already passed ~${Math.max(1, Math.round(estimate.crossingAgeMin || 0))} min ago · ETA >${lookaheadMin} min`
+      return 'AUTO ETO waiting · ' + estimate.refFix + ' already passed ~' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · ETA >' + lookaheadMin + ' min'
     }
-    return `AUTO ETO waiting · ~${Math.ceil(estimate.minutes || 0)} min to destination · auto-fill starts ETA ≤${lookaheadMin} min`
+    return 'AUTO ETO waiting · ~' + Math.ceil(estimate.minutes || 0) + ' min to destination · auto-fill starts ETA ≤' + lookaheadMin + ' min'
   }
-  if (estimate.status === 'calculating') return `AUTO ETO · ${estimate.reason || 'calculating'}`
-  return `AUTO ETO unavailable · ${estimate.reason || 'insufficient data'}`
+  if (estimate.status === 'calculating') return 'AUTO ETO · ' + (estimate.reason || 'calculating')
+  return 'AUTO ETO unavailable · ' + (estimate.reason || 'insufficient data')
 }
 
 `
