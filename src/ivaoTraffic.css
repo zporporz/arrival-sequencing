@@ -1,4 +1,5 @@
-.ivao-traffic-menu { position: relative; }
+.workspace-card { overflow: visible !important; }
+.ivao-traffic-menu { position: relative; z-index: 60; }
 .ivao-traffic-menu > summary { list-style: none; }
 .ivao-traffic-menu > summary::-webkit-details-marker { display: none; }
 .ivao-traffic-trigger {
