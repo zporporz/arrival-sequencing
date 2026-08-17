@@ -232,7 +232,7 @@ export async function onRequestGet(context) {
     const flights = await Promise.all(inboundPilots.map(async (pilot) => {
       const fp = pilot.flightPlan || {};
       const track = pilot.lastTrack || {};
-      let context = {
+      let domestic = {
         departureCountryId: cleanCountryId(fp?.departure?.countryId),
         arrivalCountryId: cleanCountryId(fp?.arrival?.countryId),
         isDomesticThailand: false,
@@ -240,55 +240,16 @@ export async function onRequestGet(context) {
         trackedTakeoffAt: null,
         filedDestinationEtaAt: null,
         domesticTriggerStatus: 'UNKNOWN',
-        domesticTriggerError: null,
         detailedFlightPlan: null,
       };
 
       try {
-        context = await domesticContext(pilot, context.env || context);
+        domestic = await domesticContext(pilot, context.env);
       } catch {
-        // Replaced below with a second safe attempt using the Cloudflare environment.
+        // Domestic enrichment is optional. Keep the live traffic row usable if IVAO detail endpoints fail.
       }
 
-      try {
-        context = await domesticContext(pilot, context.env ? context.env : context);
-      } catch {
-        // This branch is intentionally overwritten below; kept out of flight rendering failures.
-      }
-
-      return { pilot, fp, track, context };
-    }));
-
-    const enrichedFlights = [];
-    for (const item of flights) {
-      let context = item.context;
-      try {
-        context = await domesticContext(item.pilot, context.env || context);
-      } catch {
-        // no-op
-      }
-      enrichedFlights.push({ ...item, context });
-    }
-
-    const renderedFlights = await Promise.all(enrichedFlights.map(async ({ pilot, fp, track }) => {
-      let context;
-      try {
-        context = await domesticContext(pilot, context.env || context);
-      } catch {
-        context = {
-          departureCountryId: cleanCountryId(fp?.departure?.countryId),
-          arrivalCountryId: cleanCountryId(fp?.arrival?.countryId),
-          isDomesticThailand: false,
-          filedEetSeconds: null,
-          trackedTakeoffAt: null,
-          filedDestinationEtaAt: null,
-          domesticTriggerStatus: 'UNKNOWN',
-          domesticTriggerError: null,
-          detailedFlightPlan: null,
-        };
-      }
-
-      const detailed = context.detailedFlightPlan || {};
+      const detailed = domestic.detailedFlightPlan || {};
       return {
         sessionId: String(pilot.id ?? ''),
         vid: pilot.userId != null ? String(pilot.userId) : null,
@@ -305,18 +266,21 @@ export async function onRequestGet(context) {
         heading: finiteNumber(track.heading, track.course, pilot.heading),
         connectedAt: pilot.createdAt || null,
         airlineIcao: airlineIcaoFromCallsign(pilot.callsign),
-        departureCountryId: context.departureCountryId,
-        arrivalCountryId: context.arrivalCountryId,
-        isDomesticThailand: context.isDomesticThailand,
-        filedEetSeconds: context.filedEetSeconds,
-        trackedTakeoffAt: context.trackedTakeoffAt,
-        filedDestinationEtaAt: context.filedDestinationEtaAt,
-        domesticTriggerStatus: context.domesticTriggerStatus,
+        departureCountryId: domestic.departureCountryId,
+        arrivalCountryId: domestic.arrivalCountryId,
+        isDomesticThailand: domestic.isDomesticThailand,
+        filedEetSeconds: domestic.filedEetSeconds,
+        trackedTakeoffAt: domestic.trackedTakeoffAt,
+        filedDestinationEtaAt: domestic.filedDestinationEtaAt,
+        domesticTriggerStatus: domestic.domesticTriggerStatus,
       };
     }));
 
-    renderedFlights.sort((a, b) => a.callsign.localeCompare(b.callsign));
-    return json({ airport, fetchedAt: new Date().toISOString(), flights: renderedFlights.filter((flight) => flight.callsign) });
+    return json({
+      airport,
+      fetchedAt: new Date().toISOString(),
+      flights: flights.filter((flight) => flight.callsign).sort((a, b) => a.callsign.localeCompare(b.callsign)),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return json({ error: message }, message.includes('IVAO_API_KEY') ? 503 : 502);
