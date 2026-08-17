@@ -68,6 +68,8 @@ type AutoEstimate = {
   groundSpeed: number | null
   offRouteNm: number | null
   reason: string | null
+  pastCrossing?: boolean
+  crossingAgeMin?: number | null
 }
 
 type RouteProgress = { progressNm: number; offRouteNm: number }
@@ -147,25 +149,41 @@ function findRouteProgress(flight: TrafficFlight, geometry: RouteGeometry): Rout
   return best
 }
 
-function fixDistanceAlongRoute(geometry: RouteGeometry, fix: string, currentProgressNm: number) {
+function fixDistancesAlongRoute(geometry: RouteGeometry, fix: string) {
   const target = fix.trim().toUpperCase()
   const candidates: number[] = []
   for (const segment of geometry.segments) {
     const startDistance = Math.max(0, segment.cumulativeDistance - segment.distance)
-    if (segment.from.identifier.toUpperCase() === target && startDistance >= currentProgressNm - 1) candidates.push(startDistance)
-    if (segment.to.identifier.toUpperCase() === target && segment.cumulativeDistance >= currentProgressNm - 1) candidates.push(segment.cumulativeDistance)
+    if (segment.from.identifier.toUpperCase() === target) candidates.push(startDistance)
+    if (segment.to.identifier.toUpperCase() === target) candidates.push(segment.cumulativeDistance)
   }
-  return candidates.sort((a, b) => a - b)[0] ?? null
+  return candidates.sort((a, b) => a - b)
+}
+
+function fixDistanceAlongRoute(geometry: RouteGeometry, fix: string, currentProgressNm: number) {
+  return fixDistancesAlongRoute(geometry, fix).find((distance) => distance >= currentProgressNm - 1) ?? null
+}
+
+function passedFixDistanceAlongRoute(geometry: RouteGeometry, fix: string, currentProgressNm: number) {
+  const candidates = fixDistancesAlongRoute(geometry, fix).filter((distance) => distance < currentProgressNm - 1)
+  return candidates.length ? candidates[candidates.length - 1] : null
 }
 
 function upcomingConfiguredFix(flight: TrafficFlight, geometry: RouteGeometry, fixes: string[]) {
   const progress = findRouteProgress(flight, geometry)
   if (!progress) return suggestedFix(flight.route, fixes)
-  const candidates = fixes
+
+  const ahead = fixes
     .map((fix) => ({ fix, distance: fixDistanceAlongRoute(geometry, fix, progress.progressNm) }))
     .filter((item): item is { fix: string; distance: number } => item.distance != null)
     .sort((a, b) => a.distance - b.distance)
-  return candidates[0]?.fix || suggestedFix(flight.route, fixes)
+  if (ahead[0]) return ahead[0].fix
+
+  const passed = fixes
+    .map((fix) => ({ fix, distance: passedFixDistanceAlongRoute(geometry, fix, progress.progressNm) }))
+    .filter((item): item is { fix: string; distance: number } => item.distance != null)
+    .sort((a, b) => b.distance - a.distance)
+  return passed[0]?.fix || suggestedFix(flight.route, fixes)
 }
 
 function autoEstimate(
@@ -188,41 +206,78 @@ function autoEstimate(
     return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Aircraft too far from filed route' }
   }
 
-  const targetDistance = fixDistanceAlongRoute(geometry, refFix, progress.progressNm)
-  if (targetDistance == null) {
-    return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not ahead in filed route' }
-  }
-
-  const remainingNm = Math.max(0, targetDistance - progress.progressNm) + progress.offRouteNm
-  const minutesToFix = remainingNm / groundSpeed * 60
   const finalSegment = geometry.segments[geometry.segments.length - 1]
-  const routeEndDistance = geometry.totalDistance ?? finalSegment?.cumulativeDistance ?? targetDistance
+  const routeEndDistance = geometry.totalDistance ?? finalSegment?.cumulativeDistance ?? progress.progressNm
   const remainingToDestinationNm = Math.max(0, routeEndDistance - progress.progressNm) + progress.offRouteNm
-  const minutes = remainingToDestinationNm / groundSpeed * 60
+  const minutesToDestination = remainingToDestinationNm / groundSpeed * 60
   const baseTime = new Date(baseTimeIso).getTime()
   const safeBaseTime = Number.isFinite(baseTime) ? baseTime : Date.now()
-  const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
 
-  if (minutes > lookaheadMin) {
-    return { status: 'waiting', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${lookaheadMin} min ETA window` }
+  const targetDistance = fixDistanceAlongRoute(geometry, refFix, progress.progressNm)
+  if (targetDistance != null) {
+    const remainingNm = Math.max(0, targetDistance - progress.progressNm) + progress.offRouteNm
+    const minutesToFix = remainingNm / groundSpeed * 60
+    const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
+
+    if (minutesToDestination > lookaheadMin) {
+      return { status: 'waiting', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Outside ' + lookaheadMin + ' min ETA window' }
+    }
+    return { status: 'ready', refFix, eto, remainingNm, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
   }
-  return { status: 'ready', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
+
+  const routeFixDistances = fixDistancesAlongRoute(geometry, refFix)
+  if (!routeFixDistances.length) {
+    return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not in filed route' }
+  }
+
+  const passedDistance = passedFixDistanceAlongRoute(geometry, refFix, progress.progressNm)
+  if (passedDistance == null) {
+    return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: minutesToDestination, groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX not ahead in resolved route' }
+  }
+
+  const distanceSinceFix = Math.max(0, progress.progressNm - passedDistance) + progress.offRouteNm
+  const crossingAgeMin = distanceSinceFix / groundSpeed * 60
+  const eto = formatUtcHhmm(safeBaseTime - crossingAgeMin * 60_000)
+
+  if (minutesToDestination > lookaheadMin) {
+    return {
+      status: 'waiting', refFix, eto, remainingNm: distanceSinceFix, minutes: minutesToDestination,
+      groundSpeed, offRouteNm: progress.offRouteNm, reason: 'REF FIX already passed; outside ' + lookaheadMin + ' min ETA window',
+      pastCrossing: true, crossingAgeMin,
+    }
+  }
+
+  return {
+    status: 'ready', refFix, eto, remainingNm: distanceSinceFix, minutes: minutesToDestination,
+    groundSpeed, offRouteNm: progress.offRouteNm, reason: 'Estimated past REF FIX crossing',
+    pastCrossing: true, crossingAgeMin,
+  }
 }
 
 function estimateText(estimate: AutoEstimate | undefined, manual: boolean, lookaheadMin: number) {
   if (!estimate) return 'AUTO ETO · waiting for route data'
   if (manual) {
-    if (estimate.status === 'ready') return `MANUAL ETO · auto estimate ${estimate.eto}Z available`
+    if (estimate.status === 'ready') {
+      return estimate.pastCrossing
+        ? 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available'
+        : 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available'
+    }
     return 'MANUAL ETO · automatic estimate not applied'
   }
   if (estimate.status === 'ready') {
-    return `AUTO ETO · ${estimate.refFix} ${estimate.eto}Z · ${Math.round(estimate.remainingNm || 0)} NM · GS ${Math.round(estimate.groundSpeed || 0)}`
+    if (estimate.pastCrossing) {
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0)
+    }
+    return 'AUTO ETO · ' + estimate.refFix + ' ' + estimate.eto + 'Z · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0)
   }
   if (estimate.status === 'waiting') {
-    return `AUTO ETO waiting · ~${Math.ceil(estimate.minutes || 0)} min to destination · auto-fill starts ETA ≤${lookaheadMin} min`
+    if (estimate.pastCrossing) {
+      return 'AUTO ETO waiting · ' + estimate.refFix + ' already passed ~' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · ETA >' + lookaheadMin + ' min'
+    }
+    return 'AUTO ETO waiting · ~' + Math.ceil(estimate.minutes || 0) + ' min to destination · auto-fill starts ETA ≤' + lookaheadMin + ' min'
   }
-  if (estimate.status === 'calculating') return `AUTO ETO · ${estimate.reason || 'calculating'}`
-  return `AUTO ETO unavailable · ${estimate.reason || 'insufficient data'}`
+  if (estimate.status === 'calculating') return 'AUTO ETO · ' + (estimate.reason || 'calculating')
+  return 'AUTO ETO unavailable · ' + (estimate.reason || 'insufficient data')
 }
 
 export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, disabled, onAdd }: Props) {
@@ -512,7 +567,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
                 <div className="ivao-traffic-call"><strong>{flight.callsign}</strong><span>{flight.aircraft || '—'}</span></div>
                 <div className="ivao-traffic-route"><strong>{flight.departure || '----'}</strong><span>→</span><strong>{airport}</strong>{flight.vid && <small>VID {flight.vid}</small>}</div>
                 <small className="ivao-traffic-track">{formatTrack(flight)}</small>
-                <small className={`ivao-auto-eto ${draft.etoManual ? 'is-manual' : estimate?.status === 'ready' ? 'is-ready' : estimate?.status === 'waiting' ? 'is-waiting' : ''}`}>
+                <small className={`ivao-auto-eto ${draft.etoManual ? 'is-manual' : estimate?.pastCrossing && estimate?.status === 'ready' ? 'is-past' : estimate?.status === 'ready' ? 'is-ready' : estimate?.status === 'waiting' ? 'is-waiting' : ''}`}>
                   {estimateText(estimate, draft.etoManual, lookaheadMin)}
                 </small>
                 {flight.route && <small className="ivao-traffic-fpl" title={flight.route}>{flight.route}</small>}

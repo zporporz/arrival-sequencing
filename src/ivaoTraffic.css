@@ -138,6 +138,7 @@
   line-height: 1.35;
 }
 .ivao-auto-eto.is-ready { background: #eaf8ef; color: #167647; }
+.ivao-auto-eto.is-past { background: #fff3e3; color: #995d0d; }
 .ivao-auto-eto.is-waiting { background: #fff6df; color: #8a6418; }
 .ivao-auto-eto.is-manual { background: #f0f2f6; color: #626d7e; }
 .ivao-traffic-fpl {
