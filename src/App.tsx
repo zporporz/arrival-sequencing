@@ -20,9 +20,20 @@ type PublishedRunway = {
   timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'
 }
 
+type PublishedStarProcedure = {
+  id: string
+  runway_config_id: string
+  designator: string
+  entry_fix: string | null
+  effective_from: string | null
+  effective_to: string | null
+  active: boolean
+}
+
 type WorkspacePayload = {
   airports: PublishedAirport[]
   runwayConfigs: PublishedRunway[]
+  starProcedures: PublishedStarProcedure[]
 }
 
 type LiveWorkspace = {
@@ -167,7 +178,7 @@ function App() {
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [utcNow, setUtcNow] = useState(new Date())
   const [workspace, setWorkspace] = useState<LiveWorkspace | null>(null)
-  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspacePayload>({ airports: [], runwayConfigs: [] })
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspacePayload>({ airports: [], runwayConfigs: [], starProcedures: [] })
   const channelRef = useRef<RealtimeChannel | null>(null)
   const realtimePendingIdsRef = useRef<Set<string>>(new Set())
   const realtimeFlushTimerRef = useRef<number | null>(null)
@@ -259,7 +270,12 @@ function App() {
 
         const workspaceResponse = await fetch('/api/workspaces', { credentials: 'same-origin', cache: 'no-store' })
         if (!workspaceResponse.ok) throw new Error('Unable to load published workspaces')
-        const config = await workspaceResponse.json() as WorkspacePayload
+        const configPayload = await workspaceResponse.json() as Partial<WorkspacePayload>
+        const config: WorkspacePayload = {
+          airports: configPayload.airports ?? [],
+          runwayConfigs: configPayload.runwayConfigs ?? [],
+          starProcedures: configPayload.starProcedures ?? [],
+        }
         const airportById = new Map(config.airports.map((airport) => [airport.id, airport]))
         const candidates: LiveWorkspace[] = config.runwayConfigs.flatMap((runway) => {
           const airport = airportById.get(runway.airport_id)
@@ -711,6 +727,10 @@ function App() {
               {workspace && <IvaoTrafficPanel
                 airport={workspace.airport}
                 fixes={fixes.map((fix) => fix.fix)}
+                starProcedures={workspaceConfig.starProcedures
+                  .filter((star) => star.runway_config_id === workspace.runwayId && star.active)
+                  .filter((star) => !session || (!star.effective_from || star.effective_from <= session.service_date) && (!star.effective_to || star.effective_to >= session.service_date))
+                  .flatMap((star) => star.entry_fix ? [{ designator: star.designator, entryFix: star.entry_fix }] : [])}
                 existingCallsigns={arrivals.map((row) => row.callsign)}
                 disabled={!session || !workspace.timingReady || fixes.length === 0}
                 onAdd={addIvaoFlight}

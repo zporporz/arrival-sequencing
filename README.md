@@ -252,7 +252,10 @@ waypoints + leg distances + cumulative route distance
 
 ## 13. AUTO reference-fix selection
 
-- The system prefers the next configured reference fix that is still ahead on the resolved route.
+- If the filed route contains a configured STAR designator (for example `SABAI3A`), the system maps that procedure through `star_procedures` and prioritizes its configured entry fix (for example `SABAI`) as the REF FIX.
+- This STAR-designator mapping takes priority over an earlier configured waypoint that also appears in the en-route portion of the FPL.
+- If the route parser does not expand the STAR procedure into its entry fix, the estimator bridges the resolved filed route to the mapped STAR entry for planning while labelling it as `FILED STAR ... · STAR ENTRY ... · ROUTE→STAR ENTRY`.
+- Otherwise the system prefers the next configured reference fix that is still ahead on the resolved route.
 - If all configured fixes have already been passed, it selects the most recently passed configured fix when possible.
 - Controller can manually choose another REF FIX at any time.
 

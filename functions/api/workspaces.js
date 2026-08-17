@@ -10,10 +10,15 @@ export async function onRequestGet(context) {
       context.env,
       "runway_configs?select=id,airport_id,flow,label,timing_status,active,published,sort_order&active=eq.true&published=eq.true&order=sort_order.asc,flow.asc",
     );
+    const starProcedures = await supabaseAdminRequest(
+      context.env,
+      "star_procedures?select=id,runway_config_id,designator,entry_fix,effective_from,effective_to,active&active=eq.true&order=designator.asc",
+    );
 
     return Response.json({
       airports: airports.data ?? [],
       runwayConfigs: runwayConfigs.data ?? [],
+      starProcedures: starProcedures.data ?? [],
     }, {
       headers: { "Cache-Control": "no-store" },
     });

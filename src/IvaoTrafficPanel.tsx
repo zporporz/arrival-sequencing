@@ -32,9 +32,12 @@ type TrafficAddItem = {
   eto: string
 }
 
+type StarProcedure = { designator: string; entryFix: string }
+
 type Props = {
   airport: string
   fixes: string[]
+  starProcedures: StarProcedure[]
   existingCallsigns: string[]
   disabled?: boolean
   onAdd: (flight: TrafficFlight, refFix: string, eto: string) => Promise<void>
@@ -86,6 +89,7 @@ type AutoEstimate = {
   crossingAgeMin?: number | null
   assumedDirect?: boolean
   autoAssignedFix?: boolean
+  filedStarDesignator?: string | null
   triggerSource?: 'live-route' | 'domestic-eet'
   triggerEta?: string | null
 }
@@ -107,6 +111,22 @@ const routeKey = (flight: TrafficFlight, airport: string) => `${flight.departure
 function formatUtcHhmm(timestampMs: number) {
   const date = new Date(timestampMs)
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function filedStarEntryFix(route: string | null, starProcedures: StarProcedure[], fixes: string[]) {
+  if (!route || !starProcedures.length) return null
+  const tokens = route.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)
+  const allowedFixes = new Set(fixes.map((fix) => fix.toUpperCase()))
+  let best: { designator: string; entryFix: string; index: number } | null = null
+  for (const star of starProcedures) {
+    const designator = star.designator.trim().toUpperCase()
+    const entryFix = star.entryFix.trim().toUpperCase()
+    if (!designator || !entryFix || !allowedFixes.has(entryFix)) continue
+    const index = tokens.lastIndexOf(designator)
+    if (index < 0) continue
+    if (!best || index > best.index) best = { designator, entryFix, index }
+  }
+  return best
 }
 
 function suggestedFix(route: string | null, fixes: string[]) {
@@ -323,9 +343,11 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   const domesticEta = estimate.triggerSource === 'domestic-eet' && estimate.triggerEta
     ? ' · DOM EET ETA ' + formatUtcHhmm(new Date(estimate.triggerEta).getTime()) + 'Z'
     : ''
+  const filedStar = estimate.filedStarDesignator ? ' · FILED STAR ' + estimate.filedStarDesignator + ' · STAR ENTRY ' + estimate.refFix : ''
 
   if (manual) {
     if (estimate.status === 'ready') {
+      if (estimate.assumedDirect && estimate.filedStarDesignator) return 'MANUAL ETO · filed STAR ' + estimate.filedStarDesignator + ' · STAR ENTRY ' + estimate.refFix + ' · ' + estimate.eto + 'Z available' + domesticEta
       if (estimate.assumedDirect) return 'MANUAL ETO · assumed-DCT auto estimate ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED REF FIX' : '') + domesticEta
       if (estimate.pastCrossing) return 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + domesticEta
       return 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available' + domesticEta
@@ -335,7 +357,8 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   if (estimate.status === 'ready') {
     if (estimate.assumedDirect) {
       const past = estimate.pastCrossing ? ' · EST PAST XING' : ''
-      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT' + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
+      const routeLabel = estimate.filedStarDesignator ? filedStar + ' · ROUTE→STAR ENTRY' : ' · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT'
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z' + routeLabel + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
     }
     if (estimate.pastCrossing) {
       return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
@@ -348,9 +371,10 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
     }
     if (estimate.triggerSource === 'domestic-eet' && estimate.triggerEta) {
       const minutes = Math.max(0, Math.ceil(estimate.minutes || 0))
-      const assumed = estimate.assumedDirect ? ' · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT' : ''
+      const assumed = estimate.assumedDirect ? (estimate.filedStarDesignator ? filedStar + ' · ROUTE→STAR ENTRY' : ' · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT') : ''
       return 'AUTO ETO waiting · DOM EET ETA ' + formatUtcHhmm(new Date(estimate.triggerEta).getTime()) + 'Z · ~' + minutes + ' min' + assumed + ' · auto-fill starts ETA ≤' + lookaheadMin + ' min'
     }
+    if (estimate.assumedDirect && estimate.filedStarDesignator) return 'AUTO ETO waiting' + filedStar + ' · ROUTE→STAR ENTRY · ETA >' + lookaheadMin + ' min'
     if (estimate.assumedDirect) return 'AUTO ETO waiting · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT · ETA >' + lookaheadMin + ' min'
     if (estimate.pastCrossing) return 'AUTO ETO waiting · ' + estimate.refFix + ' already passed ~' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · ETA >' + lookaheadMin + ' min'
     return 'AUTO ETO waiting · ~' + Math.ceil(estimate.minutes || 0) + ' min to destination · auto-fill starts ETA ≤' + lookaheadMin + ' min'
@@ -359,7 +383,7 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   return 'AUTO ETO unavailable · ' + (estimate.reason || 'insufficient data')
 }
 
-export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, disabled, onAdd, onAddAll }: Props) {
+export default function IvaoTrafficPanel({ airport, fixes, starProcedures, existingCallsigns, disabled, onAdd, onAddAll }: Props) {
   const [flights, setFlights] = useState<TrafficFlight[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [autoEstimates, setAutoEstimates] = useState<Record<string, AutoEstimate>>({})
@@ -493,13 +517,14 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     groundSpeed: number | null,
     baseTimeIso: string,
     autoAssignedFix = false,
+    filedStarDesignator: string | null = null,
   ) => {
-    let estimate = autoEstimate(flight, geometry, refFix, groundSpeed, baseTimeIso, lookaheadMin)
+    let estimate: AutoEstimate = { ...autoEstimate(flight, geometry, refFix, groundSpeed, baseTimeIso, lookaheadMin), filedStarDesignator }
     if (estimate.status === 'unavailable' && estimate.reason === 'REF FIX not in filed route' && refFix) {
       const assumedGeometry = await getAssumedRouteGeometry(flight, refFix)
       if (assumedGeometry) {
         const assumedEstimate = autoEstimate(flight, assumedGeometry, refFix, groundSpeed, baseTimeIso, lookaheadMin)
-        estimate = { ...assumedEstimate, assumedDirect: true, autoAssignedFix }
+        estimate = { ...assumedEstimate, assumedDirect: true, autoAssignedFix, filedStarDesignator }
       }
     }
     return estimate
@@ -561,12 +586,15 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         const geometry = geometries.get(flight.sessionId) ?? null
         const previous = currentDrafts[flight.sessionId]
         const gs = smoothedGroundSpeed(flight)
-        const filedSuggested = geometry ? upcomingConfiguredFix(flight, geometry, fixes) : suggestedFix(flight.route, fixes)
+        const filedStar = filedStarEntryFix(flight.route, starProcedures, fixes)
+        const filedSuggested = filedStar?.entryFix || (geometry ? upcomingConfiguredFix(flight, geometry, fixes) : suggestedFix(flight.route, fixes))
         let refFix = previous?.refFixManual ? previous.refFix : filedSuggested
         let estimate: AutoEstimate | null = null
 
         if (previous?.refFixManual) {
           estimate = await estimateForRefFix(flight, geometry, refFix, gs, nextFetchedAt, false)
+        } else if (filedStar) {
+          estimate = await estimateForRefFix(flight, geometry, filedStar.entryFix, gs, nextFetchedAt, false, filedStar.designator)
         } else if (filedSuggested) {
           estimate = autoEstimate(flight, geometry, filedSuggested, gs, nextFetchedAt, lookaheadMin)
         } else if (previous?.refFix && fixes.includes(previous.refFix)) {
@@ -601,7 +629,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
       refreshInFlightRef.current = false
       setLoading(false)
     }
-  }, [airport, autoAssignUnfiledFix, estimateForRefFix, fixes, getRouteGeometry, lookaheadMin, setDraftState, smoothedGroundSpeed])
+  }, [airport, autoAssignUnfiledFix, estimateForRefFix, fixes, getRouteGeometry, lookaheadMin, setDraftState, smoothedGroundSpeed, starProcedures])
 
   const markActivity = useCallback(() => {
     lastActivityRef.current = Date.now()
