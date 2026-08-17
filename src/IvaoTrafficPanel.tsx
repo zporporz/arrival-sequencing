@@ -75,7 +75,9 @@ type RouteProgress = { progressNm: number; offRouteNm: number }
 const AUTO_REFRESH_MS = 30_000
 const IDLE_TIMEOUT_MS = 10 * 60_000
 const IDLE_CHECK_MS = 15_000
-const AUTO_ETO_LOOKAHEAD_MIN = 60
+const DEFAULT_AUTO_ETO_LOOKAHEAD_MIN = 60
+const AUTO_ETO_LOOKAHEAD_OPTIONS = [30, 45, 60, 90, 120]
+const AUTO_ETO_LOOKAHEAD_STORAGE_KEY = 'ivao-auto-eto-lookahead-min'
 const MIN_AUTO_GS_KT = 80
 const MAX_ROUTE_DEVIATION_NM = 100
 
@@ -172,6 +174,7 @@ function autoEstimate(
   refFix: string,
   groundSpeed: number | null,
   baseTimeIso: string,
+  lookaheadMin: number,
 ): AutoEstimate {
   if (!refFix) return { status: 'unavailable', refFix: null, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'No REF FIX' }
   if (!flight.route || !flight.departure) return { status: 'unavailable', refFix, eto: '', remainingNm: null, minutes: null, groundSpeed, offRouteNm: null, reason: 'Filed route unavailable' }
@@ -200,13 +203,13 @@ function autoEstimate(
   const safeBaseTime = Number.isFinite(baseTime) ? baseTime : Date.now()
   const eto = formatUtcHhmm(safeBaseTime + minutesToFix * 60_000)
 
-  if (minutes > AUTO_ETO_LOOKAHEAD_MIN) {
-    return { status: 'waiting', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${AUTO_ETO_LOOKAHEAD_MIN} min ETA window` }
+  if (minutes > lookaheadMin) {
+    return { status: 'waiting', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: `Outside ${lookaheadMin} min ETA window` }
   }
   return { status: 'ready', refFix, eto, remainingNm, minutes, groundSpeed, offRouteNm: progress.offRouteNm, reason: null }
 }
 
-function estimateText(estimate: AutoEstimate | undefined, manual: boolean) {
+function estimateText(estimate: AutoEstimate | undefined, manual: boolean, lookaheadMin: number) {
   if (!estimate) return 'AUTO ETO · waiting for route data'
   if (manual) {
     if (estimate.status === 'ready') return `MANUAL ETO · auto estimate ${estimate.eto}Z available`
@@ -216,7 +219,7 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean) {
     return `AUTO ETO · ${estimate.refFix} ${estimate.eto}Z · ${Math.round(estimate.remainingNm || 0)} NM · GS ${Math.round(estimate.groundSpeed || 0)}`
   }
   if (estimate.status === 'waiting') {
-    return `AUTO ETO waiting · ~${Math.ceil(estimate.minutes || 0)} min to destination · auto-fill starts ETA ≤${AUTO_ETO_LOOKAHEAD_MIN} min`
+    return `AUTO ETO waiting · ~${Math.ceil(estimate.minutes || 0)} min to destination · auto-fill starts ETA ≤${lookaheadMin} min`
   }
   if (estimate.status === 'calculating') return `AUTO ETO · ${estimate.reason || 'calculating'}`
   return `AUTO ETO unavailable · ${estimate.reason || 'insufficient data'}`
@@ -232,6 +235,14 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [idle, setIdle] = useState(false)
+  const [lookaheadMin, setLookaheadMin] = useState(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(AUTO_ETO_LOOKAHEAD_STORAGE_KEY))
+      return AUTO_ETO_LOOKAHEAD_OPTIONS.includes(stored) ? stored : DEFAULT_AUTO_ETO_LOOKAHEAD_MIN
+    } catch {
+      return DEFAULT_AUTO_ETO_LOOKAHEAD_MIN
+    }
+  })
   const lastActivityRef = useRef(Date.now())
   const idleRef = useRef(false)
   const refreshInFlightRef = useRef(false)
@@ -241,6 +252,10 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   const gsHistoryRef = useRef(new Map<string, number[]>())
 
   const existing = useMemo(() => new Set(existingCallsigns.map((item) => item.toUpperCase())), [existingCallsigns])
+
+  useEffect(() => {
+    try { window.localStorage.setItem(AUTO_ETO_LOOKAHEAD_STORAGE_KEY, String(lookaheadMin)) } catch { /* ignore storage failures */ }
+  }, [lookaheadMin])
 
   const setDraftState = useCallback((next: Record<string, Draft>) => {
     draftsRef.current = next
@@ -320,7 +335,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         const suggested = geometry ? upcomingConfiguredFix(flight, geometry, fixes) : suggestedFix(flight.route, fixes)
         const refFix = previous?.refFixManual ? previous.refFix : (suggested || previous?.refFix || fixes[0] || '')
         const gs = smoothedGroundSpeed(flight)
-        const estimate = autoEstimate(flight, geometry, refFix, gs, nextFetchedAt)
+        const estimate = autoEstimate(flight, geometry, refFix, gs, nextFetchedAt, lookaheadMin)
         const etoManual = previous?.etoManual ?? false
         const eto = etoManual ? (previous?.eto || '') : (estimate.status === 'ready' ? estimate.eto : '')
         nextDrafts[flight.sessionId] = {
@@ -339,7 +354,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
       refreshInFlightRef.current = false
       setLoading(false)
     }
-  }, [airport, fixes, getRouteGeometry, setDraftState, smoothedGroundSpeed])
+  }, [airport, fixes, getRouteGeometry, lookaheadMin, setDraftState, smoothedGroundSpeed])
 
   const markActivity = useCallback(() => {
     lastActivityRef.current = Date.now()
@@ -401,12 +416,21 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     void refresh()
   }
 
+  const changeLookahead = (minutes: number) => {
+    if (!AUTO_ETO_LOOKAHEAD_OPTIONS.includes(minutes)) return
+    setLookaheadMin(minutes)
+  }
+
+  useEffect(() => {
+    if (open) void refresh()
+  }, [lookaheadMin])
+
   const changeRefFix = (flight: TrafficFlight, refFix: string) => {
     const current = draftsRef.current[flight.sessionId] || { refFix, eto: '', refFixManual: false, etoManual: false }
     const geometry = geometryCacheRef.current.get(routeKey(flight, airport)) ?? null
     const gsSamples = gsHistoryRef.current.get(flight.sessionId) || []
     const gs = gsSamples.length ? gsSamples.reduce((sum, value) => sum + value, 0) / gsSamples.length : flight.groundSpeed
-    const estimate = autoEstimate(flight, geometry, refFix, gs, fetchedAt || new Date().toISOString())
+    const estimate = autoEstimate(flight, geometry, refFix, gs, fetchedAt || new Date().toISOString(), lookaheadMin)
     const nextDraft = {
       ...current,
       refFix,
@@ -461,9 +485,12 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         <div className="ivao-traffic-heading">
           <div>
             <strong>IVAO inbound · {airport}</strong>
-            <span>AUTO ETO uses filed-route distance + live GS when estimated arrival is within {AUTO_ETO_LOOKAHEAD_MIN} minutes. Manual override remains available.</span>
+            <span>AUTO ETO uses filed-route distance + live GS when estimated arrival is inside the selected ETA window. Manual override remains available.</span>
           </div>
-          <button type="button" onClick={manualRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+          <div className="ivao-traffic-heading-actions">
+            <label className="ivao-lookahead-control"><span>START AUTO ETO</span><select value={lookaheadMin} onChange={(event) => changeLookahead(Number(event.target.value))}>{AUTO_ETO_LOOKAHEAD_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>ETA ≤ {minutes} min</option>)}</select></label>
+            <button type="button" onClick={manualRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+          </div>
         </div>
 
         {error && <div className="ivao-traffic-error">{error}</div>}
@@ -486,7 +513,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
                 <div className="ivao-traffic-route"><strong>{flight.departure || '----'}</strong><span>→</span><strong>{airport}</strong>{flight.vid && <small>VID {flight.vid}</small>}</div>
                 <small className="ivao-traffic-track">{formatTrack(flight)}</small>
                 <small className={`ivao-auto-eto ${draft.etoManual ? 'is-manual' : estimate?.status === 'ready' ? 'is-ready' : estimate?.status === 'waiting' ? 'is-waiting' : ''}`}>
-                  {estimateText(estimate, draft.etoManual)}
+                  {estimateText(estimate, draft.etoManual, lookaheadMin)}
                 </small>
                 {flight.route && <small className="ivao-traffic-fpl" title={flight.route}>{flight.route}</small>}
               </div>
@@ -500,7 +527,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         </div>
 
         <div className="ivao-traffic-footer">
-          <span>{fetchedAt ? `Updated ${new Date(fetchedAt).toISOString().slice(11, 19)}Z` : 'Waiting for IVAO data'} · AUTO ETO is a planning estimate</span>
+          <span>{fetchedAt ? `Updated ${new Date(fetchedAt).toISOString().slice(11, 19)}Z` : 'Waiting for IVAO data'} · AUTO ETO window {lookaheadMin} min · planning estimate</span>
           <span>{idle ? 'Auto-refresh paused · idle 10 min' : 'Auto-refresh 30s · panel open only'}</span>
         </div>
       </div>

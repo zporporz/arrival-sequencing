@@ -76,6 +76,10 @@
 }
 .ivao-traffic-heading strong { display: block; font-size: 13px; }
 .ivao-traffic-heading span { display: block; margin-top: 2px; color: #7f899a; font-size: 10px; }
+.ivao-traffic-heading-actions { display: flex; align-items: end; gap: 8px; flex: 0 0 auto; }
+.ivao-lookahead-control span { margin: 0 0 3px 2px; color: #7f899a; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+.ivao-lookahead-control select { height: 30px; border: 1px solid #dfe5ee; border-radius: 9px; background: #f8fbff; color: #244a84; padding: 0 8px; font-size: 10px; font-weight: 750; outline: none; }
+.ivao-lookahead-control select:focus { border-color: #8aacef; box-shadow: 0 0 0 3px rgba(45,105,207,.08); }
 .ivao-traffic-heading button {
   border: 1px solid #dfe5ee;
   background: #fff;
