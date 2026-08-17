@@ -60,7 +60,7 @@ export default function AmanTrafficSummary({ airport, existingCallsigns, importC
 
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/sequence/ivao-traffic?airport=${encodeURIComponent(airport)}&mode=summary`, {
+        const response = await fetch(`/api/sequence/ivao-summary?airport=${encodeURIComponent(airport)}`, {
           credentials: 'same-origin',
           cache: 'no-store',
         })
