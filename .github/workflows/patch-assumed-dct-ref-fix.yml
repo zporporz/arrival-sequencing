@@ -1,0 +1,38 @@
+name: Patch assumed DCT REF FIX
+
+on:
+  push:
+    paths:
+      - 'scripts/patch-assumed-dct-ref-fix.py'
+      - '.github/workflows/patch-assumed-dct-ref-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/patch-assumed-dct-ref-fix.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        run: npm install
+      - name: Check functions
+        run: find functions -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Build
+        run: npm run build
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/patch-assumed-dct-ref-fix.py .github/workflows/patch-assumed-dct-ref-fix.yml package-lock.json
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Estimate unfiled REF FIX via assumed DCT"
+          git push
