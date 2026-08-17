@@ -74,7 +74,7 @@ function csvEscape(value: unknown) {
 }
 
 function downloadCsv(session: SequenceSession, arrivals: ArrivalHistory[]) {
-  const headers = ['SEQ','CALLSIGN','A/C','DEP','REF FIX','ETO','ELDT','CLDT','CTO','ALDT','EST VAR','SEQ VAR','STATUS','NOMINAL SEC']
+  const headers = ['SEQ','CALLSIGN','A/C','DEP','REF FIX','ETO','ELDT','TLDT','CTO','ALDT','EST VAR','SEQ VAR','STATUS','NOMINAL SEC']
   const rows = arrivals.map((arrival) => [arrival.sequence_no, arrival.callsign, arrival.aircraft_type, arrival.departure, arrival.ref_fix, fmtTime(arrival.eto), fmtTime(arrival.eldt), fmtTime(arrival.cldt), fmtTime(arrival.cto), fmtTime(arrival.aldt), arrival.est_var ?? '', arrival.seq_var ?? '', arrival.status, arrival.nominal_seconds_snapshot])
   const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(',')).join('\r\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
@@ -204,7 +204,7 @@ export default function SessionsPanel({ sessions, onChanged }: Props) {
             <div><span>ARRIVALS</span><strong>{detail.arrivals.length}</strong></div>
             <div><span>LANDED</span><strong>{stats.landed}</strong></div>
             <div><span>CANCELLED</span><strong>{stats.cancelled}</strong></div>
-            <div><span>AVG CLDT GAP</span><strong>{signedMinutes(stats.averageGap)}</strong></div>
+            <div><span>AVG TLDT GAP</span><strong>{signedMinutes(stats.averageGap)}</strong></div>
             <div><span>AVG EST VAR</span><strong>{signedMinutes(stats.averageEstVar)}</strong></div>
             <div><span>AVG SEQ VAR</span><strong>{signedMinutes(stats.averageSeqVar)}</strong></div>
             <div><span>MAX EST DELAY</span><strong>{signedMinutes(stats.maxDelay)}</strong></div>
@@ -212,7 +212,7 @@ export default function SessionsPanel({ sessions, onChanged }: Props) {
 
           <div className="admin-table-wrap">
             <table className="admin-table session-arrival-table">
-              <thead><tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th>STATUS</th></tr></thead>
+              <thead><tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>TLDT</th><th>CTO</th><th>ALDT</th><th>STATUS</th></tr></thead>
               <tbody>
                 {detail.arrivals.length === 0 ? <tr><td colSpan={11} className="admin-empty-cell">No arrivals were stored in this session.</td></tr> : detail.arrivals.map((arrival) => <tr key={arrival.id}><td>{arrival.sequence_no}</td><td><strong>{arrival.callsign}</strong></td><td>{arrival.aircraft_type}</td><td>{arrival.departure}</td><td>{arrival.ref_fix}</td><td>{fmtTime(arrival.eto)}</td><td>{fmtTime(arrival.eldt)}</td><td>{fmtTime(arrival.cldt)}</td><td>{fmtTime(arrival.cto)}</td><td>{fmtTime(arrival.aldt)}</td><td><span className={`session-flight-status ${arrival.status.toLowerCase()}`}>{arrival.status}</span></td></tr>)}
               </tbody>

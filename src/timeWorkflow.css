@@ -123,7 +123,7 @@
   box-shadow: 0 2px 6px rgba(161, 47, 39, .18);
 }
 
-/* If spacing conflict and sequence adjustment affect CLDT at once, spacing warning stays the stronger signal. */
+/* If spacing conflict and sequence adjustment affect TLDT at once, spacing warning stays the stronger signal. */
 .spacing-conflict-cell.sequence-adjusted-cell {
   box-shadow: inset 3px 0 0 #d24b3f !important;
 }

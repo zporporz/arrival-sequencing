@@ -1,5 +1,5 @@
 const TARGET_GAP_MINUTES = 2
-const CLDT_SELECTOR = 'tbody input.cell-input.time.strong'
+const TLDT_SELECTOR = 'tbody input.cell-input.time.strong'
 const CONFLICT_CLASS = 'spacing-conflict-cell'
 const SPACING_CLASS = 'spacing-gap-cell'
 const EXACT_CLASS = 'same-cldt-conflict'
@@ -58,11 +58,11 @@ function applySpacingConflict(input: HTMLInputElement, conflict: Conflict) {
   if (!cell) return
 
   const { partner, gapMinutes } = conflict
-  const relationship = gapMinutes === 0 ? 'SAME CLDT' : `GAP ${gapMinutes}m`
+  const relationship = gapMinutes === 0 ? 'SAME TLDT' : `GAP ${gapMinutes}m`
   const warningLabel = `↔ SEQ ${partner.sequence} ${partner.callsign} · ${relationship}`
   const title = gapMinutes === 0
-    ? `Same CLDT as SEQ ${partner.sequence} ${partner.callsign}. Adjust the landing plan as required.`
-    : `${gapMinutes}-minute CLDT gap with SEQ ${partner.sequence} ${partner.callsign}. This is below the ${TARGET_GAP_MINUTES}-minute planning target.`
+    ? `Same TLDT as SEQ ${partner.sequence} ${partner.callsign}. Adjust the landing plan as required.`
+    : `${gapMinutes}-minute TLDT gap with SEQ ${partner.sequence} ${partner.callsign}. This is below the ${TARGET_GAP_MINUTES}-minute planning target.`
 
   cell.classList.add(CONFLICT_CLASS, SPACING_CLASS)
   if (gapMinutes === 0) cell.classList.add(EXACT_CLASS)
@@ -91,7 +91,7 @@ function setNearestConflict(
 }
 
 function recalculateSpacing() {
-  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(CLDT_SELECTOR))
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(TLDT_SELECTOR))
 
   for (const input of inputs) clearConflict(input)
 
@@ -107,7 +107,7 @@ function recalculateSpacing() {
 
   const conflicts = new Map<HTMLInputElement, Conflict>()
 
-  // Compare every active flight against every other active flight. CLDT sequence numbers
+  // Compare every active flight against every other active flight. TLDT sequence numbers
   // can temporarily place a later row between two flights with the same time, so only
   // checking adjacent table rows misses real conflicts such as SEQ 1 03:14 / SEQ 3 03:14.
   // circularGap also treats 23:59 / 00:00 as a one-minute gap.
@@ -136,7 +136,7 @@ export function installSpacingGuard() {
 
   document.addEventListener('input', (event) => {
     const target = event.target
-    if (target instanceof HTMLInputElement && target.matches(CLDT_SELECTOR)) schedule()
+    if (target instanceof HTMLInputElement && target.matches(TLDT_SELECTOR)) schedule()
   }, true)
 
   document.addEventListener('change', schedule, true)

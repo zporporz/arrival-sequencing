@@ -97,8 +97,8 @@ function evaluateRow(row: HTMLTableRowElement) {
     ctoCell.dataset.timeState = 'TARGET ADJUSTED'
     cldtCell.dataset.timeDelta = signedMinutes(landingDelta)
     ctoCell.dataset.timeDelta = signedMinutes(fixDelta)
-    cldtCell.title = `CLDT differs from ELDT by ${signedMinutes(landingDelta)}. This is an active sequence adjustment.`
-    ctoCell.title = `CTO differs from ETO by ${signedMinutes(fixDelta)} to achieve the adjusted CLDT.`
+    cldtCell.title = `TLDT differs from ELDT by ${signedMinutes(landingDelta)}. This is an active sequence adjustment.`
+    ctoCell.title = `CTO differs from ETO by ${signedMinutes(fixDelta)} to achieve the adjusted TLDT.`
     addBadge(ctoCell, `SEQUENCE ${signedMinutes(landingDelta)}`, 'adjusted')
     return
   }
@@ -108,7 +108,7 @@ function evaluateRow(row: HTMLTableRowElement) {
   cldtCell.dataset.timeState = 'CHECK'
   ctoCell.dataset.timeState = 'MISMATCH'
   cldtCell.title = `Landing adjustment is ${signedMinutes(landingDelta)}, but target-fix adjustment is ${signedMinutes(fixDelta)}.`
-  ctoCell.title = 'ETO/CTO and ELDT/CLDT adjustments do not agree. Check timing.'
+  ctoCell.title = 'ETO/CTO and ELDT/TLDT adjustments do not agree. Check timing.'
   addBadge(ctoCell, '⚠ TIMING MISMATCH', 'mismatch')
 }
 
@@ -141,7 +141,7 @@ function installWorkflowStrip() {
     <i>→</i>
     <span><b>ELDT</b><small>AUTO ESTIMATE</small></span>
     <i>→</i>
-    <span><b>CLDT</b><small>SEQUENCE</small></span>
+    <span><b>TLDT</b><small>SEQUENCE</small></span>
     <i>→</i>
     <span><b>CTO</b><small>AUTO TARGET</small></span>
   `

@@ -6,11 +6,11 @@ const FIELD_GUIDE = [
   ['REF FIX', 'Reference Fix', 'Reference waypoint used for sequencing time calculations.'],
   ['ETO', 'Estimated Time Over', 'Estimated time the aircraft will pass the reference fix.'],
   ['ELDT', 'Estimated Landing Time', 'Estimated landing time calculated from ETO plus the nominal fix-to-runway time.'],
-  ['CLDT', 'Calculated Landing Time', 'Landing time planned or assigned by the sequencing controller.'],
-  ['CTO', 'Calculated Time Over', 'Calculated time the aircraft should cross the reference fix to achieve the CLDT.'],
+  ['TLDT', 'Target Landing Time', 'Landing time planned or assigned by the sequencing controller.'],
+  ['CTO', 'Calculated Time Over', 'Calculated time the aircraft should cross the reference fix to achieve the TLDT.'],
   ['ALDT', 'Actual Landing Time', 'Actual time the aircraft landed.'],
   ['EST VAR', 'Estimate Variance', 'Difference between ALDT and ELDT.'],
-  ['SEQ VAR', 'Sequence Variance', 'Difference between ALDT and CLDT.'],
+  ['SEQ VAR', 'Sequence Variance', 'Difference between ALDT and TLDT.'],
   ['STATUS', 'Flight Status', 'Current operational state of the flight in the sequencing board.'],
 ] as const
 
@@ -47,7 +47,7 @@ export function installFieldGuide() {
       </div>
       <div class="field-guide-note">
         <strong>Timing note</strong>
-        <span>ELDT and CTO are calculated values. CLDT is the controller planning value. The 2-minute gap warning is a sequencing planning target, not a universal separation minimum.</span>
+        <span>ELDT and CTO are calculated values. TLDT is the controller planning value. The 2-minute gap warning is a sequencing planning target, not a universal separation minimum.</span>
       </div>
     </aside>
   `

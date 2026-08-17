@@ -19,8 +19,8 @@ Core timing flow:
 ETO at REF FIX
      ↓ + nominal fix-to-runway time
 ELDT
-     ↓ controller sequencing / CLDT override
-CLDT
+     ↓ controller sequencing / TLDT override
+TLDT
      ↓ - nominal fix-to-runway time
 CTO at REF FIX
      ↓
@@ -84,11 +84,11 @@ Each flight row contains:
 | `REF FIX` | Reference fix used for timing |
 | `ETO` | Estimated Time Over the reference fix |
 | `ELDT` | Estimated Landing Time |
-| `CLDT` | Calculated / planned Landing Time |
+| `TLDT` | Calculated / planned Landing Time |
 | `CTO` | Calculated Time Over the reference fix |
 | `ALDT` | Actual Landing Time |
 | `EST VAR` | `ALDT - ELDT` |
-| `SEQ VAR` | `ALDT - CLDT` |
+| `SEQ VAR` | `ALDT - TLDT` |
 | `STATUS` | Current flight lifecycle state |
 
 ### Editable fields
@@ -98,36 +98,36 @@ Each flight row contains:
 - Departure aerodrome.
 - Reference fix.
 - ETO.
-- CLDT.
+- TLDT.
 - ALDT.
 - Status.
 
 ### Calculated fields
 
 - `ELDT = ETO + nominal REF FIX → landing time`.
-- `CTO = CLDT - nominal REF FIX → landing time`.
+- `CTO = TLDT - nominal REF FIX → landing time`.
 - Estimate variance from ALDT versus ELDT.
-- Sequence variance from ALDT versus CLDT.
+- Sequence variance from ALDT versus TLDT.
 
-### CLDT workflow
+### TLDT workflow
 
-- CLDT initially follows ELDT.
-- Controller may override CLDT for sequencing.
+- TLDT initially follows ELDT.
+- Controller may override TLDT for sequencing.
 - Override state is visibly marked.
-- `Reset` returns CLDT to ELDT.
+- `Reset` returns TLDT to ELDT.
 - CTO automatically moves with the sequence adjustment.
 - Timing workflow helper visually distinguishes:
   - ETO = INPUT;
   - ELDT = AUTO ESTIMATE;
-  - CLDT = SEQUENCE;
+  - TLDT = SEQUENCE;
   - CTO = AUTO TARGET.
-- A timing mismatch warning appears if the CLDT / ELDT adjustment does not agree with the CTO / ETO adjustment.
+- A timing mismatch warning appears if the TLDT / ELDT adjustment does not agree with the CTO / ETO adjustment.
 
 ## 5. Sequence spacing guard
 
-- Compares all active CLDTs, not only adjacent table rows.
-- Warns when two active flights have a CLDT gap below the current **2-minute planning target**.
-- Detects identical CLDTs.
+- Compares all active TLDTs, not only adjacent table rows.
+- Warns when two active flights have a TLDT gap below the current **2-minute planning target**.
+- Detects identical TLDTs.
 - Handles midnight wrap-around such as `23:59` vs `00:00`.
 - Shows the conflicting sequence number and callsign.
 - LANDED and CANCELLED flights are excluded from spacing checks.
@@ -160,9 +160,9 @@ The live page displays:
 
 - active flights in sequence;
 - total sequence rows;
-- next landing by CLDT;
+- next landing by TLDT;
 - callsign of the next landing;
-- average CLDT interval;
+- average TLDT interval;
 - number of controllers online.
 
 ## 8. Search and rapid data entry
@@ -190,7 +190,7 @@ Built-in Field Guide explains the operational fields and abbreviations used by t
 - REF FIX
 - ETO
 - ELDT
-- CLDT
+- TLDT
 - CTO
 - ALDT
 - EST VAR
@@ -388,7 +388,7 @@ This is intended for cases where the pilot did not file the expected STAR / sequ
 - Arrival changes are recorded in audit logs.
 - Activity view groups changes by flight.
 - Shows controller / actor label and UTC change time.
-- Tracks visible changes to callsign, aircraft type, departure, REF FIX, ETO, CLDT, ALDT and status.
+- Tracks visible changes to callsign, aircraft type, departure, REF FIX, ETO, TLDT, ALDT and status.
 - Insert and delete activity is also represented.
 
 ## 21. Historical timing safety
@@ -592,8 +592,8 @@ src/
   TimingEditor.tsx         Reference-fix timing editor
   SessionsPanel.tsx        Session administration
   HistoryPanel.tsx         Configuration history / rollback
-  spacingGuard.ts          CLDT planning-gap warnings
-  timeWorkflow.ts          ETO → ELDT → CLDT → CTO workflow helpers
+  spacingGuard.ts          TLDT planning-gap warnings
+  timeWorkflow.ts          ETO → ELDT → TLDT → CTO workflow helpers
   lifecyclePanel.ts        Active / Completed / Activity workflow
   restoreCancelled.ts      Restore cancelled flights
   spreadsheetNavigation.ts Keyboard-oriented table navigation

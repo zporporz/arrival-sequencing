@@ -680,8 +680,8 @@ function App() {
 
         <section className="summary-grid">
           <article className="summary-card"><span>Flights in sequence</span><strong>{arrivals.filter((row) => !['LANDED', 'CANCELLED'].includes(row.status)).length}</strong><small>{arrivals.length} total rows</small></article>
-          <article className="summary-card"><span>Next landing (CLDT)</span><strong>{nextLanding ? timeOnly(nextLanding.cldt) : '—'}</strong><small>{nextLanding?.callsign ?? 'No active traffic'}</small></article>
-          <article className="summary-card"><span>Average interval</span><strong>{averageInterval(arrivals)}</strong><small>CLDT planning gap</small></article>
+          <article className="summary-card"><span>Next landing (TLDT)</span><strong>{nextLanding ? timeOnly(nextLanding.cldt) : '—'}</strong><small>{nextLanding?.callsign ?? 'No active traffic'}</small></article>
+          <article className="summary-card"><span>Average interval</span><strong>{averageInterval(arrivals)}</strong><small>TLDT planning gap</small></article>
           <article className="summary-card"><span>Controllers online</span><strong>{onlineControllers.length || 1}</strong><small>Presence channel</small></article>
         </section>
 
@@ -750,7 +750,7 @@ function App() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>CLDT</th><th>CTO</th><th>ALDT</th><th title="ALDT − ELDT">EST VAR</th><th title="ALDT − CLDT">SEQ VAR</th><th>STATUS</th><th /></tr>
+                <tr><th>SEQ</th><th>CALLSIGN</th><th>A/C</th><th>DEP</th><th>REF FIX</th><th>ETO</th><th>ELDT</th><th>TLDT</th><th>CTO</th><th>ALDT</th><th title="ALDT − ELDT">EST VAR</th><th title="ALDT − TLDT">SEQ VAR</th><th>STATUS</th><th /></tr>
               </thead>
               <tbody>
                 {loading ? (
@@ -785,14 +785,14 @@ function App() {
                         <div className="cldt-control-meta">
                           <span className={`cldt-mode-badge ${cldtOverride ? 'override' : 'auto'}`}>{cldtOverride ? 'OVERRIDE' : 'AUTO'}</span>
                           {cldtOverride && (
-                            <button className="cldt-reset-button" onClick={() => void resetCldt(row)} disabled={savingCell === `${row.id}:cldt`} title="Reset CLDT to ELDT">↺ Reset</button>
+                            <button className="cldt-reset-button" onClick={() => void resetCldt(row)} disabled={savingCell === `${row.id}:cldt`} title="Reset TLDT to ELDT">↺ Reset</button>
                           )}
                         </div>
                       </td>
                       <td className="computed-cell">{timeOnly(row.cto)}</td>
                       <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} allowEmpty /></td>
                       <td className={row.est_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − ELDT">{intervalLabel(row.est_var)}</td>
-                      <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − CLDT">{intervalLabel(row.seq_var)}</td>
+                      <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − TLDT">{intervalLabel(row.seq_var)}</td>
                       <td>
                         <select className={`status-select status-${row.status.toLowerCase()}`} value={row.status} onChange={(event) => void updateStatus(row, event.target.value as ArrivalStatus)}>
                           <option value="INBOUND">INBOUND</option><option value="SEQUENCED">SEQUENCED</option><option value="LANDING">LANDING</option><option value="LANDED">LANDED</option><option value="CANCELLED">CANCELLED</option>
