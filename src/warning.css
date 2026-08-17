@@ -6,7 +6,8 @@
 }
 
 .spacing-conflict-cell {
-  padding-bottom: 21px !important;
+  height: 84px !important;
+  padding-bottom: 30px !important;
   background: linear-gradient(90deg, rgba(255, 241, 239, .80), rgba(255, 248, 247, .18)) !important;
   box-shadow: inset 3px 0 0 #d24b3f !important;
 }
@@ -26,25 +27,28 @@
 
 .spacing-warning-badge {
   position: absolute !important;
-  left: 12px !important;
-  right: auto !important;
+  z-index: 6 !important;
+  left: 8px !important;
+  right: 8px !important;
   bottom: 4px !important;
-  display: inline-flex !important;
+  display: flex !important;
   align-items: center !important;
   width: auto !important;
-  max-width: calc(100% - 24px) !important;
-  padding: 2px 7px !important;
+  max-width: none !important;
+  min-height: 22px !important;
+  padding: 3px 6px !important;
   border: 0 !important;
   border-radius: 6px !important;
   background: #fde4e1 !important;
   color: #a7352c !important;
-  font-size: 9.5px !important;
+  font-size: 9px !important;
   font-weight: 850 !important;
-  line-height: 1.25 !important;
+  line-height: 1.18 !important;
   letter-spacing: 0 !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere !important;
   pointer-events: none;
 }
 
