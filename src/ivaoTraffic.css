@@ -90,6 +90,18 @@
   font-size: 10px;
   font-weight: 750;
 }
+.ivao-traffic-heading button.ivao-add-all {
+  border-color: #2d6fd8;
+  background: #2d6fd8;
+  color: #fff;
+  min-width: 82px;
+}
+.ivao-traffic-heading button.ivao-add-all:disabled {
+  border-color: #d8dfeb;
+  background: #edf1f6;
+  color: #98a3b5;
+}
+.ivao-bulk-notice { padding: 8px 16px; background: #eef8f2; color: #28734c; border-bottom: 1px solid #dceee3; font-size: 10px; font-weight: 750; }
 .ivao-traffic-error { padding: 11px 16px; background: #fff2ef; color: #a34538; border-bottom: 1px solid #f4d9d4; font-size: 11px; }
 .ivao-traffic-empty { padding: 30px 18px; text-align: center; color: #8590a3; font-size: 11px; }
 .ivao-traffic-list { display: grid; }

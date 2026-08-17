@@ -355,6 +355,16 @@ This is intended for cases where the pilot did not file the expected STAR / sequ
 - If an automatic estimate later becomes available, the panel offers `Use auto` to return to the automatic value.
 - Changing REF FIX manually recalculates the automatic estimate for that fix, including the assumed-DCT fallback when applicable.
 
+### Add All and automatic unfiled REF FIX assignment
+
+- The IVAO Traffic panel includes `Add All (N)` for bulk insertion of every non-duplicate flight that currently has a valid REF FIX and ETO.
+- Bulk insertion assigns consecutive sequence numbers so multiple rows can be created safely in one action.
+- Flights that are still outside the selected AUTO ETO window, waiting for domestic tracked takeoff, or otherwise unavailable are skipped and remain visible for later addition.
+- When a configured STAR entry / REF FIX is present in the resolved filed route, that filed fix is preferred.
+- When no configured REF FIX is filed, the panel evaluates each configured fix using an assumed-DCT continuation and automatically selects the usable candidate with the shortest remaining distance to the fix.
+- Auto-selected unfiled fixes are explicitly labelled `REF FIX NOT FILED · AUTO ASSIGNED · ASSUMED DCT`.
+- This automatic assignment is a sequencing-planning fallback only. It does not modify the pilot's IVAO flight plan and does not represent an ATC STAR clearance.
+
 ## 19. IVAO panel refresh behaviour
 
 - Refreshes automatically every 30 seconds while the panel is open.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { useAuthUser } from './AuthGate'
-import IvaoTrafficPanel, { type TrafficFlight } from './IvaoTrafficPanel'
+import IvaoTrafficPanel, { type TrafficAddItem, type TrafficFlight } from './IvaoTrafficPanel'
 import { getBrowserIdentity } from './browserIdentity'
 import { supabase } from './lib/supabase'
 import type { ArrivalStatus, ArrivalView, FixTiming, SequenceSession } from './types'
@@ -549,6 +549,24 @@ function App() {
     })
   }
 
+  const addIvaoFlights = async (items: TrafficAddItem[]) => {
+    if (!session) throw new Error('No active sequence session')
+    let sequenceNo = arrivals.reduce((max, row) => Math.max(max, row.sequence_no), 0) + 1
+    for (const item of items) {
+      await sequenceApi('/api/sequence/arrival', {
+        action: 'create',
+        sessionId: session.id,
+        sequenceNo,
+        callsign: item.flight.callsign,
+        aircraftType: item.flight.aircraft,
+        departure: item.flight.departure,
+        refFix: item.refFix,
+        eto: isoFromClock(session.service_date, item.eto, new Date().toISOString()),
+      })
+      sequenceNo += 1
+    }
+  }
+
   const deleteFlight = async (row: ArrivalView) => {
     if (!window.confirm(`Delete ${row.callsign}?`)) return
     try {
@@ -689,6 +707,7 @@ function App() {
                 existingCallsigns={arrivals.map((row) => row.callsign)}
                 disabled={!session || !workspace.timingReady || fixes.length === 0}
                 onAdd={addIvaoFlight}
+                onAddAll={addIvaoFlights}
               />}
               <button className="primary-button" onClick={() => void addFlight()} disabled={!session || !workspace?.timingReady || fixes.length === 0}>+ Add Flight</button>
               <input aria-label="Search flights" placeholder="Search callsign, aircraft or fix…" value={search} onChange={(event) => setSearch(event.target.value)} />

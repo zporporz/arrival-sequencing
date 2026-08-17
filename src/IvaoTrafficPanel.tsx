@@ -26,12 +26,19 @@ type TrafficFlight = {
   domesticTriggerStatus: 'READY' | 'WAITING_TAKEOFF' | 'EET_UNAVAILABLE' | 'TAKEOFF_UNAVAILABLE' | 'NOT_DOMESTIC' | 'UNKNOWN'
 }
 
+type TrafficAddItem = {
+  flight: TrafficFlight
+  refFix: string
+  eto: string
+}
+
 type Props = {
   airport: string
   fixes: string[]
   existingCallsigns: string[]
   disabled?: boolean
   onAdd: (flight: TrafficFlight, refFix: string, eto: string) => Promise<void>
+  onAddAll: (items: TrafficAddItem[]) => Promise<void>
 }
 
 type TrafficPayload = {
@@ -78,6 +85,7 @@ type AutoEstimate = {
   pastCrossing?: boolean
   crossingAgeMin?: number | null
   assumedDirect?: boolean
+  autoAssignedFix?: boolean
   triggerSource?: 'live-route' | 'domestic-eet'
   triggerEta?: string | null
 }
@@ -102,10 +110,9 @@ function formatUtcHhmm(timestampMs: number) {
 }
 
 function suggestedFix(route: string | null, fixes: string[]) {
-  if (!fixes.length) return ''
-  if (!route) return fixes[0]
+  if (!fixes.length || !route) return ''
   const normalized = ` ${route.toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `
-  let best = fixes[0]
+  let best = ''
   let bestIndex = -1
   for (const fix of fixes) {
     const index = normalized.lastIndexOf(` ${fix.toUpperCase()} `)
@@ -194,6 +201,16 @@ function upcomingConfiguredFix(flight: TrafficFlight, geometry: RouteGeometry, f
     .filter((item): item is { fix: string; distance: number } => item.distance != null)
     .sort((a, b) => b.distance - a.distance)
   return passed[0]?.fix || suggestedFix(flight.route, fixes)
+}
+
+function remainingDistanceToFix(flight: TrafficFlight, geometry: RouteGeometry, fix: string) {
+  const progress = findRouteProgress(flight, geometry)
+  if (progress) {
+    const target = fixDistanceAlongRoute(geometry, fix, progress.progressNm)
+    if (target != null) return Math.max(0, target - progress.progressNm) + progress.offRouteNm
+  }
+  const distances = fixDistancesAlongRoute(geometry, fix)
+  return distances.length ? distances[distances.length - 1] : null
 }
 
 function autoEstimate(
@@ -309,7 +326,7 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
 
   if (manual) {
     if (estimate.status === 'ready') {
-      if (estimate.assumedDirect) return 'MANUAL ETO · assumed-DCT auto estimate ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + domesticEta
+      if (estimate.assumedDirect) return 'MANUAL ETO · assumed-DCT auto estimate ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED REF FIX' : '') + domesticEta
       if (estimate.pastCrossing) return 'MANUAL ETO · estimated past crossing ' + estimate.refFix + ' ' + estimate.eto + 'Z available' + domesticEta
       return 'MANUAL ETO · auto estimate ' + estimate.eto + 'Z available' + domesticEta
     }
@@ -318,7 +335,7 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   if (estimate.status === 'ready') {
     if (estimate.assumedDirect) {
       const past = estimate.pastCrossing ? ' · EST PAST XING' : ''
-      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · REF FIX NOT FILED · ASSUMED DCT' + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
+      return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT' + past + ' · ' + Math.round(estimate.remainingNm || 0) + ' NM · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
     }
     if (estimate.pastCrossing) {
       return 'AUTO ETO · ' + estimate.refFix + ' ~' + estimate.eto + 'Z · EST PAST XING · ~' + Math.round(estimate.remainingNm || 0) + ' NM / ' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · GS ' + Math.round(estimate.groundSpeed || 0) + domesticEta
@@ -331,10 +348,10 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
     }
     if (estimate.triggerSource === 'domestic-eet' && estimate.triggerEta) {
       const minutes = Math.max(0, Math.ceil(estimate.minutes || 0))
-      const assumed = estimate.assumedDirect ? ' · REF FIX NOT FILED · ASSUMED DCT' : ''
+      const assumed = estimate.assumedDirect ? ' · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT' : ''
       return 'AUTO ETO waiting · DOM EET ETA ' + formatUtcHhmm(new Date(estimate.triggerEta).getTime()) + 'Z · ~' + minutes + ' min' + assumed + ' · auto-fill starts ETA ≤' + lookaheadMin + ' min'
     }
-    if (estimate.assumedDirect) return 'AUTO ETO waiting · REF FIX NOT FILED · ASSUMED DCT · ETA >' + lookaheadMin + ' min'
+    if (estimate.assumedDirect) return 'AUTO ETO waiting · REF FIX NOT FILED' + (estimate.autoAssignedFix ? ' · AUTO ASSIGNED' : '') + ' · ASSUMED DCT · ETA >' + lookaheadMin + ' min'
     if (estimate.pastCrossing) return 'AUTO ETO waiting · ' + estimate.refFix + ' already passed ~' + Math.max(1, Math.round(estimate.crossingAgeMin || 0)) + ' min ago · ETA >' + lookaheadMin + ' min'
     return 'AUTO ETO waiting · ~' + Math.ceil(estimate.minutes || 0) + ' min to destination · auto-fill starts ETA ≤' + lookaheadMin + ' min'
   }
@@ -342,12 +359,15 @@ function estimateText(estimate: AutoEstimate | undefined, manual: boolean, looka
   return 'AUTO ETO unavailable · ' + (estimate.reason || 'insufficient data')
 }
 
-export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, disabled, onAdd }: Props) {
+export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, disabled, onAdd, onAddAll }: Props) {
   const [flights, setFlights] = useState<TrafficFlight[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [autoEstimates, setAutoEstimates] = useState<Record<string, AutoEstimate>>({})
   const [loading, setLoading] = useState(false)
   const [adding, setAdding] = useState<string | null>(null)
+  const [bulkAdding, setBulkAdding] = useState(false)
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null)
+  const [locallyAddedCallsigns, setLocallyAddedCallsigns] = useState<Set<string>>(() => new Set())
   const [error, setError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -369,6 +389,19 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   const gsHistoryRef = useRef(new Map<string, number[]>())
 
   const existing = useMemo(() => new Set(existingCallsigns.map((item) => item.toUpperCase())), [existingCallsigns])
+
+  useEffect(() => {
+    setLocallyAddedCallsigns((current) => {
+      let changed = false
+      const next = new Set(current)
+      for (const callsign of current) {
+        if (!existing.has(callsign)) continue
+        next.delete(callsign)
+        changed = true
+      }
+      return changed ? next : current
+    })
+  }, [existing])
 
   useEffect(() => {
     try { window.localStorage.setItem(AUTO_ETO_LOOKAHEAD_STORAGE_KEY, String(lookaheadMin)) } catch { /* ignore storage failures */ }
@@ -453,6 +486,52 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     return request
   }, [airport])
 
+  const estimateForRefFix = useCallback(async (
+    flight: TrafficFlight,
+    geometry: RouteGeometry | null,
+    refFix: string,
+    groundSpeed: number | null,
+    baseTimeIso: string,
+    autoAssignedFix = false,
+  ) => {
+    let estimate = autoEstimate(flight, geometry, refFix, groundSpeed, baseTimeIso, lookaheadMin)
+    if (estimate.status === 'unavailable' && estimate.reason === 'REF FIX not in filed route' && refFix) {
+      const assumedGeometry = await getAssumedRouteGeometry(flight, refFix)
+      if (assumedGeometry) {
+        const assumedEstimate = autoEstimate(flight, assumedGeometry, refFix, groundSpeed, baseTimeIso, lookaheadMin)
+        estimate = { ...assumedEstimate, assumedDirect: true, autoAssignedFix }
+      }
+    }
+    return estimate
+  }, [getAssumedRouteGeometry, lookaheadMin])
+
+  const autoAssignUnfiledFix = useCallback(async (
+    flight: TrafficFlight,
+    geometry: RouteGeometry | null,
+    groundSpeed: number | null,
+    baseTimeIso: string,
+  ) => {
+    if (!geometry || !fixes.length) return null
+    if (fixes.some((fix) => fixDistancesAlongRoute(geometry, fix).length > 0)) return null
+
+    const candidates = await Promise.all(fixes.map(async (fix) => {
+      const assumedGeometry = await getAssumedRouteGeometry(flight, fix)
+      if (!assumedGeometry) return null
+      const score = remainingDistanceToFix(flight, assumedGeometry, fix)
+      if (score == null || !Number.isFinite(score)) return null
+      const estimate = autoEstimate(flight, assumedGeometry, fix, groundSpeed, baseTimeIso, lookaheadMin)
+      return {
+        refFix: fix,
+        score,
+        estimate: { ...estimate, assumedDirect: true, autoAssignedFix: true } as AutoEstimate,
+      }
+    }))
+
+    return candidates
+      .filter((candidate): candidate is { refFix: string; score: number; estimate: AutoEstimate } => candidate != null)
+      .sort((left, right) => left.score - right.score)[0] ?? null
+  }, [fixes, getAssumedRouteGeometry, lookaheadMin])
+
   const refresh = useCallback(async () => {
     if (!airport || refreshInFlightRef.current) return
     refreshInFlightRef.current = true
@@ -481,19 +560,29 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
       for (const flight of nextFlights) {
         const geometry = geometries.get(flight.sessionId) ?? null
         const previous = currentDrafts[flight.sessionId]
-        const suggested = geometry ? upcomingConfiguredFix(flight, geometry, fixes) : suggestedFix(flight.route, fixes)
-        const refFix = previous?.refFixManual ? previous.refFix : (suggested || previous?.refFix || fixes[0] || '')
         const gs = smoothedGroundSpeed(flight)
-        let estimate = autoEstimate(flight, geometry, refFix, gs, nextFetchedAt, lookaheadMin)
-        if (estimate.status === 'unavailable' && estimate.reason === 'REF FIX not in filed route' && refFix) {
-          const assumedGeometry = await getAssumedRouteGeometry(flight, refFix)
-          if (assumedGeometry) {
-            const assumedEstimate = autoEstimate(flight, assumedGeometry, refFix, gs, nextFetchedAt, lookaheadMin)
-            if (assumedEstimate.status === 'ready' || assumedEstimate.status === 'waiting') {
-              estimate = { ...assumedEstimate, assumedDirect: true }
-            }
+        const filedSuggested = geometry ? upcomingConfiguredFix(flight, geometry, fixes) : suggestedFix(flight.route, fixes)
+        let refFix = previous?.refFixManual ? previous.refFix : filedSuggested
+        let estimate: AutoEstimate | null = null
+
+        if (previous?.refFixManual) {
+          estimate = await estimateForRefFix(flight, geometry, refFix, gs, nextFetchedAt, false)
+        } else if (filedSuggested) {
+          estimate = autoEstimate(flight, geometry, filedSuggested, gs, nextFetchedAt, lookaheadMin)
+        } else if (previous?.refFix && fixes.includes(previous.refFix)) {
+          refFix = previous.refFix
+          estimate = await estimateForRefFix(flight, geometry, refFix, gs, nextFetchedAt, true)
+        } else {
+          const assigned = await autoAssignUnfiledFix(flight, geometry, gs, nextFetchedAt)
+          if (assigned) {
+            refFix = assigned.refFix
+            estimate = assigned.estimate
           }
         }
+
+        if (!refFix) refFix = fixes[0] || ''
+        if (!estimate) estimate = await estimateForRefFix(flight, geometry, refFix, gs, nextFetchedAt, !filedSuggested)
+
         const etoManual = previous?.etoManual ?? false
         const eto = etoManual ? (previous?.eto || '') : (estimate.status === 'ready' ? estimate.eto : '')
         nextDrafts[flight.sessionId] = {
@@ -512,7 +601,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
       refreshInFlightRef.current = false
       setLoading(false)
     }
-  }, [airport, fixes, getAssumedRouteGeometry, getRouteGeometry, lookaheadMin, setDraftState, smoothedGroundSpeed])
+  }, [airport, autoAssignUnfiledFix, estimateForRefFix, fixes, getRouteGeometry, lookaheadMin, setDraftState, smoothedGroundSpeed])
 
   const markActivity = useCallback(() => {
     lastActivityRef.current = Date.now()
@@ -589,16 +678,7 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     const gsSamples = gsHistoryRef.current.get(flight.sessionId) || []
     const gs = gsSamples.length ? gsSamples.reduce((sum, value) => sum + value, 0) / gsSamples.length : flight.groundSpeed
     const baseTime = fetchedAt || new Date().toISOString()
-    let estimate = autoEstimate(flight, geometry, refFix, gs, baseTime, lookaheadMin)
-    if (estimate.status === 'unavailable' && estimate.reason === 'REF FIX not in filed route') {
-      const assumedGeometry = await getAssumedRouteGeometry(flight, refFix)
-      if (assumedGeometry) {
-        const assumedEstimate = autoEstimate(flight, assumedGeometry, refFix, gs, baseTime, lookaheadMin)
-        if (assumedEstimate.status === 'ready' || assumedEstimate.status === 'waiting') {
-          estimate = { ...assumedEstimate, assumedDirect: true }
-        }
-      }
-    }
+    const estimate = await estimateForRefFix(flight, geometry, refFix, gs, baseTime, false)
     const nextDraft = {
       ...current,
       refFix,
@@ -630,17 +710,55 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
     })
   }
 
+  const bulkItems = useMemo<TrafficAddItem[]>(() => {
+    if (disabled) return []
+    return flights.flatMap((flight) => {
+      const callsign = flight.callsign.toUpperCase()
+      if (existing.has(callsign) || locallyAddedCallsigns.has(callsign)) return []
+      const draft = drafts[flight.sessionId]
+      if (!draft?.refFix || !validTime(draft.eto)) return []
+      return [{ flight, refFix: draft.refFix, eto: draft.eto }]
+    })
+  }, [disabled, drafts, existing, flights, locallyAddedCallsigns])
+
   const add = async (flight: TrafficFlight) => {
     const draft = drafts[flight.sessionId]
     if (!draft || !draft.refFix || !validTime(draft.eto)) return
     setAdding(flight.sessionId)
     setError(null)
+    setBulkNotice(null)
     try {
       await onAdd(flight, draft.refFix, draft.eto)
+      setLocallyAddedCallsigns((current) => new Set(current).add(flight.callsign.toUpperCase()))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setAdding(null)
+    }
+  }
+
+  const addAll = async () => {
+    if (!bulkItems.length || bulkAdding) return
+    const eligibleFlights = flights.filter((flight) => {
+      const callsign = flight.callsign.toUpperCase()
+      return !existing.has(callsign) && !locallyAddedCallsigns.has(callsign)
+    }).length
+    setBulkAdding(true)
+    setBulkNotice(null)
+    setError(null)
+    try {
+      await onAddAll(bulkItems)
+      setLocallyAddedCallsigns((current) => {
+        const next = new Set(current)
+        for (const item of bulkItems) next.add(item.flight.callsign.toUpperCase())
+        return next
+      })
+      const skipped = Math.max(0, eligibleFlights - bulkItems.length)
+      setBulkNotice(`Added ${bulkItems.length} flight${bulkItems.length === 1 ? '' : 's'}${skipped ? ` · ${skipped} waiting/unavailable` : ''}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBulkAdding(false)
     }
   }
 
@@ -653,14 +771,16 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
         <div className="ivao-traffic-heading">
           <div>
             <strong>IVAO inbound · {airport}</strong>
-            <span>AUTO ETO uses filed-route distance + live GS. Thailand domestic flights use tracked wheels-off + filed EET for the look-ahead trigger. If the selected REF FIX is not filed, the system may extend the filed route with an assumed DCT to that fix and labels the estimate accordingly.</span>
+            <span>AUTO ETO uses filed-route distance + live GS. Thailand domestic flights use tracked wheels-off + filed EET for the look-ahead trigger. Filed STAR/REF FIX is preferred; when none is filed, the system auto-assigns the shortest usable configured REF FIX using an assumed-DCT continuation.</span>
           </div>
           <div className="ivao-traffic-heading-actions">
             <label className="ivao-lookahead-control"><span>START AUTO ETO</span><select value={lookaheadMin} onChange={(event) => changeLookahead(Number(event.target.value))}>{AUTO_ETO_LOOKAHEAD_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>ETA ≤ {minutes} min</option>)}</select></label>
             <button type="button" onClick={manualRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+            <button type="button" className="ivao-add-all" onClick={() => void addAll()} disabled={disabled || bulkAdding || bulkItems.length === 0} title="Add every IVAO arrival with a valid ETO; waiting or unavailable flights are skipped">{bulkAdding ? 'Adding…' : `Add All${bulkItems.length ? ` (${bulkItems.length})` : ''}`}</button>
           </div>
         </div>
 
+        {bulkNotice && <div className="ivao-bulk-notice">{bulkNotice}</div>}
         {error && <div className="ivao-traffic-error">{error}</div>}
         {!error && flights.length === 0 && <div className="ivao-traffic-empty">No connected IVAO arrivals to {airport}.</div>}
 
@@ -668,8 +788,9 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
           {flights.map((flight) => {
             const draft = drafts[flight.sessionId] || { refFix: fixes[0] || '', eto: '', refFixManual: false, etoManual: false }
             const estimate = autoEstimates[flight.sessionId]
-            const alreadyAdded = existing.has(flight.callsign.toUpperCase())
-            const canAdd = !disabled && !alreadyAdded && Boolean(draft.refFix) && validTime(draft.eto)
+            const callsign = flight.callsign.toUpperCase()
+            const alreadyAdded = existing.has(callsign) || locallyAddedCallsigns.has(callsign)
+            const canAdd = !disabled && !bulkAdding && !alreadyAdded && Boolean(draft.refFix) && validTime(draft.eto)
             return <article className="ivao-traffic-flight" key={flight.sessionId}>
               <div className="ivao-traffic-logo">
                 {flight.airlineIcao
@@ -703,4 +824,4 @@ export default function IvaoTrafficPanel({ airport, fixes, existingCallsigns, di
   )
 }
 
-export type { TrafficFlight }
+export type { TrafficAddItem, TrafficFlight }
