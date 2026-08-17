@@ -1,0 +1,36 @@
+name: Patch passed REF FIX ETO
+
+on:
+  push:
+    paths:
+      - 'scripts/patch-past-ref-fix-eto.mjs'
+      - '.github/workflows/patch-past-ref-fix-eto.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply patch
+        run: node scripts/patch-past-ref-fix-eto.mjs
+      - name: Install
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/patch-past-ref-fix-eto.mjs .github/workflows/patch-past-ref-fix-eto.yml package-lock.json
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Back-estimate passed REF FIX ETO"
+          git push
