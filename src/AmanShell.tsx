@@ -266,6 +266,16 @@ export default function AmanShell() {
     }
   }
 
+  const deleteFlight = async (row: ArrivalView) => {
+    if (!window.confirm(`Remove ${row.callsign} from the arrival sequence?`)) return
+    try {
+      setError(null)
+      await sequenceApi('/api/sequence/arrival', { action: 'delete', id: row.id })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <div className="app-shell aman-v2-shell">
       <header className="topbar aman-v2-topbar">
@@ -278,7 +288,15 @@ export default function AmanShell() {
           <div className="connection-pill"><span className="live-dot" /> REALTIME</div>
           <a className="aman-header-link" href={legacyHref}>Detailed editor</a>
           {authUser.isThailandStaff && <a className="aman-header-link" href="/admin">Admin</a>}
-          <div className="aman-user-chip"><strong>{authUser.name}</strong><span>{authUser.vid}</span></div>
+          <details className="aman-account-menu">
+            <summary className="aman-user-chip"><span className="aman-user-avatar">{authUser.name.slice(0, 2).toUpperCase()}</span><span className="aman-user-text"><strong>{authUser.name}</strong><small>VID {authUser.vid}</small></span><b>▾</b></summary>
+            <div className="aman-account-popover">
+              <div className="aman-account-identity"><strong>{authUser.name}</strong><span>VID {authUser.vid}</span></div>
+              <a href={legacyHref}>Open detailed editor</a>
+              {authUser.isThailandStaff && <a href="/admin">Open Admin Console</a>}
+              <a className="aman-signout-link" href="/api/auth/logout">Sign out of IVAO</a>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -325,8 +343,8 @@ export default function AmanShell() {
             </div>
             <div className="aman-sequence-table-wrap">
               <table className="aman-sequence-table">
-                <thead><tr><th>TLDT<small>Target Landing Time</small></th><th>CALLSIGN</th><th>TYPE</th><th>IAWP / STAR<small>Entry fix / procedure</small></th><th>TTO<small>Target Time Over</small></th><th>DELAY<small>Required</small></th><th>RWY CFG</th></tr></thead>
-                <tbody>{loading ? <tr><td colSpan={7} className="aman-panel-empty">Connecting to shared sequence…</td></tr> : activeRows.length === 0 ? <tr><td colSpan={7} className="aman-panel-empty">No active arrivals in sequence.</td></tr> : activeRows.map((row) => {
+                <thead><tr><th>TLDT<small>Target Landing Time</small></th><th>CALLSIGN</th><th>TYPE</th><th>IAWP / STAR<small>Entry fix / procedure</small></th><th>TTO<small>Target Time Over</small></th><th>DELAY<small>Required</small></th><th>RWY CFG</th><th className="aman-action-head">ACTION</th></tr></thead>
+                <tbody>{loading ? <tr><td colSpan={8} className="aman-panel-empty">Connecting to shared sequence…</td></tr> : activeRows.length === 0 ? <tr><td colSpan={8} className="aman-panel-empty">No active arrivals in sequence.</td></tr> : activeRows.map((row) => {
                   const delay = delayMinutes(row.cldt, row.eldt)
                   const stars = workspaceConfig.starProcedures.filter((star) => star.runway_config_id === workspace.runwayId && star.active && star.entry_fix?.toUpperCase() === row.ref_fix.toUpperCase()).map((star) => star.designator)
                   const airline = airlineIcaoFromCallsign(row.callsign)
@@ -338,6 +356,7 @@ export default function AmanShell() {
                     <td className="aman-tto">{timeOnly(row.cto)}</td>
                     <td><span className={`aman-delay-pill ${delayClass(delay)}`}>{delayLabel(delay)}</span></td>
                     <td className="aman-runway-config">{workspace.runway}</td>
+                    <td className="aman-action-cell"><button type="button" className="aman-delete-flight" onClick={() => void deleteFlight(row)} title={`Remove ${row.callsign} from sequence`} aria-label={`Remove ${row.callsign} from sequence`}>×</button></td>
                   </tr>
                 })}</tbody>
               </table>

@@ -283,3 +283,132 @@
   .aman-v2-shell .destination-nav-row { align-items: flex-start; flex-direction: column; }
   .aman-v2-shell .destination-nav-heading { min-width: 0; }
 }
+
+
+/* AMAN V2 readability + primary actions */
+.aman-v2-shell .brand-block h1 {
+  color: #f4f9fc !important;
+  font-size: 22px !important;
+  line-height: 1.15;
+}
+.aman-v2-shell .brand-block p { color: #9eb6c6 !important; font-size: 12px !important; }
+.aman-v2-shell .eyebrow { color: #79bfe5 !important; font-size: 10px !important; }
+
+.aman-header-link,
+.aman-table-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #36566b;
+  border-radius: 7px;
+  background: #102a3d;
+  color: #dcecf5 !important;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none !important;
+  white-space: nowrap;
+}
+.aman-header-link:hover,
+.aman-table-link:hover { background: #173a52; border-color: #55a8d4; color: #fff !important; }
+.aman-table-link { min-height: 34px; }
+
+.aman-account-menu { position: relative; }
+.aman-account-menu > summary { list-style: none; }
+.aman-account-menu > summary::-webkit-details-marker { display: none; }
+.aman-user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 9px;
+  border: 1px solid #36566b;
+  border-radius: 8px;
+  background: #0d2435;
+  color: #eef7fb;
+  cursor: pointer;
+}
+.aman-user-avatar {
+  display: grid !important;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #173f58;
+  color: #8bd8ff !important;
+  font-size: 10px !important;
+  font-weight: 900;
+}
+.aman-user-text { display: grid !important; gap: 1px; }
+.aman-user-text strong { color: #f7fbfd; font-size: 12px; line-height: 1.1; }
+.aman-user-text small { color: #8faaba; font-size: 10px; }
+.aman-user-chip > b { color: #8ca8ba; font-size: 10px; }
+.aman-account-popover {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 7px);
+  min-width: 230px;
+  padding: 8px;
+  border: 1px solid #34566b;
+  border-radius: 9px;
+  background: #0c2130;
+  box-shadow: 0 16px 40px rgba(0,0,0,.4);
+}
+.aman-account-identity { display: grid; gap: 2px; padding: 8px 9px 10px; border-bottom: 1px solid #244151; }
+.aman-account-identity strong { color: #fff; font-size: 13px; }
+.aman-account-identity span { color: #8faaba !important; font-size: 11px !important; }
+.aman-account-popover a {
+  display: block;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: #dcecf5 !important;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none !important;
+}
+.aman-account-popover a:hover { background: #15364b; color: #fff !important; }
+.aman-account-popover .aman-signout-link { color: #ffb1a1 !important; border-top: 1px solid #244151; margin-top: 7px; padding-top: 10px; }
+
+.aman-v2-shell .clock-card,
+.aman-v2-shell .connection-pill { min-height: 36px; font-size: 11px; }
+.aman-v2-shell .topbar-actions { gap: 8px; }
+
+.aman-stat-card span { font-size: 11px; }
+.aman-stat-card small { font-size: 11px; }
+.aman-panel-head span { font-size: 11px; }
+.aman-panel-head h2 { font-size: 17px; }
+.aman-sequence-table th { font-size: 11px; padding: 10px 9px; }
+.aman-sequence-table th small { font-size: 9px; line-height: 1.25; }
+.aman-sequence-table td { height: 46px; padding: 8px 9px; font-size: 13px; }
+.aman-side-panel-head span { font-size: 10px; }
+.aman-side-panel-head h3 { font-size: 14px; }
+.aman-side-table th { font-size: 10px; padding: 8px 9px; }
+.aman-side-table td { font-size: 11px; padding: 8px 9px; }
+.aman-panel-empty, .aman-panel-error { font-size: 12px; }
+.aman-delay-legend > strong { font-size: 12px; }
+.aman-delay-key { font-size: 11px; }
+.aman-delay-legend-note { font-size: 10px; }
+
+.aman-action-head { width: 64px; text-align: center !important; }
+.aman-action-cell { width: 64px; text-align: center; }
+.aman-delete-flight {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #764337;
+  border-radius: 6px;
+  background: #321c1b;
+  color: #ff9b86;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+}
+.aman-delete-flight:hover { background: #61291f; border-color: #d76550; color: #fff; }
+
+@media (max-width: 980px) {
+  .aman-v2-shell .topbar { align-items: flex-start; }
+  .aman-v2-shell .topbar-actions { flex-wrap: wrap; justify-content: flex-end; }
+}
