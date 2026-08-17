@@ -136,7 +136,7 @@ async function sequenceApi(path: string, body: Record<string, unknown>) {
   return payload
 }
 
-type EditingState = Record<string, { displayName: string }>
+type EditingState = Record<string, { displayName: string; userId: string }>
 type OnlineController = {
   key: string
   displayName: string
@@ -370,7 +370,14 @@ function App() {
           .on('broadcast', { event: 'editing' }, ({ payload }) => {
             if (!payload || payload.userId === identity.id) return
             const key = `${payload.arrivalId}:${payload.field}`
-            setEditing((current) => ({ ...current, [key]: { displayName: payload.displayName } }))
+            setEditing((current) => {
+              const next = { ...current }
+              for (const [editingKey, editor] of Object.entries(next)) {
+                if (editor.userId === payload.userId && editingKey !== key) delete next[editingKey]
+              }
+              next[key] = { displayName: payload.displayName, userId: payload.userId }
+              return next
+            })
           })
           .on('broadcast', { event: 'editing-end' }, ({ payload }) => {
             if (!payload) return
@@ -729,21 +736,21 @@ function App() {
                   return (
                     <tr key={row.id} className={row.status === 'LANDED' ? 'landed-row' : 'active-row'}>
                       <td className="seq-cell">{row.sequence_no}</td>
-                      <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} bold /></td>
-                      <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
-                      <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                      <td><EditableText row={row} field="callsign" value={row.callsign} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} bold /></td>
+                      <td><EditableText row={row} field="aircraft_type" value={row.aircraft_type ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} /></td>
+                      <td><EditableText row={row} field="departure" value={row.departure ?? ''} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} /></td>
                       <td>
                         <div className="cell-editor-wrap">
-                          <select className="cell-select" value={row.ref_fix} disabled={savingCell === `${row.id}:ref_fix`} onFocus={() => startEditing(row.id, 'ref_fix')} onChange={(event) => void updateArrival(row, 'ref_fix', event.target.value)}>
+                          <select className="cell-select" value={row.ref_fix} disabled={savingCell === `${row.id}:ref_fix`} onFocus={() => startEditing(row.id, 'ref_fix')} onBlur={() => stopEditing(row.id, 'ref_fix')} onChange={(event) => void updateArrival(row, 'ref_fix', event.target.value)}>
                             {fixes.map((fix) => <option key={fix.fix} value={fix.fix}>{fix.fix}</option>)}
                           </select>
                           {editing[`${row.id}:ref_fix`] && <small className="editing-tag">{editing[`${row.id}:ref_fix`].displayName}</small>}
                         </div>
                       </td>
-                      <td><EditableTime row={row} field="eto" value={row.eto} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} /></td>
+                      <td><EditableTime row={row} field="eto" value={row.eto} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} /></td>
                       <td className="computed-cell">{timeOnly(row.eldt)}</td>
                       <td className="cldt-control-cell">
-                        <EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} strong />
+                        <EditableTime row={row} field="cldt" value={row.cldt} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} strong />
                         <div className="cldt-control-meta">
                           <span className={`cldt-mode-badge ${cldtOverride ? 'override' : 'auto'}`}>{cldtOverride ? 'OVERRIDE' : 'AUTO'}</span>
                           {cldtOverride && (
@@ -752,7 +759,7 @@ function App() {
                         </div>
                       </td>
                       <td className="computed-cell">{timeOnly(row.cto)}</td>
-                      <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onSave={updateArrival} allowEmpty /></td>
+                      <td><EditableTime row={row} field="aldt" value={row.aldt} saving={savingCell} editing={editing} onStart={startEditing} onStop={stopEditing} onSave={updateArrival} allowEmpty /></td>
                       <td className={row.est_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − ELDT">{intervalLabel(row.est_var)}</td>
                       <td className={row.seq_var?.startsWith('-') ? 'negative-var' : 'positive-var'} title="ALDT − CLDT">{intervalLabel(row.seq_var)}</td>
                       <td>
@@ -789,22 +796,23 @@ type EditorCommon = {
   saving: string | null
   editing: EditingState
   onStart: (arrivalId: string, field: string) => void
+  onStop: (arrivalId: string, field: string) => void
   onSave: (row: ArrivalView, field: string, value: string | null) => Promise<void>
 }
 
-function EditableText({ row, field, value, saving, editing, onStart, onSave, bold = false }: EditorCommon & { value: string; bold?: boolean }) {
+function EditableText({ row, field, value, saving, editing, onStart, onStop, onSave, bold = false }: EditorCommon & { value: string; bold?: boolean }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
   const key = `${row.id}:${field}`
   return (
     <div className="cell-editor-wrap">
-      <input className={`cell-input${bold ? ' bold' : ''}`} value={draft} disabled={saving === key} onFocus={() => onStart(row.id, field)} onChange={(event) => setDraft(event.target.value.toUpperCase())} onBlur={() => { if (draft.trim() !== value) void onSave(row, field, draft.trim() || null) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      <input className={`cell-input${bold ? ' bold' : ''}`} value={draft} disabled={saving === key} onFocus={() => onStart(row.id, field)} onChange={(event) => setDraft(event.target.value.toUpperCase())} onBlur={() => { if (draft.trim() !== value) void onSave(row, field, draft.trim() || null); onStop(row.id, field) }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
       {editing[key] && <small className="editing-tag">{editing[key].displayName}</small>}
     </div>
   )
 }
 
-function EditableTime({ row, field, value, saving, editing, onStart, onSave, strong = false, allowEmpty = false }: EditorCommon & { value: string | null; strong?: boolean; allowEmpty?: boolean }) {
+function EditableTime({ row, field, value, saving, editing, onStart, onStop, onSave, strong = false, allowEmpty = false }: EditorCommon & { value: string | null; strong?: boolean; allowEmpty?: boolean }) {
   const current = value ? timeOnly(value) : ''
   const [draft, setDraft] = useState(current)
   useEffect(() => setDraft(current), [current])
@@ -837,7 +845,7 @@ function EditableTime({ row, field, value, saving, editing, onStart, onSave, str
         disabled={saving === key}
         onFocus={() => onStart(row.id, field)}
         onChange={(event) => setDraft(formatAtcTimeDraft(event.target.value))}
-        onBlur={commit}
+        onBlur={() => { commit(); onStop(row.id, field) }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
           if (event.key === 'Escape') {

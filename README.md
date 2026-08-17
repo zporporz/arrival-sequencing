@@ -47,6 +47,7 @@ ALDT + variance after landing
 - Presence channel shows controllers currently online in the selected workspace.
 - Controller presence includes display name, VID, role and Thailand staff codes where available.
 - Live edit presence shows when another controller is editing a field.
+- Edit presence is focus-scoped: moving to another field or leaving a field clears the previous editor badge, with one active cell tracked per controller.
 - Changes autosave and appear on connected screens.
 - UTC clock and realtime connection indicator in the header.
 
