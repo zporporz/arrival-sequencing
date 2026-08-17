@@ -84,7 +84,7 @@ Each flight row contains:
 | `REF FIX` | Reference fix used for timing |
 | `ETO` | Estimated Time Over the reference fix |
 | `ELDT` | Estimated Landing Time |
-| `TLDT` | Calculated / planned Landing Time |
+| `TLDT` | Target Landing Time |
 | `CTO` | Calculated Time Over the reference fix |
 | `ALDT` | Actual Landing Time |
 | `EST VAR` | `ALDT - ELDT` |
@@ -119,7 +119,7 @@ Each flight row contains:
 - Timing workflow helper visually distinguishes:
   - ETO = INPUT;
   - ELDT = AUTO ESTIMATE;
-  - TLDT = SEQUENCE;
+  - TLDT = TARGET;
   - CTO = AUTO TARGET.
 - A timing mismatch warning appears if the TLDT / ELDT adjustment does not agree with the CTO / ETO adjustment.
 

@@ -8,7 +8,7 @@ const TIME_COLUMNS = {
 const ROLE_DEFINITIONS = [
   [TIME_COLUMNS.eto, 'INPUT', 'Enter the estimated time over the reference fix.'],
   [TIME_COLUMNS.eldt, 'ESTIMATE', 'Automatically calculated estimated landing time.'],
-  [TIME_COLUMNS.cldt, 'SEQUENCE', 'Starts at ELDT; controller may override for sequencing.'],
+  [TIME_COLUMNS.cldt, 'TARGET', 'Target Landing Time. Starts at ELDT; controller may override for sequencing.'],
   [TIME_COLUMNS.cto, 'TARGET', 'Automatically calculated target time over the reference fix.'],
 ] as const
 
@@ -141,7 +141,7 @@ function installWorkflowStrip() {
     <i>→</i>
     <span><b>ELDT</b><small>AUTO ESTIMATE</small></span>
     <i>→</i>
-    <span><b>TLDT</b><small>SEQUENCE</small></span>
+    <span><b>TLDT</b><small>TARGET</small></span>
     <i>→</i>
     <span><b>CTO</b><small>AUTO TARGET</small></span>
   `
