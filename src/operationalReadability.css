@@ -149,6 +149,69 @@
   font-size: 14px;
 }
 
+/* Airport picker: make it a clean selector list rather than nested boxes. */
+.aman-airport-tabs.has-runtime-selector {
+  background: #091321;
+}
+
+.aman-airport-scope-picker {
+  height: 100%;
+  justify-content: center;
+}
+
+.aman-airport-checks {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.aman-airport-checks .aman-airport-choice {
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  box-shadow: none;
+  min-height: 31px;
+  height: 31px;
+  padding: 2px 4px 2px 5px;
+  grid-template-columns: 16px 54px 1fr;
+  column-gap: 7px;
+}
+
+.aman-airport-checks .aman-airport-choice:hover {
+  background: #0d1b2c;
+}
+
+.aman-airport-checks .aman-airport-choice:has(input:checked) {
+  border: 0;
+  background: #10233a;
+  box-shadow: inset 3px 0 0 #6aa7df;
+}
+
+.aman-airport-choice-code {
+  font-size: 12px;
+  font-weight: 900;
+  overflow: visible;
+}
+
+.aman-airport-side-controls {
+  justify-self: stretch;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.aman-airport-side-button {
+  width: auto;
+  min-width: 0;
+  height: 26px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.aman-airport-choice:not(:has(input:checked)) .aman-airport-side-controls {
+  visibility: hidden;
+}
+
 /* Stable side placement -------------------------------------------------------
    Side is stored as a data attribute by airportScopeRuntime. React rewrites the
    row className continuously while dragging, but does not own this attribute,
