@@ -8,14 +8,18 @@ function buttonValue(button: HTMLButtonElement) {
   return (button.textContent || '').trim().toUpperCase()
 }
 
+// Only the original React scope buttons are direct children of .aman-airport-tabs.
+// Runtime L/R buttons live inside the injected picker and must never be treated as airports.
+function scopeButtons(host: HTMLElement) {
+  return Array.from(host.querySelectorAll<HTMLButtonElement>(':scope > button'))
+}
+
 function airportButtons(host: HTMLElement) {
-  return Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-    .filter((button) => buttonValue(button) !== 'BOTH')
+  return scopeButtons(host).filter((button) => buttonValue(button) !== 'BOTH')
 }
 
 function allButton(host: HTMLElement) {
-  return Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-    .find((button) => buttonValue(button) === 'BOTH') ?? null
+  return scopeButtons(host).find((button) => buttonValue(button) === 'BOTH') ?? null
 }
 
 function loadDisplaySides() {
@@ -65,8 +69,6 @@ export function installAirportScopeRuntime() {
   const setDisplaySide = (airport: string, side: DisplaySide) => {
     displaySides[airport] = side
 
-    // The MAESTRO timeline has two operational sides. If two selected airports collide,
-    // the other selected airport is moved to the opposite side automatically.
     const opposite: DisplaySide = side === 'LEFT' ? 'RIGHT' : 'LEFT'
     for (const other of selectedValues()) {
       if (other !== airport && displaySides[other] === side) displaySides[other] = opposite
@@ -134,8 +136,6 @@ export function installAirportScopeRuntime() {
       if (selected.length === 1) {
         buttons.find((button) => buttonValue(button) === selected[0])?.click()
       } else {
-        // Current sequencing engine represents the supported two-airport set with the
-        // hidden BOTH scope. The visible picker stays airport-by-airport.
         allButton(host)?.click()
       }
     } finally {
@@ -242,8 +242,8 @@ export function installAirportScopeRuntime() {
 
     if (!wrapper || syncing) return
 
-    const active = Array.from(nextHost.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.classList.contains('is-active'))
+    // Read active state only from the original direct-child React buttons.
+    const active = scopeButtons(nextHost).find((button) => button.classList.contains('is-active'))
     const activeValue = active ? buttonValue(active) : ''
     const multiActive = activeValue === 'BOTH'
 
