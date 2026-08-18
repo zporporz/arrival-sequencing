@@ -4,15 +4,16 @@ function formatHm(date: Date) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
 }
 
-function selectedBelowActualMinutes() {
-  const select = document.querySelector<HTMLSelectElement>('.aman-history-control select')
+function readBelowActualMinutes(select: HTMLSelectElement | null) {
   const value = Number(select?.value)
   return Number.isFinite(value) ? value : 10
 }
 
-function rebuildTimelineAxis() {
+export function installTimelineAxisRuntime() {
   const stage = document.querySelector<HTMLElement>('.aman-timeline-stage')
-  if (!stage) return
+  const select = document.querySelector<HTMLSelectElement>('.aman-history-control select')
+
+  if (!stage) return () => {}
 
   let overlay = stage.querySelector<HTMLElement>(':scope > .aman-runtime-time-axis')
   if (!overlay) {
@@ -21,85 +22,72 @@ function rebuildTimelineAxis() {
     stage.appendChild(overlay)
   }
 
-  const height = stage.clientHeight
-  if (!height) return
+  let lastRenderKey = ''
 
-  const belowMinutes = selectedBelowActualMinutes()
-  const belowPx = belowMinutes * PX_PER_MINUTE
-  const actualY = Math.max(20, Math.min(height - 20, height - belowPx))
-  stage.style.setProperty('--now-line', `${Math.round(actualY)}px`)
+  const rebuild = (force = false) => {
+    const height = stage.clientHeight
+    if (!height || !overlay) return
 
-  const now = new Date()
-  const minuteAnchor = new Date(now)
-  minuteAnchor.setUTCSeconds(0, 0)
+    const belowMinutes = readBelowActualMinutes(select)
+    const belowPx = belowMinutes * PX_PER_MINUTE
+    const actualY = Math.max(20, Math.min(height - 20, height - belowPx))
+    stage.style.setProperty('--now-line', `${Math.round(actualY)}px`)
 
-  const futureMinutesNeeded = Math.ceil(actualY / PX_PER_MINUTE) + 2
-  const pastMinutesNeeded = Math.ceil((height - actualY) / PX_PER_MINUTE) + 2
-  const fragment = document.createDocumentFragment()
+    const now = new Date()
+    const minuteAnchor = new Date(now)
+    minuteAnchor.setUTCSeconds(0, 0)
 
-  for (let offset = -pastMinutesNeeded; offset <= futureMinutesNeeded; offset += 1) {
-    const tickTime = new Date(minuteAnchor.getTime() + offset * 60_000)
-    const diffMinutes = (tickTime.getTime() - now.getTime()) / 60_000
-    const y = Math.round(actualY - diffMinutes * PX_PER_MINUTE)
-    if (y < -12 || y > height + 12) continue
+    // At 10 px/min the axis moves only 1 px about every 6 seconds.
+    // Skip DOM replacement until the visible pixel position actually changes.
+    const secondIntoMinute = now.getUTCSeconds() + now.getUTCMilliseconds() / 1000
+    const pixelPhase = Math.round(secondIntoMinute * PX_PER_MINUTE / 60)
+    const renderKey = `${height}|${belowMinutes}|${minuteAnchor.getTime()}|${pixelPhase}`
+    if (!force && renderKey === lastRenderKey) return
+    lastRenderKey = renderKey
 
-    const tick = document.createElement('div')
-    const isMajor = tickTime.getUTCMinutes() % 5 === 0
-    tick.className = `aman-runtime-minute-tick ${isMajor ? 'is-major' : 'is-minor'}`
-    tick.style.top = `${y}px`
+    const futureMinutesNeeded = Math.ceil(actualY / PX_PER_MINUTE) + 2
+    const pastMinutesNeeded = Math.ceil((height - actualY) / PX_PER_MINUTE) + 2
+    const fragment = document.createDocumentFragment()
 
-    if (isMajor) {
-      const label = document.createElement('span')
-      label.textContent = formatHm(tickTime)
-      tick.appendChild(label)
-    }
+    for (let offset = -pastMinutesNeeded; offset <= futureMinutesNeeded; offset += 1) {
+      const tickTime = new Date(minuteAnchor.getTime() + offset * 60_000)
+      const diffMinutes = (tickTime.getTime() - now.getTime()) / 60_000
+      const y = Math.round(actualY - diffMinutes * PX_PER_MINUTE)
+      if (y < -12 || y > height + 12) continue
 
-    const marker = document.createElement('i')
-    tick.appendChild(marker)
-    fragment.appendChild(tick)
-  }
+      const tick = document.createElement('div')
+      const isMajor = tickTime.getUTCMinutes() % 5 === 0
+      tick.className = `aman-runtime-minute-tick ${isMajor ? 'is-major' : 'is-minor'}`
+      tick.style.top = `${y}px`
 
-  overlay.replaceChildren(fragment)
-}
-
-export function installTimelineAxisRuntime() {
-  let resizeObserver: ResizeObserver | null = null
-  let select: HTMLSelectElement | null = null
-  let selectHandler: (() => void) | null = null
-  let stage: HTMLElement | null = null
-
-  const attach = () => {
-    const nextStage = document.querySelector<HTMLElement>('.aman-timeline-stage')
-    const nextSelect = document.querySelector<HTMLSelectElement>('.aman-history-control select')
-
-    if (nextStage !== stage) {
-      resizeObserver?.disconnect()
-      stage = nextStage
-      if (stage) {
-        resizeObserver = new ResizeObserver(rebuildTimelineAxis)
-        resizeObserver.observe(stage)
+      if (isMajor) {
+        const label = document.createElement('span')
+        label.textContent = formatHm(tickTime)
+        tick.appendChild(label)
       }
+
+      const marker = document.createElement('i')
+      tick.appendChild(marker)
+      fragment.appendChild(tick)
     }
 
-    if (nextSelect !== select) {
-      if (select && selectHandler) select.removeEventListener('change', selectHandler)
-      select = nextSelect
-      selectHandler = rebuildTimelineAxis
-      select?.addEventListener('change', selectHandler)
-    }
-
-    rebuildTimelineAxis()
+    overlay.replaceChildren(fragment)
   }
 
-  attach()
-  const domObserver = new MutationObserver(attach)
-  domObserver.observe(document.body, { childList: true, subtree: true })
-  const timer = window.setInterval(rebuildTimelineAxis, 1000)
+  const resizeObserver = new ResizeObserver(() => rebuild(true))
+  resizeObserver.observe(stage)
+
+  const selectHandler = () => rebuild(true)
+  select?.addEventListener('change', selectHandler)
+
+  // Lightweight timer only checks whether the axis has moved a whole pixel.
+  const timer = window.setInterval(() => rebuild(false), 1000)
+  window.requestAnimationFrame(() => rebuild(true))
 
   return () => {
     window.clearInterval(timer)
-    domObserver.disconnect()
-    resizeObserver?.disconnect()
-    if (select && selectHandler) select.removeEventListener('change', selectHandler)
+    resizeObserver.disconnect()
+    select?.removeEventListener('change', selectHandler)
+    overlay?.remove()
   }
 }
