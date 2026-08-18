@@ -3,7 +3,7 @@
 **Baseline:** 2026-08-18  
 **Evidence:** TH-SME — operational information supplied directly through the project owner.
 
-This file records Thailand-specific MAESTRO meanings that have been confirmed by an operational SME but are not yet supported by a published manual available to the project.
+This file records Thailand-specific MAESTRO meanings confirmed for the project. Some values are working operational baselines and may be revised later when the owner supplies more exact detail.
 
 ---
 
@@ -11,70 +11,37 @@ This file records Thailand-specific MAESTRO meanings that have been confirmed by
 
 **Confirmed meaning:** `ΔT` is the **average delay of the aircraft in the arrival sequence / STAR flow**.
 
-It represents, at a glance, how many minutes of delay aircraft are being required to absorb on average before meeting the MAESTRO target.
-
 Conceptually:
 
 `ΔT = sum of aircraft Delay Required values / number of aircraft included`
 
-Example:
+It is an aggregate/summary indicator derived from the per-aircraft Delay Required values, not another target time.
 
-- Aircraft A delay required = 2 min
-- Aircraft B delay required = 4 min
-- Aircraft C delay required = 6 min
+Still to refine later:
 
-Then:
-
-`ΔT = (2 + 4 + 6) / 3 = 4 min`
-
-### Relationship to the main sequence row
-
-The main MAESTRO row already contains an individual **Delay Required** value for each aircraft. `ΔT` is not another target time; it is an aggregate/summary indicator derived from those per-aircraft delay values.
-
-### Implementation note
-
-For the rebuild, `ΔT` should be treated as a calculated dashboard/stream metric rather than a manually entered setting.
-
-Still to confirm before hard-coding the exact calculation scope:
-
-- whether aircraft requiring time gain / Expedite (negative delay) are included as signed values;
-- whether only positive delay is included;
-- whether the average is calculated per airport, runway, STAR/IAWP stream, selected sector/view, or another active-filter scope;
-- whether Frozen/landed/holding aircraft are included or excluded.
-
-Until those scope rules are confirmed, the semantic definition above is authoritative but the exact population/filter used in the average remains configurable/TODO.
+- exact population/filter used in the average;
+- whether negative/Expedite values are included as signed values;
+- whether scope is airport/runway/STAR/IAWP/view-specific.
 
 ---
 
 ## TMA — Aircraft currently inside the TMA
 
-**Confirmed meaning:** the `TMA` counter shows **how many aircraft are currently inside the TMA** for the relevant MAESTRO view/context.
+**Confirmed meaning:** `TMA` shows **how many aircraft are currently inside the TMA** for the relevant MAESTRO context.
 
-### Implementation note
-
-Treat this as a live calculated counter, not a manually entered setting.
-
-Still to confirm:
-
-- the exact TMA volume/filter represented by each controller/view;
-- whether the count includes all controlled arrivals or only flights participating in the active AMAN sequence;
-- how boundary transitions are handled at the exact entry/exit instant.
+Treat this as a live calculated counter.
 
 ---
 
 ## HLD — Aircraft currently holding
 
-**Confirmed meaning:** the `HLD` counter shows **how many aircraft are currently in holding** for the relevant MAESTRO view/context.
+**Confirmed meaning:** `HLD` shows **how many aircraft are currently holding** for the relevant MAESTRO context.
 
-### Implementation note
+### Holding location
 
-Treat this as a live calculated counter. It should be derived from operational flight/holding state rather than entered manually.
+**Confirmed:** the operational holding point is at the **head of the STAR / feeder-entry point**.
 
-Still to confirm:
-
-- whether only published holding fixes associated with the active arrival flow are counted;
-- whether multiple holds/holding areas are aggregated into one total;
-- how an aircraft is classified during hold entry/exit transitions.
+For the rebuild, the default AMAN holding-point model is therefore the STAR head / feeder fix. Procedure-specific exceptions can be added later if supplied.
 
 ---
 
@@ -82,34 +49,21 @@ Still to confirm:
 
 **Confirmed label/meaning:** `TOT` means **Total traffic inbound in system**.
 
-Operationally, this is best interpreted as the **total number of inbound arrival aircraft currently known to / participating in the MAESTRO AMAN system for the relevant view**, not only aircraft already inside the TMA.
+For the IVAO rebuild, the current working interpretation is the total inbound traffic currently connected/known with destination matching the selected airport, including traffic still outside the TMA.
 
-This distinction matters:
+Conceptually:
 
-- `TMA` = aircraft currently inside the TMA;
-- `TOT` = all inbound aircraft currently in the AMAN system/planning population for that view;
-- `HLD` = aircraft currently holding.
+- `TOT` = all inbound traffic in the AMAN population;
+- `TMA` = subset currently inside the TMA;
+- `HLD` = subset currently holding.
 
-Therefore `TMA` is conceptually a subset of `TOT` for arrivals, while `TOT` can include aircraft still outside the TMA but already created/tracked by AMAN within its planning horizon.
-
-This interpretation is consistent with generic AMAN architecture, where inbound flights are acquired and sequenced before they reach the TMA. In the Thailand MAESTRO status model, flights can exist in the system while still in Unstable/Stable planning stages well outside the TMA.
-
-### Still to confirm
-
-The phrase **"in system"** still needs a precise Thailand implementation boundary before hard-coding the counter. Specifically:
-
-- exactly when an inbound first becomes part of `TOT` (e.g. after ABI/flight creation, planning-horizon entry, or another trigger);
-- exactly when a flight leaves `TOT` (landing, cancellation, diversion, go-around handling, manual removal, etc.);
-- whether `TOT` is airport-wide or filtered by selected runway/stream/sector/view;
-- whether arrivals assigned to another runway/configuration but visible to the same AMAN view are counted.
-
-Until those boundaries are confirmed, treat the displayed definition as authoritative but keep the membership/filter rule configurable.
+Exact membership boundaries can be refined later for disconnect, landing, diversion, go-around and filtering by view.
 
 ---
 
-## Delay colour thresholds — provisional from real HMI screenshot + SME memory
+## Delay colour thresholds — working confirmed baseline
 
-**Observed:** the supplied Thailand MAESTRO slide explicitly confirms the five action classes:
+The Thailand MAESTRO HMI uses:
 
 - Green — Expedite
 - White/grey — Nothing
@@ -117,13 +71,7 @@ Until those boundaries are confirmed, treat the displayed definition as authorit
 - Orange — Path Stretching
 - Red — Holding
 
-The slide itself does **not** print numeric thresholds.
-
-From the photographed live sequence, values of `0` are displayed in the no-action colour, `1` appears in the yellow/speed-reduction colour, and larger positive values are shown in the high-delay colour family. The project owner also recalls that **5 minutes of required delay is already treated as Holding**.
-
-### Temporary working threshold model
-
-Until a Thailand manual/SME confirms exact boundaries, use the following only as a **provisional UI/config hypothesis**, not authoritative MAESTRO logic:
+For the current rebuild, the project owner has confirmed the following **working threshold baseline**. These values are intentionally centralised so they can be changed later if a more exact operational table is recalled or supplied.
 
 - `< 0 min` → Expedite
 - `0 min` → Nothing
@@ -131,4 +79,4 @@ Until a Thailand manual/SME confirms exact boundaries, use the following only as
 - `3–4 min` → Path Stretching
 - `>= 5 min` → Holding
 
-This model fits the project owner's recollection that 5 minutes is already Holding and the screenshot evidence that 1 minute is a lower-severity action. The exact 2/3/4-minute boundaries still require confirmation before being treated as operational fact.
+Do not spread these numeric bands across UI code; reference the central AMAN constants/configuration.
