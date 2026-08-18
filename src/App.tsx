@@ -3,6 +3,10 @@ import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
 import {
   AMAN_DEFAULT_RUNWAY_SPACING_MINUTES,
+  AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES,
+  AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES,
+  BANGKOK_TMA_WORKING_RADIUS_NM,
+  BKK_VOR_COORDINATES,
   VTBD_IAWP_COMPACT_CODES,
   VTBD_IAWP_COMPACT_CODE_STYLE,
   VTBD_IAWP_NOMINAL_MINUTES,
@@ -115,11 +119,22 @@ function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: Airport
   return request
 }
 
+function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (value: number) => value * Math.PI / 180
+  const earthRadiusNm = 3440.065
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 export default function App() {
   const user = useAuthUser()
   const [now, setNow] = useState(() => new Date())
   const [airport, setAirport] = useState<AirportCode>('VTBD')
   const [runway, setRunway] = useState('21R')
+  const [historyMinutes, setHistoryMinutes] = useState(AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES)
   const [inbound, setInbound] = useState<InboundPreview[]>([])
   const [sequence, setSequence] = useState<AmanSequenceRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -132,6 +147,22 @@ export default function App() {
     () => inbound.filter((item) => item.source === 'LIVE_ROUTE').length,
     [inbound],
   )
+  const tmaCount = useMemo(
+    () => inbound.filter(({ flight }) => {
+      if (!Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return false
+      return distanceNm(
+        BKK_VOR_COORDINATES.lat,
+        BKK_VOR_COORDINATES.lon,
+        flight.latitude as number,
+        flight.longitude as number,
+      ) <= BANGKOK_TMA_WORKING_RADIUS_NM
+    }).length,
+    [inbound],
+  )
+  const visibleSequence = useMemo(() => {
+    const cutoff = now.getTime() - historyMinutes * 60_000
+    return sequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
+  }, [historyMinutes, now, sequence])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000)
@@ -307,7 +338,7 @@ export default function App() {
         </div>
 
         <div className="aman-counters">
-          <div><span>TMA</span><strong>---</strong></div>
+          <div><span>TMA</span><strong>{String(tmaCount).padStart(3, '0')}</strong></div>
           <div><span>TOT</span><strong>{String(inbound.length).padStart(3, '0')}</strong></div>
           <div><span>HLD</span><strong>---</strong></div>
           <div><span>ΔT</span><strong>{sequence.length ? formatDelay(averageDelay) : '--'}</strong></div>
@@ -324,6 +355,17 @@ export default function App() {
             <div className="aman-panel-meta">
               <span>5 MIN MAJOR</span>
               <span>1 MIN MINOR</span>
+              <label className="aman-history-control">
+                <span>HISTORY</span>
+                <select
+                  value={historyMinutes}
+                  onChange={(event) => setHistoryMinutes(Number(event.target.value))}
+                >
+                  {AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => (
+                    <option key={value} value={value}>{value} MIN</option>
+                  ))}
+                </select>
+              </label>
               <span>{loading ? 'LOADING' : 'IVAO LIVE'}</span>
             </div>
           </div>
@@ -347,14 +389,15 @@ export default function App() {
             </div>
 
             <div className="aman-flight-layer">
-              {sequence.map((row) => {
+              {visibleSequence.map((row) => {
                 const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
+                const isPast = offsetMinutes < 0
                 return (
                   <div
                     key={row.id}
-                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}`}
+                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}`}
                     style={{ '--offset-px': `${-offsetMinutes * PX_PER_MINUTE}px` } as CSSProperties}
-                    title={`Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min`}
+                    title={`Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min${isPast ? ' · assumed landed' : ''}`}
                   >
                     <span className="tldt">{formatHm(row.tldt)}</span>
                     <strong>{row.callsign}</strong>
@@ -370,7 +413,7 @@ export default function App() {
               })}
             </div>
 
-            {!loading && !sequence.length && (
+            {!loading && !visibleSequence.length && (
               <div className="aman-empty-sequence">
                 <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : 'NO SEQUENCEABLE INBOUND'}</strong>
                 <span>
@@ -421,6 +464,7 @@ export default function App() {
               <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
               <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
               <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
+              <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
               <div><dt>Sequence</dt><dd>AUTO UNSTABLE</dd></div>
               <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
             </dl>
