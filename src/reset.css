@@ -1,176 +1,389 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f7f7f5;
-  background: #11110f;
+  color: #e9f1fb;
+  background: #050914;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
-body { min-width: 320px; background: #11110f; }
+body { min-width: 320px; background: #050914; }
 button, input, select, textarea { font: inherit; }
 a { color: inherit; }
+button { color: inherit; }
 
-.construction-app {
+.aman-app {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 50% 42%, rgba(255, 122, 0, .12), transparent 36rem),
-    #11110f;
+    radial-gradient(circle at 50% 0%, rgba(44, 98, 157, .14), transparent 34rem),
+    linear-gradient(180deg, #07101d 0%, #050914 48%, #040710 100%);
 }
 
-.construction-topbar {
-  min-height: 72px;
+.aman-topbar {
+  min-height: 82px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 14px 28px;
-  border-bottom: 1px solid #2a2924;
-  background: rgba(17, 17, 15, .92);
+  gap: 24px;
+  padding: 10px 22px;
+  border-bottom: 1px solid #1c2c42;
+  background: rgba(4, 8, 16, .94);
 }
 
-.construction-brand,
-.construction-account-copy {
+.aman-brand,
+.aman-session,
+.aman-user,
+.aman-clock,
+.aman-brand-copy {
   display: flex;
-  flex-direction: column;
+  align-items: center;
 }
 
-.construction-brand { gap: 2px; }
-.construction-brand small {
-  color: #ff8a1f;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: .14em;
+.aman-brand { gap: 15px; min-width: 0; }
+.aman-brand img {
+  width: 178px;
+  height: 62px;
+  object-fit: contain;
+  object-position: center;
+  flex: 0 0 auto;
+}
+.aman-brand-copy { flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.1; }
+.aman-brand-copy span {
+  color: #7593b8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .15em;
   text-transform: uppercase;
 }
-.construction-brand strong { font-size: 20px; }
+.aman-brand-copy strong {
+  margin-top: 5px;
+  color: #f3f7fc;
+  font-size: 18px;
+  letter-spacing: .01em;
+}
 
-.construction-account { display: flex; align-items: center; gap: 12px; }
-.construction-account-copy { align-items: flex-end; line-height: 1.2; }
-.construction-account-copy strong { font-size: 13px; }
-.construction-account-copy span { color: #96938b; font-size: 11px; }
-.construction-signout {
+.aman-session { gap: 15px; }
+.aman-clock,
+.aman-user { flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.aman-clock span,
+.aman-user span { color: #6f829b; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.aman-clock strong { color: #9fd1ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: 15px; }
+.aman-user strong { color: #dfe8f4; font-size: 12px; }
+.aman-signout {
   padding: 8px 11px;
-  border: 1px solid #39372f;
-  border-radius: 8px;
-  color: #d8d6d0;
+  border: 1px solid #2a3b50;
+  border-radius: 5px;
+  background: #0b1420;
+  color: #9eb0c5;
   text-decoration: none;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
 }
 
-.construction-main {
-  min-height: calc(100vh - 73px);
+.aman-control-strip {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  align-items: stretch;
+  gap: 1px;
+  border-bottom: 1px solid #203048;
+  background: #0b1523;
+}
+
+.aman-airport-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 12px;
+  border-right: 1px solid #203048;
+}
+.aman-airport-tabs button {
+  min-width: 62px;
+  height: 34px;
+  border: 1px solid #293b53;
+  border-radius: 4px;
+  background: #0f1b2c;
+  color: #8399b4;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .07em;
+}
+.aman-airport-tabs button.is-active {
+  border-color: #477cb6;
+  background: #17304e;
+  color: #d8ecff;
+  box-shadow: inset 0 -2px 0 #67aef7;
+}
+
+.aman-config-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 16px;
+}
+.aman-config-label span { color: #5f7693; font-size: 9px; font-weight: 900; letter-spacing: .14em; }
+.aman-config-label strong { margin-top: 4px; color: #b9c9dc; font-size: 12px; }
+
+.aman-counters { display: flex; border-left: 1px solid #203048; }
+.aman-counters > div {
+  min-width: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 7px 12px;
+  border-left: 1px solid #15243a;
+}
+.aman-counters span { color: #607998; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.aman-counters strong { margin-top: 3px; color: #d5e3f3; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; }
+
+.aman-workspace {
+  min-height: calc(100vh - 178px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 10px;
+  padding: 10px;
+}
+
+.aman-panel {
+  min-width: 0;
+  border: 1px solid #1d304a;
+  border-radius: 4px;
+  background: rgba(9, 18, 31, .95);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .2);
+  overflow: hidden;
+}
+
+.aman-panel-header {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 15px;
+  border-bottom: 1px solid #1b2d45;
+  background: #0d1929;
+}
+.aman-panel-header.compact { min-height: 54px; }
+.aman-panel-header h1,
+.aman-panel-header h2 { margin: 2px 0 0; color: #e7eff8; font-size: 16px; }
+.aman-panel-header h2 { font-size: 14px; }
+.aman-eyebrow { color: #6785a8; font-size: 8px; font-weight: 900; letter-spacing: .16em; }
+.aman-panel-meta { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.aman-panel-meta span,
+.aman-live-pill {
+  padding: 5px 7px;
+  border: 1px solid #294260;
+  border-radius: 3px;
+  background: #101f31;
+  color: #7f9fc3;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.aman-live-pill { border-color: #215846; color: #6fdaa8; background: #0b231c; }
+
+.aman-timeline-stage {
+  position: relative;
+  min-height: 650px;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, transparent 0 49.92%, rgba(79, 111, 151, .42) 49.92% 50.08%, transparent 50.08%),
+    repeating-linear-gradient(180deg, rgba(89, 122, 162, .08) 0 1px, transparent 1px 22px),
+    #08111f;
+}
+
+.aman-time-axis {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.aman-major-tick {
+  --tick-index: 0;
+  position: absolute;
+  left: calc(50% - 56px);
+  top: calc(44% + (var(--tick-index) * 110px));
+  width: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+}
+.aman-major-tick span {
+  position: absolute;
+  right: 68px;
+  color: #7990aa;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+.aman-major-tick i {
+  width: 18px;
+  height: 1px;
+  background: #7087a3;
+  box-shadow: 0 -22px 0 -0.4px #3d516b, 0 22px 0 -0.4px #3d516b, 0 -44px 0 -0.4px #3d516b, 0 44px 0 -0.4px #3d516b;
+}
+
+.aman-current-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 44%;
+  height: 1px;
+  background: #ed4b55;
+  box-shadow: 0 0 8px rgba(237, 75, 85, .28);
+  z-index: 3;
+}
+.aman-current-line::before {
+  content: '';
+  position: absolute;
+  left: calc(50% - 5px);
+  top: -4px;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #ff7780;
+  background: #08111f;
+  transform: rotate(45deg);
+}
+.aman-current-line span {
+  position: absolute;
+  right: 11px;
+  top: -17px;
+  padding: 2px 5px;
+  background: #251019;
+  color: #ff8d95;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .05em;
+}
+
+.aman-empty-sequence {
+  position: absolute;
+  left: 50%;
+  top: 61%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 56px 24px 84px;
+  gap: 6px;
+  transform: translate(-50%, -50%);
   text-align: center;
 }
+.aman-empty-sequence strong { color: #526d8d; font-size: 11px; letter-spacing: .12em; }
+.aman-empty-sequence span { max-width: 440px; color: #40546d; font-size: 10px; line-height: 1.5; }
 
-.construction-beacon {
-  width: 18px;
-  height: 18px;
-  margin-bottom: 22px;
-  border-radius: 50%;
-  background: #ff7900;
-  box-shadow: 0 0 0 9px rgba(255, 121, 0, .11), 0 0 44px rgba(255, 121, 0, .5);
-  animation: construction-pulse 1.8s ease-in-out infinite;
-}
-
-.construction-kicker {
-  margin: 0 0 14px;
-  color: #ff8a1f;
-  font-size: 12px;
+.aman-side-stack { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; min-width: 0; }
+.aman-inbound-panel { min-height: 430px; }
+.aman-placeholder-list > div {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr .7fr .7fr;
+  gap: 8px;
+  padding: 8px 11px;
+  border-bottom: 1px solid #182b43;
+  background: #0a1625;
+  color: #617c9c;
+  font-size: 8px;
   font-weight: 900;
-  letter-spacing: .22em;
-  text-transform: uppercase;
+  letter-spacing: .08em;
 }
+.aman-placeholder-list p { margin: 0; padding: 24px 12px; color: #4a617d; font-size: 10px; text-align: center; }
 
-.construction-main h1 {
-  margin: 0;
-  color: #ff7900;
-  font-size: clamp(62px, 12vw, 170px);
-  font-weight: 950;
-  letter-spacing: -.07em;
-  line-height: .78;
-  text-shadow: 0 0 42px rgba(255, 121, 0, .08);
-}
-
-.construction-copy {
-  max-width: 720px;
-  margin: 34px auto 0;
-  color: #b7b4ac;
-  font-size: 15px;
-  line-height: 1.7;
-}
-
-.construction-status {
-  display: inline-flex;
+.aman-status-list { margin: 0; padding: 4px 0; }
+.aman-status-list > div {
+  display: flex;
   align-items: center;
-  gap: 9px;
-  margin-top: 22px;
-  padding: 9px 13px;
-  border: 1px solid #353229;
-  border-radius: 999px;
-  color: #8f8b81;
-  font-size: 11px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-top: 1px solid #14263b;
+}
+.aman-status-list > div:first-child { border-top: 0; }
+.aman-status-list dt { color: #657c97; font-size: 10px; }
+.aman-status-list dd { margin: 0; color: #78cba8; font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+.aman-status-list > div:last-child dd { color: #78aee4; }
+
+.aman-legend {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-top: 1px solid #1a2b41;
+  background: #07111e;
+  color: #7387a0;
+  font-size: 9px;
   font-weight: 700;
 }
-.construction-status span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ff7900;
-}
+.aman-legend > span { margin-right: 7px; color: #536b88; font-weight: 900; letter-spacing: .14em; }
+.aman-legend i { width: 14px; height: 7px; margin-left: 6px; border-radius: 1px; }
+.aman-legend .expedite { background: #8ef05a; }
+.aman-legend .nothing { border: 1px solid #8c95a2; background: #d8dadd; }
+.aman-legend .speed { background: #f4ed43; }
+.aman-legend .stretch { background: #e9a33a; }
+.aman-legend .holding { background: #d54735; }
 
 .auth-page {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: #11110f;
+  background: #050914;
 }
 .auth-card {
   width: min(460px, 100%);
   padding: 32px;
-  border: 1px solid #2e2d28;
-  border-radius: 18px;
-  background: #191816;
+  border: 1px solid #1d304a;
+  border-radius: 6px;
+  background: #0a1422;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .32);
 }
-.auth-eyebrow { color: #ff8a1f; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
-.auth-card h1 { margin: 10px 0; color: #fff; font-size: 28px; }
-.auth-copy { color: #aaa69d; line-height: 1.6; }
-.auth-error { margin: 14px 0; padding: 10px 12px; border-radius: 8px; background: #351b17; color: #ff9d8d; font-size: 12px; }
+.auth-eyebrow { color: #70a5dc; font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.auth-card h1 { margin: 10px 0; color: #eef5fc; font-size: 28px; }
+.auth-copy { color: #7890ac; line-height: 1.6; }
+.auth-error { margin: 14px 0; padding: 10px 12px; border-radius: 4px; background: #351b22; color: #ff9aa2; font-size: 12px; }
 .auth-login-button {
   display: inline-flex;
   margin-top: 8px;
   padding: 11px 15px;
-  border-radius: 9px;
-  background: #ff7900;
-  color: #17120d;
+  border-radius: 4px;
+  background: #25588f;
+  color: #eff7ff;
   text-decoration: none;
   font-size: 13px;
   font-weight: 900;
 }
-.auth-card small { display: block; margin-top: 14px; color: #77736a; }
+.auth-card small { display: block; margin-top: 14px; color: #586b82; }
 .auth-loading-card { display: flex; align-items: center; gap: 12px; }
-.auth-spinner { width: 18px; height: 18px; border: 2px solid #4a453d; border-top-color: #ff7900; border-radius: 50%; animation: reset-spin .8s linear infinite; }
+.auth-spinner { width: 18px; height: 18px; border: 2px solid #24384f; border-top-color: #6bb5ff; border-radius: 50%; animation: aman-spin .8s linear infinite; }
+@keyframes aman-spin { to { transform: rotate(360deg); } }
 
-@keyframes reset-spin { to { transform: rotate(360deg); } }
-@keyframes construction-pulse {
-  0%, 100% { transform: scale(1); opacity: .8; }
-  50% { transform: scale(1.18); opacity: 1; }
+@media (max-width: 980px) {
+  .aman-workspace { grid-template-columns: 1fr; }
+  .aman-side-stack { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+  .aman-inbound-panel { min-height: 260px; }
+  .aman-control-strip { grid-template-columns: auto 1fr; }
+  .aman-counters { grid-column: 1 / -1; border-top: 1px solid #203048; border-left: 0; justify-content: flex-end; }
+  .aman-timeline-stage { min-height: 560px; }
 }
 
 @media (max-width: 700px) {
-  .construction-topbar { align-items: flex-start; padding: 14px 18px; }
-  .construction-account-copy { display: none; }
-  .construction-main { min-height: calc(100vh - 69px); }
-  .construction-main h1 { font-size: clamp(54px, 20vw, 100px); }
-  .construction-copy { font-size: 13px; }
-  .construction-status { border-radius: 14px; }
+  .aman-topbar { align-items: flex-start; padding: 9px 12px; }
+  .aman-brand img { width: 126px; height: 48px; }
+  .aman-brand-copy { display: none; }
+  .aman-user { display: none; }
+  .aman-session { gap: 8px; }
+  .aman-clock strong { font-size: 12px; }
+  .aman-control-strip { grid-template-columns: 1fr; }
+  .aman-airport-tabs { border-right: 0; border-bottom: 1px solid #203048; }
+  .aman-config-label { min-height: 48px; }
+  .aman-counters { overflow-x: auto; justify-content: flex-start; }
+  .aman-counters > div { min-width: 70px; }
+  .aman-workspace { padding: 6px; gap: 6px; }
+  .aman-side-stack { grid-template-columns: 1fr; gap: 6px; }
+  .aman-panel-meta { display: none; }
+  .aman-timeline-stage { min-height: 500px; }
+  .aman-empty-sequence { width: 80%; }
+  .aman-legend { justify-content: flex-start; overflow-x: auto; white-space: nowrap; }
 }
