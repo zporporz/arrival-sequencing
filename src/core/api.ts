@@ -28,7 +28,41 @@ export type WorkspacePayload = {
   starProcedures: WorkspaceStar[]
 }
 
-export type IvaoTrafficPayload<TFlight = Record<string, unknown>> = {
+export type IvaoArrivalTrafficFlight = {
+  sessionId: string
+  vid: string | null
+  callsign: string
+  aircraft: string | null
+  wakeTurbulence: string | null
+  departure: string | null
+  arrival: string
+  route: string | null
+  state: string | null
+  onGround: boolean | null
+  trackTimestamp: string | null
+  altitude: number | null
+  groundSpeed: number | null
+  latitude: number | null
+  longitude: number | null
+  heading: number | null
+  connectedAt: string | null
+  airlineIcao: string | null
+  flightPlanId: string | null
+  flightPlanRevision: number | null
+  filedDepartureTimeSeconds: number | null
+  actualDepartureTimeSeconds: number | null
+  filedEetSeconds: number | null
+  departureCountryId: string | null
+  arrivalCountryId: string | null
+  isDomesticThailand: boolean
+  trackedTakeoffAt: string | null
+  filedDestinationEtaAt: string | null
+  domesticTriggerStatus: 'READY' | 'WAITING_TAKEOFF' | 'EET_UNAVAILABLE' | 'TAKEOFF_UNAVAILABLE' | 'NOT_DOMESTIC' | 'UNKNOWN'
+  domesticTriggerError: string | null
+  flightPlanDetailError: string | null
+}
+
+export type IvaoTrafficPayload<TFlight = IvaoArrivalTrafficFlight> = {
   airport: string
   fetchedAt: string
   flights?: TFlight[]
@@ -80,7 +114,7 @@ export function readWorkspaces() {
   }))
 }
 
-export function readIvaoTraffic<TFlight = Record<string, unknown>>(airport: string, mode?: 'summary') {
+export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: string, mode?: 'summary') {
   const params = new URLSearchParams({ airport: airport.trim().toUpperCase() })
   if (mode) params.set('mode', mode)
   return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`)
