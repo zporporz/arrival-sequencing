@@ -1,0 +1,30 @@
+.aman-history-control > span {
+  font-size: 0;
+}
+
+.aman-history-control > span::after {
+  content: 'BELOW ACTUAL';
+  font-size: 10px;
+}
+
+/* The selector is the number of minutes physically visible below the fixed ACTUAL line.
+   Timeline scale is 10 px/min, so changing 5/10/15/20 moves the red line itself. */
+.aman-timeline-stage {
+  --now-line: calc(100% - 100px);
+}
+
+.aman-app:has(.aman-history-control select option[value='5']:checked) .aman-timeline-stage {
+  --now-line: calc(100% - 50px);
+}
+
+.aman-app:has(.aman-history-control select option[value='10']:checked) .aman-timeline-stage {
+  --now-line: calc(100% - 100px);
+}
+
+.aman-app:has(.aman-history-control select option[value='15']:checked) .aman-timeline-stage {
+  --now-line: calc(100% - 150px);
+}
+
+.aman-app:has(.aman-history-control select option[value='20']:checked) .aman-timeline-stage {
+  --now-line: calc(100% - 200px);
+}
