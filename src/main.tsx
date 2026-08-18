@@ -13,21 +13,30 @@ import './runwayAssignment.css'
 import './compactControlStrip.css'
 import './operationalReadability.css'
 import './finalControlLayout.css'
+import './runtimeEnhancements.css'
 import AuthGate from './AuthGate'
 import App from './App'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
+import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
+import { installReconnectTrafficFetch, installReconnectUiRuntime } from './reconnectRecovery'
+
+installReconnectTrafficFetch()
 
 function AppWithRuntime() {
   useEffect(() => {
     const removeTimelineRuntime = installTimelineAxisRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
     const removeAirportScopeRuntime = installAirportScopeRuntime()
+    const removeReconnectUiRuntime = installReconnectUiRuntime()
+    const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
       removeAirportScopeRuntime()
+      removeReconnectUiRuntime()
+      removeOnlinePresenceRuntime()
     }
   }, [])
 
