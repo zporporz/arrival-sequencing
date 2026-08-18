@@ -19,6 +19,7 @@ The purpose of this folder is to keep operational facts, HMI observations, sourc
 
 - [`THAILAND_MAESTRO_RESEARCH.md`](./THAILAND_MAESTRO_RESEARCH.md) — operational model, Thailand deployment, timing concepts, feeder fixes, sequencing workflow, status model, and verified/non-verified behaviour.
 - [`HMI_SETTINGS_CATALOG.md`](./HMI_SETTINGS_CATALOG.md) — inventory of the real Centre AMAN/CWP screen, settings, columns, panels, colour coding, and unresolved abbreviations.
+- [`THAI_PRECURSOR_CONTEXT.md`](./THAI_PRECURSOR_CONTEXT.md) — AEROTHAI's earlier Bangkok terminal-sequencing/IAWP target-time work and how it informs the current research without being confused with MAESTRO.
 - [`SOURCE_INDEX.md`](./SOURCE_INDEX.md) — source list and what each source supports.
 
 ## Implementation rule
