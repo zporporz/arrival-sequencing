@@ -1,0 +1,281 @@
+/* Final operational HMI overrides: keep one control row, but use the width more efficiently. */
+.aman-multi-runway-strip {
+  grid-template-columns: 260px minmax(0, 1fr) auto;
+  min-height: 96px;
+  height: 96px;
+  max-height: 96px;
+}
+
+/* The runway cards already communicate the active approach configuration. The duplicated
+   APPROACH VIEW sentence was consuming valuable width and forcing every useful control smaller. */
+.aman-multi-runway-strip .aman-config-label {
+  display: none;
+}
+
+.aman-airport-tabs.has-runtime-selector {
+  min-width: 260px;
+  width: 260px;
+  padding: 7px 9px;
+}
+
+.aman-airport-picker-heading > span {
+  font-size: 11px;
+  letter-spacing: .1em;
+}
+
+.aman-airport-picker-heading > small {
+  font-size: 8px;
+}
+
+.aman-airport-checks {
+  gap: 4px;
+}
+
+.aman-airport-checks .aman-airport-choice {
+  min-height: 32px;
+  height: 32px;
+  grid-template-columns: 15px minmax(52px, 1fr) auto;
+  gap: 7px;
+  padding: 3px 6px 3px 8px;
+}
+
+.aman-airport-checks input {
+  width: 14px;
+  height: 14px;
+}
+
+.aman-airport-choice-code {
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+
+.aman-airport-side-button {
+  width: 31px;
+  height: 25px;
+  font-size: 10px;
+}
+
+.aman-runway-config-control {
+  min-width: 0;
+  height: 96px;
+  gap: 12px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.aman-runway-config-block {
+  gap: 9px;
+  padding-right: 11px;
+}
+
+.aman-profile-select {
+  min-width: 185px;
+  width: 185px;
+  gap: 5px;
+}
+
+.aman-profile-select > span {
+  font-size: 10px;
+  letter-spacing: .09em;
+}
+
+.aman-profile-select select {
+  width: 185px;
+  max-width: 185px;
+  height: 34px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.aman-runway-cards {
+  gap: 7px;
+}
+
+.aman-runway-card {
+  min-width: 130px;
+  width: 130px;
+  grid-template-columns: 40px 76px;
+  grid-template-rows: 29px 32px;
+  gap: 4px 6px;
+  padding: 6px 7px;
+}
+
+.aman-runway-card > b {
+  font-size: 16px;
+}
+
+.aman-runway-card > select {
+  width: 76px;
+  height: 29px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.aman-runway-card > label {
+  gap: 4px;
+  padding-top: 10px;
+}
+
+.aman-runway-card > label::before {
+  top: -1px;
+  font-size: 8px;
+  letter-spacing: .06em;
+}
+
+.aman-runway-card input {
+  width: 54px;
+  height: 26px;
+  padding: 0 5px;
+  font-size: 13px;
+}
+
+.aman-runway-card label span {
+  padding-bottom: 6px;
+  font-size: 9px;
+}
+
+.aman-multi-runway-strip .aman-counters > div {
+  min-width: 64px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.aman-multi-runway-strip .aman-counters span {
+  font-size: 9px;
+}
+
+.aman-multi-runway-strip .aman-counters strong {
+  font-size: 14px;
+}
+
+/* Stable side placement -------------------------------------------------------
+   Side is stored as a data attribute by airportScopeRuntime. React rewrites the
+   row className continuously while dragging, but does not own this attribute,
+   so a LEFT flight no longer flashes to RIGHT and back every drag frame. */
+.aman-flight-row[data-display-side="RIGHT"] {
+  left: calc(50% + 28px);
+  right: auto;
+}
+
+.aman-flight-row[data-display-side="LEFT"] {
+  left: auto;
+  right: calc(50% + 28px);
+  border-left: 0;
+  border-right: 3px solid #d8dadd;
+  grid-template-columns: 52px 52px 60px 30px 56px minmax(100px, 1.35fr) 58px;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > .tldt {
+  grid-column: 7;
+  grid-row: 1;
+  text-align: right;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > strong {
+  grid-column: 6;
+  grid-row: 1;
+  text-align: right;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > span:nth-child(3) {
+  grid-column: 5;
+  grid-row: 1;
+  text-align: right;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > .fix-code {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > span:nth-child(5) {
+  grid-column: 3;
+  grid-row: 1;
+  text-align: right;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > b {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: right;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > em {
+  grid-column: 1;
+  grid-row: 1;
+  text-align: left;
+}
+
+.aman-flight-row[data-display-side="LEFT"].action-expedite { border-right-color: #8ef05a; }
+.aman-flight-row[data-display-side="LEFT"].action-nothing { border-right-color: #d8dadd; }
+.aman-flight-row[data-display-side="LEFT"].action-speed_reduction { border-right-color: #f4ed43; }
+.aman-flight-row[data-display-side="LEFT"].action-path_stretching { border-right-color: #e9a33a; }
+.aman-flight-row[data-display-side="LEFT"].action-holding { border-right-color: #d54735; }
+
+.aman-flight-row[data-display-side="LEFT"] .runway-assignment {
+  justify-content: flex-start;
+}
+
+.aman-flight-row[data-display-side="LEFT"] .runway-assignment select {
+  text-align: left;
+}
+
+@media (max-width: 1450px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 245px minmax(0, 1fr) auto;
+  }
+
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 245px;
+    width: 245px;
+  }
+
+  .aman-profile-select,
+  .aman-profile-select select {
+    min-width: 170px;
+    width: 170px;
+    max-width: 170px;
+  }
+
+  .aman-runway-card {
+    min-width: 122px;
+    width: 122px;
+    grid-template-columns: 38px 70px;
+  }
+
+  .aman-runway-card > select {
+    width: 70px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 230px;
+    width: 230px;
+  }
+
+  .aman-multi-runway-strip .aman-counters {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"] {
+    left: calc(50% + 12px);
+    right: auto;
+    border-right: 0;
+    border-left-width: 3px;
+    grid-template-columns: 48px minmax(68px,1fr) 40px 22px 44px 38px;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"] > * {
+    grid-column: auto !important;
+    text-align: initial;
+  }
+}
