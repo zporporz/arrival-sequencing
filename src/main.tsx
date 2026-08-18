@@ -14,6 +14,7 @@ import './compactControlStrip.css'
 import './operationalReadability.css'
 import './finalControlLayout.css'
 import './runtimeEnhancements.css'
+import './systemPanelRuntime.css'
 import AuthGate from './AuthGate'
 import App from './App'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
@@ -21,6 +22,7 @@ import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
 import { installReconnectTrafficFetch, installReconnectUiRuntime } from './reconnectRecovery'
+import { installSystemPanelRuntime } from './systemPanelRuntime'
 
 installReconnectTrafficFetch()
 
@@ -31,12 +33,14 @@ function AppWithRuntime() {
     const removeAirportScopeRuntime = installAirportScopeRuntime()
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
+    const removeSystemPanelRuntime = installSystemPanelRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
       removeAirportScopeRuntime()
       removeReconnectUiRuntime()
       removeOnlinePresenceRuntime()
+      removeSystemPanelRuntime()
     }
   }, [])
 
