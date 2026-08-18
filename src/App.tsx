@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import ivaoThailandLogo from './assets/ivao-thailand-logo.png'
 import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
 import {
@@ -31,6 +32,23 @@ type InboundPreview = {
   reason: string | null
 }
 
+type DisplayInboundRow = {
+  id: string
+  callsign: string
+  aircraft: string
+  refFix: string
+  eta: string | null
+  title: string
+}
+
+type DemoSpec = {
+  callsign: string
+  aircraftType: string
+  wakeTurbulence: string
+  refFix: string
+  naturalLandingOffsetMinutes: number
+}
+
 const RUNWAYS: Record<AirportCode, readonly string[]> = {
   VTBD: ['21R', '21L'],
   VTBS: ['19', '20L', '20R'],
@@ -41,7 +59,32 @@ const ENTRY_FIXES: Record<AirportCode, readonly string[]> = {
   VTBS: ['WILLA', 'NORTA', 'EASTE', 'TUMGA', 'LEBIM'],
 }
 
-const PX_PER_MINUTE = 22
+const DEMO_SPECS: Record<AirportCode, readonly DemoSpec[]> = {
+  VTBD: [
+    { callsign: 'THA101', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'WEHHA', naturalLandingOffsetMinutes: 8 },
+    { callsign: 'AIQ202', aircraftType: 'A321', wakeTurbulence: 'M', refFix: 'NAKON', naturalLandingOffsetMinutes: 8.5 },
+    { callsign: 'BKP303', aircraftType: 'B738', wakeTurbulence: 'M', refFix: 'ENDUU', naturalLandingOffsetMinutes: 9 },
+    { callsign: 'TVJ404', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'SABAI', naturalLandingOffsetMinutes: 9.5 },
+    { callsign: 'HVN505', aircraftType: 'A321', wakeTurbulence: 'M', refFix: 'SEHNA', naturalLandingOffsetMinutes: 10 },
+    { callsign: 'THA606', aircraftType: 'A388', wakeTurbulence: 'J', refFix: 'WEHHA', naturalLandingOffsetMinutes: 11 },
+    { callsign: 'AIQ707', aircraftType: 'AT76', wakeTurbulence: 'M', refFix: 'NAKON', naturalLandingOffsetMinutes: 13 },
+    { callsign: 'KMI808', aircraftType: 'B763', wakeTurbulence: 'H', refFix: 'ENDUU', naturalLandingOffsetMinutes: 16 },
+  ],
+  VTBS: [
+    { callsign: 'THA111', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'WILLA', naturalLandingOffsetMinutes: 8 },
+    { callsign: 'AIQ222', aircraftType: 'A321', wakeTurbulence: 'M', refFix: 'NORTA', naturalLandingOffsetMinutes: 8.5 },
+    { callsign: 'BKP333', aircraftType: 'B738', wakeTurbulence: 'M', refFix: 'EASTE', naturalLandingOffsetMinutes: 9 },
+    { callsign: 'TVJ444', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'TUMGA', naturalLandingOffsetMinutes: 9.5 },
+    { callsign: 'HVN555', aircraftType: 'A321', wakeTurbulence: 'M', refFix: 'LEBIM', naturalLandingOffsetMinutes: 10 },
+    { callsign: 'THA666', aircraftType: 'A388', wakeTurbulence: 'J', refFix: 'WILLA', naturalLandingOffsetMinutes: 11 },
+    { callsign: 'AIQ777', aircraftType: 'AT76', wakeTurbulence: 'M', refFix: 'NORTA', naturalLandingOffsetMinutes: 13 },
+    { callsign: 'KMI888', aircraftType: 'B763', wakeTurbulence: 'H', refFix: 'EASTE', naturalLandingOffsetMinutes: 16 },
+  ],
+}
+
+const PX_PER_MINUTE = 10
+const TIMELINE_PAST_MINUTES = 22
+const TIMELINE_FUTURE_MINUTES = 58
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function formatUtc(date: Date) {
@@ -86,15 +129,20 @@ function compactFixClass(airport: AirportCode, fix: string) {
 function timelineTicks(now: Date) {
   const anchor = new Date(now)
   anchor.setUTCSeconds(0, 0)
-  anchor.setUTCMinutes(Math.floor(anchor.getUTCMinutes() / 5) * 5)
-  return Array.from({ length: 15 }, (_, index) => {
-    const tick = new Date(anchor.getTime() + (index - 5) * 5 * 60_000)
-    return {
-      key: tick.toISOString(),
-      label: formatHm(tick.toISOString()),
-      offsetMinutes: (tick.getTime() - now.getTime()) / 60_000,
-    }
-  })
+
+  return Array.from(
+    { length: TIMELINE_PAST_MINUTES + TIMELINE_FUTURE_MINUTES + 1 },
+    (_, index) => {
+      const tick = new Date(anchor.getTime() + (index - TIMELINE_PAST_MINUTES) * 60_000)
+      const offsetMinutes = (tick.getTime() - now.getTime()) / 60_000
+      return {
+        key: tick.toISOString(),
+        label: formatHm(tick.toISOString()),
+        isMajor: tick.getUTCMinutes() % 5 === 0,
+        offsetPx: Math.round(-offsetMinutes * PX_PER_MINUTE),
+      }
+    },
+  )
 }
 
 function routeKey(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
@@ -129,6 +177,27 @@ function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+function buildDemoPredictions(airport: AirportCode, runway: string, anchor: Date) {
+  return DEMO_SPECS[airport].flatMap<AmanArrivalPrediction>((spec, index) => {
+    const nominalSeconds = nominalStarSeconds(airport, spec.refFix)
+    if (nominalSeconds == null) return []
+
+    const naturalLandingMs = anchor.getTime() + spec.naturalLandingOffsetMinutes * 60_000
+    const predictedIawpMs = naturalLandingMs - nominalSeconds * 1000
+
+    return [{
+      id: `demo-${airport}-${index}`,
+      callsign: spec.callsign,
+      aircraftType: spec.aircraftType,
+      wakeTurbulence: spec.wakeTurbulence,
+      runway,
+      refFix: spec.refFix,
+      predictedIawpAt: new Date(predictedIawpMs).toISOString(),
+      nominalStarSeconds: nominalSeconds,
+    }]
+  })
+}
+
 export default function App() {
   const user = useAuthUser()
   const [now, setNow] = useState(() => new Date())
@@ -140,14 +209,15 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [trafficError, setTrafficError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
+  const [demoMode, setDemoMode] = useState(false)
+  const [demoAnchor, setDemoAnchor] = useState<Date | null>(null)
 
   const ticks = useMemo(() => timelineTicks(now), [now])
-  const averageDelay = useMemo(() => averageDelayMinutes(sequence), [sequence])
   const liveRouteCount = useMemo(
     () => inbound.filter((item) => item.source === 'LIVE_ROUTE').length,
     [inbound],
   )
-  const tmaCount = useMemo(
+  const liveTmaCount = useMemo(
     () => inbound.filter(({ flight }) => {
       if (!Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return false
       return distanceNm(
@@ -159,10 +229,51 @@ export default function App() {
     }).length,
     [inbound],
   )
+
+  const demoSequence = useMemo(() => {
+    if (!demoMode || !demoAnchor) return []
+    const spacingMinutes = (
+      AMAN_DEFAULT_RUNWAY_SPACING_MINUTES[airport] as Record<string, number>
+    )[runway]
+    if (!Number.isFinite(spacingMinutes)) return []
+
+    return autoSequenceUnstableArrivals(
+      buildDemoPredictions(airport, runway, demoAnchor),
+      { runwaySpacingSeconds: { [runway]: spacingMinutes * 60 } },
+    )
+  }, [airport, demoAnchor, demoMode, runway])
+
+  const activeSequence = demoMode ? demoSequence : sequence
+  const averageDelay = useMemo(() => averageDelayMinutes(activeSequence), [activeSequence])
   const visibleSequence = useMemo(() => {
     const cutoff = now.getTime() - historyMinutes * 60_000
-    return sequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
-  }, [historyMinutes, now, sequence])
+    return activeSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
+  }, [activeSequence, historyMinutes, now])
+
+  const displayInboundRows = useMemo<DisplayInboundRow[]>(() => {
+    if (demoMode) {
+      return demoSequence.map((row) => ({
+        id: row.id,
+        callsign: row.callsign,
+        aircraft: row.aircraftType || '----',
+        refFix: row.refFix,
+        eta: row.predictedIawpAt,
+        title: 'SIMULATED TEST TRAFFIC',
+      }))
+    }
+
+    return inbound.map((item) => ({
+      id: item.flight.sessionId,
+      callsign: item.flight.callsign,
+      aircraft: item.flight.aircraft || '----',
+      refFix: item.refFix || '----',
+      eta: item.predictedIawpAt,
+      title: `${item.source}${item.reason ? ` · ${item.reason}` : ''}`,
+    }))
+  }, [demoMode, demoSequence, inbound])
+
+  const displayTmaCount = demoMode ? Math.min(4, demoSequence.length) : liveTmaCount
+  const displayTotCount = demoMode ? demoSequence.length : inbound.length
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000)
@@ -285,11 +396,21 @@ export default function App() {
     }
   }, [airport, runway])
 
+  const toggleDemo = () => {
+    if (demoMode) {
+      setDemoMode(false)
+      setDemoAnchor(null)
+      return
+    }
+    setDemoAnchor(new Date())
+    setDemoMode(true)
+  }
+
   return (
     <div className="aman-app">
       <header className="aman-topbar">
         <div className="aman-brand">
-          <img src="/ivao-thailand-logo.png" alt="IVAO Thailand" />
+          <img src={ivaoThailandLogo} alt="IVAO Thailand" />
           <div className="aman-brand-copy">
             <span>Thailand Approach AMAN</span>
             <strong>Arrival Sequencing</strong>
@@ -334,14 +455,14 @@ export default function App() {
 
         <div className="aman-config-label">
           <span>APPROACH VIEW</span>
-          <strong>{airport} · RWY {runway} · AUTO UNSTABLE SEQUENCE</strong>
+          <strong>{airport} · RWY {runway} · {demoMode ? 'SIMULATED TEST SEQUENCE' : 'AUTO UNSTABLE SEQUENCE'}</strong>
         </div>
 
         <div className="aman-counters">
-          <div><span>TMA</span><strong>{String(tmaCount).padStart(3, '0')}</strong></div>
-          <div><span>TOT</span><strong>{String(inbound.length).padStart(3, '0')}</strong></div>
+          <div><span>TMA</span><strong>{String(displayTmaCount).padStart(3, '0')}</strong></div>
+          <div><span>TOT</span><strong>{String(displayTotCount).padStart(3, '0')}</strong></div>
           <div><span>HLD</span><strong>---</strong></div>
-          <div><span>ΔT</span><strong>{sequence.length ? formatDelay(averageDelay) : '--'}</strong></div>
+          <div><span>ΔT</span><strong>{activeSequence.length ? formatDelay(averageDelay) : '--'}</strong></div>
         </div>
       </section>
 
@@ -366,7 +487,16 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <span>{loading ? 'LOADING' : 'IVAO LIVE'}</span>
+              <button
+                type="button"
+                className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`}
+                onClick={toggleDemo}
+              >
+                {demoMode ? 'TEST TRAFFIC ON' : 'TEST TRAFFIC'}
+              </button>
+              <span className={demoMode ? 'is-simulated' : ''}>
+                {demoMode ? 'SIMULATED' : loading ? 'LOADING' : 'IVAO LIVE'}
+              </span>
             </div>
           </div>
 
@@ -374,11 +504,11 @@ export default function App() {
             <div className="aman-time-axis" aria-hidden="true">
               {ticks.map((tick) => (
                 <div
-                  className="aman-major-tick"
+                  className={`aman-minute-tick ${tick.isMajor ? 'is-major' : 'is-minor'}`}
                   key={tick.key}
-                  style={{ '--offset-px': `${-tick.offsetMinutes * PX_PER_MINUTE}px` } as CSSProperties}
+                  style={{ '--offset-px': `${tick.offsetPx}px` } as CSSProperties}
                 >
-                  <span>{tick.label}</span>
+                  {tick.isMajor && <span>{tick.label}</span>}
                   <i />
                 </div>
               ))}
@@ -392,11 +522,12 @@ export default function App() {
               {visibleSequence.map((row) => {
                 const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
                 const isPast = offsetMinutes < 0
+                const offsetPx = Math.round(-offsetMinutes * PX_PER_MINUTE)
                 return (
                   <div
                     key={row.id}
-                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}`}
-                    style={{ '--offset-px': `${-offsetMinutes * PX_PER_MINUTE}px` } as CSSProperties}
+                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}`}
+                    style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                     title={`Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min${isPast ? ' · assumed landed' : ''}`}
                   >
                     <span className="tldt">{formatHm(row.tldt)}</span>
@@ -413,11 +544,11 @@ export default function App() {
               })}
             </div>
 
-            {!loading && !visibleSequence.length && (
+            {!loading && !visibleSequence.length && !demoMode && (
               <div className="aman-empty-sequence">
                 <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : 'NO SEQUENCEABLE INBOUND'}</strong>
                 <span>
-                  {trafficError || 'Inbound may be empty, IAWP may be unresolved, or nominal timing may be unavailable.'}
+                  {trafficError || 'No live inbound right now. Use TEST TRAFFIC to verify the timeline and sequencing UI.'}
                 </span>
               </div>
             )}
@@ -431,8 +562,8 @@ export default function App() {
                 <span className="aman-eyebrow">TRAFFIC</span>
                 <h2>Inbound</h2>
               </div>
-              <span className={`aman-live-pill ${trafficError ? 'is-error' : ''}`}>
-                {trafficError ? 'API ERROR' : 'IVAO LIVE'}
+              <span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>
+                {demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}
               </span>
             </div>
 
@@ -440,15 +571,15 @@ export default function App() {
               <div className="aman-inbound-head">
                 <span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span>
               </div>
-              {inbound.map((item) => (
-                <div className="aman-inbound-row" key={item.flight.sessionId} title={`${item.source}${item.reason ? ` · ${item.reason}` : ''}`}>
-                  <strong>{item.flight.callsign}</strong>
-                  <span>{item.flight.aircraft || '----'}</span>
-                  <span>{item.refFix || '----'}</span>
-                  <span>{formatHm(item.predictedIawpAt)}</span>
+              {displayInboundRows.map((item) => (
+                <div className="aman-inbound-row" key={item.id} title={item.title}>
+                  <strong>{item.callsign}</strong>
+                  <span>{item.aircraft}</span>
+                  <span>{item.refFix}</span>
+                  <span>{formatHm(item.eta)}</span>
                 </div>
               ))}
-              {!loading && !inbound.length && <p>No connected inbound traffic for {airport}.</p>}
+              {!loading && !displayInboundRows.length && <p>No connected inbound traffic for {airport}.</p>}
             </div>
           </section>
 
@@ -460,6 +591,7 @@ export default function App() {
               </div>
             </div>
             <dl className="aman-status-list">
+              <div><dt>Data mode</dt><dd>{demoMode ? 'SIMULATED' : 'LIVE'}</dd></div>
               <div><dt>IVAO inbound</dt><dd>{trafficError ? 'ERROR' : 'LIVE'}</dd></div>
               <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
               <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
