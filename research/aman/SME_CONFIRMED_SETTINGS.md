@@ -104,3 +104,31 @@ The phrase **"in system"** still needs a precise Thailand implementation boundar
 - whether arrivals assigned to another runway/configuration but visible to the same AMAN view are counted.
 
 Until those boundaries are confirmed, treat the displayed definition as authoritative but keep the membership/filter rule configurable.
+
+---
+
+## Delay colour thresholds — provisional from real HMI screenshot + SME memory
+
+**Observed:** the supplied Thailand MAESTRO slide explicitly confirms the five action classes:
+
+- Green — Expedite
+- White/grey — Nothing
+- Yellow — Speed reduction
+- Orange — Path Stretching
+- Red — Holding
+
+The slide itself does **not** print numeric thresholds.
+
+From the photographed live sequence, values of `0` are displayed in the no-action colour, `1` appears in the yellow/speed-reduction colour, and larger positive values are shown in the high-delay colour family. The project owner also recalls that **5 minutes of required delay is already treated as Holding**.
+
+### Temporary working threshold model
+
+Until a Thailand manual/SME confirms exact boundaries, use the following only as a **provisional UI/config hypothesis**, not authoritative MAESTRO logic:
+
+- `< 0 min` → Expedite
+- `0 min` → Nothing
+- `1–2 min` → Speed reduction
+- `3–4 min` → Path Stretching
+- `>= 5 min` → Holding
+
+This model fits the project owner's recollection that 5 minutes is already Holding and the screenshot evidence that 1 minute is a lower-severity action. The exact 2/3/4-minute boundaries still require confirmation before being treated as operational fact.
