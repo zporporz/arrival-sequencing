@@ -1,0 +1,25 @@
+.aman-flight-row.status-unstable strong,
+.aman-inbound-row strong.status-unstable {
+  color: #6fc7cb;
+}
+
+.aman-flight-row.status-stable strong,
+.aman-inbound-row strong.status-stable {
+  color: #f2a64a;
+}
+
+.aman-flight-row.status-superstable strong,
+.aman-inbound-row strong.status-superstable {
+  color: #f4f7fb;
+  text-shadow: 0 0 5px rgba(244, 247, 251, .18);
+}
+
+.aman-flight-row.status-frozen strong,
+.aman-inbound-row strong.status-frozen {
+  color: #91a4ff;
+  text-shadow: 0 0 6px rgba(145, 164, 255, .22);
+}
+
+.aman-flight-row.status-stable.is-stable strong {
+  color: #f2a64a;
+}
