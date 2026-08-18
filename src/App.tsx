@@ -137,6 +137,10 @@ const PX_PER_MINUTE = 10
 const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
 const DRAG_SNAP_MS = 15_000
+// Project working rule for VTBS multi-runway sequencing: landing targets on different
+// active arrival runways are staggered by at least one minute. This is deliberately
+// separate from the per-runway NM landing spacing and can be made configurable later.
+const VTBS_CROSS_RUNWAY_STAGGER_SECONDS = 60
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function scopeAirports(scope: AirportScope): AirportCode[] {
@@ -236,44 +240,147 @@ function isArrivalMode(mode: RunwayMode) {
   return mode === 'ARR' || mode === 'MIX'
 }
 
-function assignPredictionsToRunways(predictions: AmanArrivalPrediction[], airport: AirportCode, runwayModes: Record<AirportCode, Record<string, RunwayMode>>, spacingNm: Record<string, number>) {
-  const activeRunways = RUNWAYS[airport].filter((runway) => isArrivalMode(runwayModes[airport][runway]))
+function activeRunwaysForAirport(airport: AirportCode, runwayModes: Record<AirportCode, Record<string, RunwayMode>>) {
+  return RUNWAYS[airport].filter((runway) => isArrivalMode(runwayModes[airport][runway]))
+}
+
+function candidateLandingTime(
+  airport: AirportCode,
+  runway: string,
+  naturalMs: number,
+  lastTargetByRunway: Map<string, number>,
+  spacingNm: Record<string, number>,
+) {
+  const sameRunwaySpacingMs = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5) * 60_000
+  let candidate = naturalMs
+  const previousSameRunway = lastTargetByRunway.get(runway)
+  if (previousSameRunway != null) candidate = Math.max(candidate, previousSameRunway + sameRunwaySpacingMs)
+
+  if (airport === 'VTBS') {
+    for (const [otherRunway, previousOtherRunway] of lastTargetByRunway.entries()) {
+      if (otherRunway === runway) continue
+      candidate = Math.max(candidate, previousOtherRunway + VTBS_CROSS_RUNWAY_STAGGER_SECONDS * 1000)
+    }
+  }
+
+  return candidate
+}
+
+function assignPredictionsToRunways(
+  predictions: AmanArrivalPrediction[],
+  airport: AirportCode,
+  runwayModes: Record<AirportCode, Record<string, RunwayMode>>,
+  spacingNm: Record<string, number>,
+  manualRunways: Record<string, string>,
+) {
+  const activeRunways = activeRunwaysForAirport(airport, runwayModes)
   if (!activeRunways.length) return []
+
   const lastTargetByRunway = new Map<string, number>()
-  const ordered = [...predictions].sort((a, b) => (new Date(a.predictedIawpAt).getTime() + a.nominalStarSeconds * 1000) - (new Date(b.predictedIawpAt).getTime() + b.nominalStarSeconds * 1000) || a.callsign.localeCompare(b.callsign))
+  const ordered = [...predictions].sort((a, b) =>
+    (new Date(a.predictedIawpAt).getTime() + a.nominalStarSeconds * 1000)
+      - (new Date(b.predictedIawpAt).getTime() + b.nominalStarSeconds * 1000)
+      || a.callsign.localeCompare(b.callsign),
+  )
+
   return ordered.map((prediction) => {
     const naturalMs = new Date(prediction.predictedIawpAt).getTime() + prediction.nominalStarSeconds * 1000
-    let bestRunway = activeRunways[0]
-    let bestTarget = Number.POSITIVE_INFINITY
-    for (const runway of activeRunways) {
-      const spacingMinutes = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5)
-      const previous = lastTargetByRunway.get(runway)
-      const candidate = previous == null ? naturalMs : Math.max(naturalMs, previous + spacingMinutes * 60_000)
-      if (candidate < bestTarget) { bestRunway = runway; bestTarget = candidate }
+    const requestedRunway = manualRunways[prediction.id]
+    const forcedRunway = requestedRunway && activeRunways.includes(requestedRunway) ? requestedRunway : null
+
+    let bestRunway = forcedRunway ?? activeRunways[0]
+    let bestTarget = candidateLandingTime(airport, bestRunway, naturalMs, lastTargetByRunway, spacingNm)
+
+    if (!forcedRunway) {
+      for (const runway of activeRunways.slice(1)) {
+        const candidate = candidateLandingTime(airport, runway, naturalMs, lastTargetByRunway, spacingNm)
+        if (candidate < bestTarget) {
+          bestRunway = runway
+          bestTarget = candidate
+        }
+      }
     }
+
     lastTargetByRunway.set(bestRunway, bestTarget)
     return { ...prediction, runway: bestRunway }
   })
 }
 
-function applyManualTargetsWithCascade(rows: AmanSequenceRow[], manualTldt: Record<string, string>, runwaySpacingSeconds: Record<string, number>) {
-  const byRunway = new Map<string, AmanSequenceRow[]>()
-  rows.forEach((row) => { const bucket = byRunway.get(row.runway) ?? []; bucket.push(row); byRunway.set(row.runway, bucket) })
-  const adjusted: AmanSequenceRow[] = []
-  for (const [runway, runwayRows] of byRunway.entries()) {
-    const ordered = [...runwayRows].sort((a, b) => a.sequenceIndex - b.sequenceIndex)
-    const spacingMs = Math.max(0, runwaySpacingSeconds[runway] ?? 0) * 1000
-    let previousTargetMs: number | null = null
-    for (const row of ordered) {
-      const desired = manualTldt[row.id] ?? row.tldt
-      let targetMs = new Date(desired).getTime()
-      if (previousTargetMs != null) targetMs = Math.max(targetMs, previousTargetMs + spacingMs)
-      const metrics = calculateArrivalMetrics(row, new Date(targetMs).toISOString())
-      adjusted.push({ ...metrics, sequenceIndex: row.sequenceIndex, autoShiftSeconds: Math.max(0, Math.round((targetMs - new Date(metrics.naturalLandingAt).getTime()) / 1000)) })
-      previousTargetMs = targetMs
+function applyManualTargetsWithCascade(
+  rows: AmanSequenceRow[],
+  manualTldt: Record<string, string>,
+  runwaySpacingSeconds: Record<string, number>,
+) {
+  const targetById = new Map<string, number>()
+  rows.forEach((row) => targetById.set(row.id, new Date(manualTldt[row.id] ?? row.tldt).getTime()))
+
+  const maxPasses = Math.max(4, rows.length * 4)
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    let changed = false
+
+    // First preserve the order and spacing of each landing runway. This is what makes
+    // a controller drag push the later aircraft on that runway instead of allowing overlap.
+    const byAirportRunway = new Map<string, AmanSequenceRow[]>()
+    rows.forEach((row) => {
+      const key = `${rowAirport(row.id)}:${row.runway}`
+      const bucket = byAirportRunway.get(key) ?? []
+      bucket.push(row)
+      byAirportRunway.set(key, bucket)
+    })
+
+    for (const runwayRows of byAirportRunway.values()) {
+      const ordered = [...runwayRows].sort((a, b) => a.sequenceIndex - b.sequenceIndex)
+      let previousTargetMs: number | null = null
+      for (const row of ordered) {
+        let targetMs = targetById.get(row.id) ?? new Date(row.tldt).getTime()
+        if (previousTargetMs != null) {
+          const requiredMs = Math.max(0, runwaySpacingSeconds[row.runway] ?? 0) * 1000
+          const earliest = previousTargetMs + requiredMs
+          if (targetMs < earliest) {
+            targetMs = earliest
+            targetById.set(row.id, targetMs)
+            changed = true
+          }
+        }
+        previousTargetMs = targetMs
+      }
     }
+
+    // VTBS working rule: different landing runways are still staggered by one minute.
+    // Pushing a row here is followed by another same-runway pass, so the movement cascades
+    // through any aircraft behind it as well.
+    const vtbsRows = rows
+      .filter((row) => rowAirport(row.id) === 'VTBS')
+      .sort((a, b) => (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
+
+    for (let index = 1; index < vtbsRows.length; index += 1) {
+      const leader = vtbsRows[index - 1]
+      const follower = vtbsRows[index]
+      if (leader.runway === follower.runway) continue
+      const leaderTarget = targetById.get(leader.id) ?? new Date(leader.tldt).getTime()
+      const followerTarget = targetById.get(follower.id) ?? new Date(follower.tldt).getTime()
+      const earliest = leaderTarget + VTBS_CROSS_RUNWAY_STAGGER_SECONDS * 1000
+      if (followerTarget < earliest) {
+        targetById.set(follower.id, earliest)
+        changed = true
+      }
+    }
+
+    if (!changed) break
   }
-  return adjusted.sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime() || a.callsign.localeCompare(b.callsign)).map((row, index) => ({ ...row, sequenceIndex: index + 1 }))
+
+  return rows
+    .map((row) => {
+      const targetMs = targetById.get(row.id) ?? new Date(row.tldt).getTime()
+      const metrics = calculateArrivalMetrics(row, new Date(targetMs).toISOString())
+      return {
+        ...metrics,
+        sequenceIndex: row.sequenceIndex,
+        autoShiftSeconds: Math.max(0, Math.round((targetMs - new Date(metrics.naturalLandingAt).getTime()) / 1000)),
+      } satisfies AmanSequenceRow
+    })
+    .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime() || a.callsign.localeCompare(b.callsign))
+    .map((row, index) => ({ ...row, sequenceIndex: index + 1 }))
 }
 
 export default function App() {
@@ -292,6 +399,7 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false)
   const [demoAnchor, setDemoAnchor] = useState<Date | null>(null)
   const [manualTldt, setManualTldt] = useState<Record<string, string>>({})
+  const [manualRunways, setManualRunways] = useState<Record<string, string>>({})
   const [stableIds, setStableIds] = useState<Record<string, true>>({})
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -300,52 +408,156 @@ export default function App() {
   const ticks = useMemo(() => timelineTicks(now), [now])
   const runwaySpacingSeconds = useMemo(() => {
     const result: Record<string, number> = {}
-    for (const airport of ['VTBD', 'VTBS'] as const) for (const runway of RUNWAYS[airport]) result[runway] = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5) * 60
+    for (const airport of ['VTBD', 'VTBS'] as const) {
+      for (const runway of RUNWAYS[airport]) {
+        result[runway] = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5) * 60
+      }
+    }
     return result
   }, [spacingNm])
-  const activeArrivalRunways = useMemo(() => airports.flatMap((airport) => RUNWAYS[airport].filter((runway) => isArrivalMode(runwayModes[airport][runway])).map((runway) => ({ airport, runway }))), [airports, runwayModes])
+
+  const activeArrivalRunways = useMemo(() => airports.flatMap((airport) =>
+    activeRunwaysForAirport(airport, runwayModes).map((runway) => ({ airport, runway })),
+  ), [airports, runwayModes])
+
   const liveBaseSequence = useMemo(() => {
-    const assigned = airports.flatMap((airport) => assignPredictionsToRunways(livePredictions.filter((prediction) => rowAirport(prediction.id) === airport), airport, runwayModes, spacingNm))
+    const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
+      livePredictions.filter((prediction) => rowAirport(prediction.id) === airport),
+      airport,
+      runwayModes,
+      spacingNm,
+      manualRunways,
+    ))
     return autoSequenceUnstableArrivals(assigned, { runwaySpacingSeconds })
-  }, [airports, livePredictions, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, livePredictions, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
+
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchor) return []
-    const assigned = airports.flatMap((airport) => assignPredictionsToRunways(buildDemoPredictions(airport, demoAnchor), airport, runwayModes, spacingNm))
+    const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
+      buildDemoPredictions(airport, demoAnchor),
+      airport,
+      runwayModes,
+      spacingNm,
+      manualRunways,
+    ))
     return autoSequenceUnstableArrivals(assigned, { runwaySpacingSeconds })
-  }, [airports, demoAnchor, demoMode, runwayModes, runwaySpacingSeconds, spacingNm])
-  const demoSequence = useMemo(() => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds), [demoBaseSequence, manualTldt, runwaySpacingSeconds])
-  const liveSequence = useMemo(() => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds), [liveBaseSequence, manualTldt, runwaySpacingSeconds])
+  }, [airports, demoAnchor, demoMode, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
+
+  const demoSequence = useMemo(
+    () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds),
+    [demoBaseSequence, manualTldt, runwaySpacingSeconds],
+  )
+  const liveSequence = useMemo(
+    () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds),
+    [liveBaseSequence, manualTldt, runwaySpacingSeconds],
+  )
   const activeSequence = demoMode ? demoSequence : liveSequence
   const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE').length, [inbound])
   const liveTmaCount = useMemo(() => inbound.filter(({ flight }) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude) && distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, flight.latitude as number, flight.longitude as number) <= BANGKOK_TMA_WORKING_RADIUS_NM).length, [inbound])
   const averageDelay = useMemo(() => averageDelayMinutes(activeSequence), [activeSequence])
-  const visibleSequence = useMemo(() => { const cutoff = now.getTime() - historyMinutes * 60_000; return activeSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff) }, [activeSequence, historyMinutes, now])
+  const visibleSequence = useMemo(() => {
+    const cutoff = now.getTime() - historyMinutes * 60_000
+    return activeSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
+  }, [activeSequence, historyMinutes, now])
+
   const separationConflictIds = useMemo(() => {
     const conflicts = new Set<string>()
+
+    // Same-runway check uses the previous aircraft on that runway even if another runway's
+    // flight is visually between them on the common timeline.
+    const previousByAirportRunway = new Map<string, AmanSequenceRow>()
     const ordered = [...activeSequence].sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime())
-    for (let index = 1; index < ordered.length; index += 1) {
-      const leader = ordered[index - 1], follower = ordered[index]
-      if (leader.runway !== follower.runway) continue
-      const gapMs = new Date(follower.tldt).getTime() - new Date(leader.tldt).getTime()
-      if (gapMs + 500 < (runwaySpacingSeconds[follower.runway] ?? 0) * 1000) { conflicts.add(leader.id); conflicts.add(follower.id) }
+    for (const row of ordered) {
+      const airport = rowAirport(row.id)
+      const key = `${airport}:${row.runway}`
+      const previous = previousByAirportRunway.get(key)
+      if (previous) {
+        const gapMs = new Date(row.tldt).getTime() - new Date(previous.tldt).getTime()
+        if (gapMs + 500 < (runwaySpacingSeconds[row.runway] ?? 0) * 1000) {
+          conflicts.add(previous.id)
+          conflicts.add(row.id)
+        }
+      }
+      previousByAirportRunway.set(key, row)
     }
+
+    const vtbsRows = ordered.filter((row) => rowAirport(row.id) === 'VTBS')
+    for (let index = 1; index < vtbsRows.length; index += 1) {
+      const leader = vtbsRows[index - 1]
+      const follower = vtbsRows[index]
+      if (leader.runway === follower.runway) continue
+      const gapMs = new Date(follower.tldt).getTime() - new Date(leader.tldt).getTime()
+      if (gapMs + 500 < VTBS_CROSS_RUNWAY_STAGGER_SECONDS * 1000) {
+        conflicts.add(leader.id)
+        conflicts.add(follower.id)
+      }
+    }
+
     return conflicts
   }, [activeSequence, runwaySpacingSeconds])
-  const displayInboundRows = useMemo<DisplayInboundRow[]>(() => demoMode ? demoSequence.map((row) => ({ id: row.id, airport: rowAirport(row.id), callsign: row.callsign, aircraft: row.aircraftType || '----', refFix: row.refFix, eta: row.predictedIawpAt, title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL / STABLE' : 'SIMULATED TEST TRAFFIC' })) : inbound.map((item) => ({ id: item.id, airport: item.airport, callsign: item.flight.callsign, aircraft: item.flight.aircraft || '----', refFix: item.refFix || '----', eta: item.predictedIawpAt, title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${item.reason ? ` · ${item.reason}` : ''}` })), [demoMode, demoSequence, inbound, stableIds])
+
+  const displayInboundRows = useMemo<DisplayInboundRow[]>(() => demoMode
+    ? demoSequence.map((row) => ({
+        id: row.id,
+        airport: rowAirport(row.id),
+        callsign: row.callsign,
+        aircraft: row.aircraftType || '----',
+        refFix: row.refFix,
+        eta: row.predictedIawpAt,
+        title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL / STABLE' : 'SIMULATED TEST TRAFFIC',
+      }))
+    : inbound.map((item) => ({
+        id: item.id,
+        airport: item.airport,
+        callsign: item.flight.callsign,
+        aircraft: item.flight.aircraft || '----',
+        refFix: item.refFix || '----',
+        eta: item.predictedIawpAt,
+        title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${item.reason ? ` · ${item.reason}` : ''}`,
+      })),
+  [demoMode, demoSequence, inbound, stableIds])
+
   const displayTmaCount = demoMode ? Math.min(8, demoSequence.length) : liveTmaCount
   const displayTotCount = demoMode ? demoSequence.length : inbound.length
 
-  const resetManualState = () => { setManualTldt({}); setStableIds({}); setDraggingId(null); dragRef.current = null }
-  const setScope = (scope: AirportScope) => { resetManualState(); setAirportScope(scope) }
+  const resetManualState = () => {
+    setManualTldt({})
+    setManualRunways({})
+    setStableIds({})
+    setDraggingId(null)
+    dragRef.current = null
+  }
+
+  const setScope = (scope: AirportScope) => {
+    resetManualState()
+    setAirportScope(scope)
+  }
+
   const applyProfile = (airport: AirportCode, profileId: string) => {
     const profile = RUNWAY_PROFILES[airport].find((item) => item.id === profileId)
     if (!profile) return
-    resetManualState(); setProfileByAirport((current) => ({ ...current, [airport]: profileId })); setRunwayModes((current) => ({ ...current, [airport]: { ...current[airport], ...profile.modes } }))
+    resetManualState()
+    setProfileByAirport((current) => ({ ...current, [airport]: profileId }))
+    setRunwayModes((current) => ({ ...current, [airport]: { ...current[airport], ...profile.modes } }))
   }
-  const setRunwayMode = (airport: AirportCode, runway: string, mode: RunwayMode) => { resetManualState(); setProfileByAirport((current) => ({ ...current, [airport]: 'CUSTOM' })); setRunwayModes((current) => ({ ...current, [airport]: { ...current[airport], [runway]: mode } })) }
-  const setRunwaySpacing = (airport: AirportCode, runway: string, value: number) => { if (Number.isFinite(value) && value > 0) setSpacingNm((current) => ({ ...current, [spacingKey(airport, runway)]: value })) }
 
-  useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer) }, [])
+  const setRunwayMode = (airport: AirportCode, runway: string, mode: RunwayMode) => {
+    resetManualState()
+    setProfileByAirport((current) => ({ ...current, [airport]: 'CUSTOM' }))
+    setRunwayModes((current) => ({ ...current, [airport]: { ...current[airport], [runway]: mode } }))
+  }
+
+  const setRunwaySpacing = (airport: AirportCode, runway: string, value: number) => {
+    if (Number.isFinite(value) && value > 0) {
+      setSpacingNm((current) => ({ ...current, [spacingKey(airport, runway)]: value }))
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   useEffect(() => {
     let disposed = false
     const loadTraffic = async () => {
@@ -362,41 +574,270 @@ export default function App() {
             const geometry = await resolveRouteGeometry(flight, airport)
             const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt)
             const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason } satisfies InboundPreview
-            const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? { id, callsign: flight.callsign, aircraftType: flight.aircraft, wakeTurbulence: flight.wakeTurbulence, runway: '', refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, nominalStarSeconds: nominalSeconds } : null
+            const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {
+              id,
+              callsign: flight.callsign,
+              aircraftType: flight.aircraft,
+              wakeTurbulence: flight.wakeTurbulence,
+              runway: '',
+              refFix: match.entryFix,
+              predictedIawpAt: eta.predictedIawpAt,
+              nominalStarSeconds: nominalSeconds,
+            } : null
             return { preview, prediction }
           }))
           return { airport, payload, resolved, error: null as string | null }
-        } catch (error) { return { airport, payload: null, resolved: [], error: error instanceof Error ? error.message : String(error) } }
+        } catch (error) {
+          return { airport, payload: null, resolved: [], error: error instanceof Error ? error.message : String(error) }
+        }
       }))
+
       if (disposed) return
       const previews = results.flatMap((result) => result.resolved.map((item) => item.preview))
       const predictions = results.flatMap((result) => result.resolved.map((item) => item.prediction).filter((item): item is AmanArrivalPrediction => item !== null))
       const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
-      setInbound(previews.sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999'))); setLivePredictions(predictions); setFetchedAt(fetchedTimes.at(-1) ?? null); setTrafficError(errors.length ? errors.join(' · ') : null); setLoading(false)
+      setInbound(previews.sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
+      setLivePredictions(predictions)
+      setFetchedAt(fetchedTimes.at(-1) ?? null)
+      setTrafficError(errors.length ? errors.join(' · ') : null)
+      setLoading(false)
     }
-    void loadTraffic(); const refresh = window.setInterval(() => void loadTraffic(), 30_000)
-    return () => { disposed = true; window.clearInterval(refresh) }
+
+    void loadTraffic()
+    const refresh = window.setInterval(() => void loadTraffic(), 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(refresh)
+    }
   }, [airports])
 
-  const toggleDemo = () => { resetManualState(); if (demoMode) { setDemoMode(false); setDemoAnchor(null); return } setDemoAnchor(new Date()); setDemoMode(true) }
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); dragRef.current = { id: row.id, pointerId: event.pointerId, startY: event.clientY, startTldtMs: new Date(row.tldt).getTime() }; setDraggingId(row.id) }
-  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => { const drag = dragRef.current; if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return; event.preventDefault(); const rawTargetMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000; const snappedTargetMs = Math.round(rawTargetMs / DRAG_SNAP_MS) * DRAG_SNAP_MS; setManualTldt((current) => ({ ...current, [row.id]: new Date(snappedTargetMs).toISOString() })) }
-  const endDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => { const drag = dragRef.current; if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); dragRef.current = null; setDraggingId(null); setStableIds((current) => ({ ...current, [row.id]: true })) }
-  const resetRow = (row: AmanSequenceRow) => { setManualTldt((current) => { const next = { ...current }; delete next[row.id]; return next }); setStableIds((current) => { const next = { ...current }; delete next[row.id]; return next }) }
-  const configSummary = activeArrivalRunways.length ? activeArrivalRunways.map(({ airport, runway }) => `${airport === 'VTBD' ? 'BD' : 'BS'}${runway} ${spacingNm[spacingKey(airport, runway)].toFixed(1)}NM`).join(' · ') : 'NO ARRIVAL RUNWAY'
+  const toggleDemo = () => {
+    resetManualState()
+    if (demoMode) {
+      setDemoMode(false)
+      setDemoAnchor(null)
+      return
+    }
+    setDemoAnchor(new Date())
+    setDemoMode(true)
+  }
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      id: row.id,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startTldtMs: new Date(row.tldt).getTime(),
+    }
+    setDraggingId(row.id)
+  }
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    const drag = dragRef.current
+    if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    const rawTargetMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000
+    const snappedTargetMs = Math.round(rawTargetMs / DRAG_SNAP_MS) * DRAG_SNAP_MS
+    setManualTldt((current) => ({ ...current, [row.id]: new Date(snappedTargetMs).toISOString() }))
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    const drag = dragRef.current
+    if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    dragRef.current = null
+    setDraggingId(null)
+    setStableIds((current) => ({ ...current, [row.id]: true }))
+  }
+
+  const setFlightRunway = (row: AmanSequenceRow, runway: string) => {
+    const airport = rowAirport(row.id)
+    if (!activeRunwaysForAirport(airport, runwayModes).includes(runway)) return
+    setManualRunways((current) => ({ ...current, [row.id]: runway }))
+    // A manual runway assignment is treated as a controller commitment. Preserve the
+    // current target landing time and let the constraint engine move only what is necessary.
+    setManualTldt((current) => current[row.id] ? current : ({ ...current, [row.id]: row.tldt }))
+    setStableIds((current) => ({ ...current, [row.id]: true }))
+  }
+
+  const resetRow = (row: AmanSequenceRow) => {
+    setManualTldt((current) => {
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
+    setManualRunways((current) => {
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
+    setStableIds((current) => {
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
+  }
+
+  const configSummary = activeArrivalRunways.length
+    ? activeArrivalRunways.map(({ airport, runway }) => `${airport === 'VTBD' ? 'BD' : 'BS'}${runway} ${spacingNm[spacingKey(airport, runway)].toFixed(1)}NM`).join(' · ')
+    : 'NO ARRIVAL RUNWAY'
 
   return <div className={`aman-app${airportScope === 'BOTH' ? ' scope-both' : ''}`}>
-    <header className="aman-topbar"><div className="aman-brand"><img src={ivaoThailandLogo} alt="IVAO Thailand" /><div className="aman-brand-copy"><span>Thailand Approach AMAN</span><strong>Arrival Sequencing</strong></div></div><div className="aman-session"><div className="aman-clock"><span>UTC</span><strong>{formatUtc(now)}</strong></div><div className="aman-user"><strong>{user.name}</strong><span>VID {user.vid}</span></div><a className="aman-signout" href="/api/auth/logout">Sign out</a></div></header>
+    <header className="aman-topbar">
+      <div className="aman-brand">
+        <img src={ivaoThailandLogo} alt="IVAO Thailand" />
+        <div className="aman-brand-copy"><span>Thailand Approach AMAN</span><strong>Arrival Sequencing</strong></div>
+      </div>
+      <div className="aman-session">
+        <div className="aman-clock"><span>UTC</span><strong>{formatUtc(now)}</strong></div>
+        <div className="aman-user"><strong>{user.name}</strong><span>VID {user.vid}</span></div>
+        <a className="aman-signout" href="/api/auth/logout">Sign out</a>
+      </div>
+    </header>
+
     <section className="aman-control-strip aman-multi-runway-strip">
-      <div className="aman-airport-tabs" aria-label="Airport selector">{(['VTBD', 'VTBS', 'BOTH'] as const).map((code) => <button key={code} type="button" className={airportScope === code ? 'is-active' : ''} onClick={() => setScope(code)}>{code}</button>)}</div>
-      <div className="aman-runway-config-control">{airports.map((airport) => <div className="aman-runway-config-block" key={airport}><label className="aman-profile-select"><span>{airport} CONFIG</span><select value={profileByAirport[airport]} onChange={(event) => applyProfile(airport, event.target.value)}>{profileByAirport[airport] === 'CUSTOM' && <option value="CUSTOM">CUSTOM</option>}{RUNWAY_PROFILES[airport].map((profile) => <option key={profile.id} value={profile.id}>{profile.id}</option>)}</select></label><div className="aman-runway-cards">{RUNWAYS[airport].map((runway) => { const mode = runwayModes[airport][runway]; const arrivalEnabled = isArrivalMode(mode); return <div className={`aman-runway-card ${arrivalEnabled ? 'is-arrival' : ''}`} key={runway}><b>{runway}</b><select value={mode} onChange={(event) => setRunwayMode(airport, runway, event.target.value as RunwayMode)}><option value="ARR">ARR</option><option value="DEP">DEP</option><option value="MIX">MIX</option><option value="CLOSED">CLOSED</option></select><label title="Target landing spacing"><input type="number" min="1" max="20" step="0.1" value={spacingNm[spacingKey(airport, runway)]} disabled={!arrivalEnabled} onChange={(event) => setRunwaySpacing(airport, runway, Number(event.target.value))} /><span>NM</span></label></div> })}</div></div>)}</div>
+      <div className="aman-airport-tabs" aria-label="Airport selector">
+        {(['VTBD', 'VTBS', 'BOTH'] as const).map((code) => <button key={code} type="button" className={airportScope === code ? 'is-active' : ''} onClick={() => setScope(code)}>{code}</button>)}
+      </div>
+      <div className="aman-runway-config-control">
+        {airports.map((airport) => <div className="aman-runway-config-block" key={airport}>
+          <label className="aman-profile-select">
+            <span>{airport} CONFIG</span>
+            <select value={profileByAirport[airport]} onChange={(event) => applyProfile(airport, event.target.value)}>
+              {profileByAirport[airport] === 'CUSTOM' && <option value="CUSTOM">CUSTOM</option>}
+              {RUNWAY_PROFILES[airport].map((profile) => <option key={profile.id} value={profile.id}>{profile.id}</option>)}
+            </select>
+          </label>
+          <div className="aman-runway-cards">
+            {RUNWAYS[airport].map((runway) => {
+              const mode = runwayModes[airport][runway]
+              const arrivalEnabled = isArrivalMode(mode)
+              return <div className={`aman-runway-card ${arrivalEnabled ? 'is-arrival' : ''}`} key={runway}>
+                <b>{runway}</b>
+                <select value={mode} onChange={(event) => setRunwayMode(airport, runway, event.target.value as RunwayMode)}>
+                  <option value="ARR">ARR</option><option value="DEP">DEP</option><option value="MIX">MIX</option><option value="CLOSED">CLOSED</option>
+                </select>
+                <label title="Target landing spacing">
+                  <input type="number" min="1" max="20" step="0.1" value={spacingNm[spacingKey(airport, runway)]} disabled={!arrivalEnabled} onChange={(event) => setRunwaySpacing(airport, runway, Number(event.target.value))} />
+                  <span>NM</span>
+                </label>
+              </div>
+            })}
+          </div>
+        </div>)}
+      </div>
       <div className="aman-config-label"><span>APPROACH VIEW</span><strong>{configSummary}</strong></div>
-      <div className="aman-counters"><div><span>TMA</span><strong>{String(displayTmaCount).padStart(3, '0')}</strong></div><div><span>TOT</span><strong>{String(displayTotCount).padStart(3, '0')}</strong></div><div><span>HLD</span><strong>---</strong></div><div><span>ΔT</span><strong>{activeSequence.length ? formatDelay(averageDelay) : '--'}</strong></div></div>
+      <div className="aman-counters">
+        <div><span>TMA</span><strong>{String(displayTmaCount).padStart(3, '0')}</strong></div>
+        <div><span>TOT</span><strong>{String(displayTotCount).padStart(3, '0')}</strong></div>
+        <div><span>HLD</span><strong>---</strong></div>
+        <div><span>ΔT</span><strong>{activeSequence.length ? formatDelay(averageDelay) : '--'}</strong></div>
+      </div>
     </section>
-    <main className="aman-workspace"><section className="aman-panel aman-timeline-panel"><div className="aman-panel-header"><div><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div><div className="aman-panel-meta"><span>5 MIN MAJOR</span><span>1 MIN MINOR</span><label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label><span className="is-drag-enabled">CASCADE DRAG · DBL CLICK RESET</span><button type="button" className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`} onClick={toggleDemo}>{demoMode ? 'TEST TRAFFIC ON' : 'TEST TRAFFIC'}</button><span className={demoMode ? 'is-simulated' : ''}>{demoMode ? 'SIMULATED' : loading ? 'LOADING' : 'IVAO LIVE'}</span></div></div>
-      <div className="aman-timeline-stage"><div className="aman-time-axis" aria-hidden="true">{ticks.map((tick) => <div className={`aman-minute-tick ${tick.isMajor ? 'is-major' : 'is-minor'}`} key={tick.key} style={{ '--offset-px': `${tick.offsetPx}px` } as CSSProperties}>{tick.isMajor && <span>{tick.label}</span>}<i /></div>)}</div><div className="aman-current-line"><span>ACTUAL {formatUtc(now)}</span></div><div className="aman-flight-layer">{visibleSequence.map((row) => { const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000; const isPast = offsetMinutes < 0; const offsetPx = Math.round(-offsetMinutes * PX_PER_MINUTE); const isStable = Boolean(stableIds[row.id]); const hasConflict = separationConflictIds.has(row.id); const isDragging = draggingId === row.id; const airport = rowAirport(row.id); const runwayLabel = airportScope === 'BOTH' ? `${airport === 'VTBD' ? 'BD' : 'BS'}/${row.runway}` : row.runway; return <div key={row.id} className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`} style={{ '--offset-px': `${offsetPx}px` } as CSSProperties} title={`Cascade drag sets TLDT · double-click to reset · Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${hasConflict ? ' · SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`} onPointerDown={(event) => startDrag(event, row)} onPointerMove={(event) => moveDrag(event, row)} onPointerUp={(event) => endDrag(event, row)} onPointerCancel={(event) => endDrag(event, row)} onDoubleClick={() => resetRow(row)}><span className="tldt">{formatHm(row.tldt)}</span><strong>{row.callsign}</strong><span>{row.aircraftType || '----'}</span><span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span><span>{formatHm(row.tto)}</span><b>{formatDelay(row.delayMinutes)}</b><em>{runwayLabel}</em></div> })}</div>{!loading && !visibleSequence.length && !demoMode && <div className="aman-empty-sequence"><strong>{trafficError ? 'LIVE TRAFFIC ERROR' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong><span>{trafficError || (activeArrivalRunways.length ? 'No live inbound right now. Use TEST TRAFFIC to verify multi-runway sequencing.' : 'Set at least one runway to ARR or MIX.')}</span></div>}</div>
-    </section><aside className="aman-side-stack"><section className="aman-panel aman-inbound-panel"><div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span></div><div className="aman-inbound-list"><div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span></div>{displayInboundRows.map((item) => <div className="aman-inbound-row multi" key={item.id} title={item.title}><span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span><strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong><span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span></div>)}{!loading && !displayInboundRows.length && <p>No connected inbound traffic for {airportScope}.</p>}</div></section><section className="aman-panel aman-system-panel"><div className="aman-panel-header compact"><div><span className="aman-eyebrow">SYSTEM</span><h2>Pipeline</h2></div></div><dl className="aman-status-list"><div><dt>Data mode</dt><dd>{demoMode ? 'SIMULATED' : 'LIVE'}</dd></div><div><dt>IVAO inbound</dt><dd>{trafficError ? 'PARTIAL / ERROR' : 'LIVE'}</dd></div><div><dt>Airport scope</dt><dd>{airportScope}</dd></div><div><dt>Arrival runways</dt><dd>{activeArrivalRunways.length}</dd></div><div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div><div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div><div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div><div><dt>TMA model</dt><dd>50 NM BKK</dd></div><div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div><div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div><div><dt>SEP invariant</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? 'FAILED' : 'OK'}</dd></div><div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div></dl></section></aside></main>
+
+    <main className="aman-workspace">
+      <section className="aman-panel aman-timeline-panel">
+        <div className="aman-panel-header">
+          <div><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div>
+          <div className="aman-panel-meta">
+            <span>5 MIN MAJOR</span><span>1 MIN MINOR</span>
+            <label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label>
+            <span className="is-drag-enabled">CASCADE DRAG · DBL CLICK RESET</span>
+            <button type="button" className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`} onClick={toggleDemo}>{demoMode ? 'TEST TRAFFIC ON' : 'TEST TRAFFIC'}</button>
+            <span className={demoMode ? 'is-simulated' : ''}>{demoMode ? 'SIMULATED' : loading ? 'LOADING' : 'IVAO LIVE'}</span>
+          </div>
+        </div>
+
+        <div className="aman-timeline-stage">
+          <div className="aman-time-axis" aria-hidden="true">{ticks.map((tick) => <div className={`aman-minute-tick ${tick.isMajor ? 'is-major' : 'is-minor'}`} key={tick.key} style={{ '--offset-px': `${tick.offsetPx}px` } as CSSProperties}>{tick.isMajor && <span>{tick.label}</span>}<i /></div>)}</div>
+          <div className="aman-current-line"><span>ACTUAL {formatUtc(now)}</span></div>
+          <div className="aman-flight-layer">
+            {visibleSequence.map((row) => {
+              const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
+              const isPast = offsetMinutes < 0
+              const offsetPx = Math.round(-offsetMinutes * PX_PER_MINUTE)
+              const isStable = Boolean(stableIds[row.id])
+              const hasConflict = separationConflictIds.has(row.id)
+              const isDragging = draggingId === row.id
+              const airport = rowAirport(row.id)
+              const selectableRunways = activeRunwaysForAirport(airport, runwayModes)
+              const runwayLabel = airportScope === 'BOTH' ? `${airport === 'VTBD' ? 'BD' : 'BS'}/${row.runway}` : row.runway
+
+              return <div
+                key={row.id}
+                className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
+                style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
+                title={`Cascade drag sets TLDT · double-click to reset · Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${hasConflict ? ' · SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
+                onPointerDown={(event) => startDrag(event, row)}
+                onPointerMove={(event) => moveDrag(event, row)}
+                onPointerUp={(event) => endDrag(event, row)}
+                onPointerCancel={(event) => endDrag(event, row)}
+                onDoubleClick={() => resetRow(row)}
+              >
+                <span className="tldt">{formatHm(row.tldt)}</span>
+                <strong>{row.callsign}</strong>
+                <span>{row.aircraftType || '----'}</span>
+                <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
+                <span>{formatHm(row.tto)}</span>
+                <b>{formatDelay(row.delayMinutes)}</b>
+                <em className={`runway-assignment${manualRunways[row.id] ? ' is-manual' : ''}`}>
+                  {selectableRunways.length > 1 ? <select
+                    value={row.runway}
+                    aria-label={`${row.callsign} landing runway`}
+                    title={`Assign ${row.callsign} landing runway`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onChange={(event) => setFlightRunway(row, event.target.value)}
+                  >
+                    {selectableRunways.map((runway) => <option key={runway} value={runway}>{runway}</option>)}
+                  </select> : runwayLabel}
+                </em>
+              </div>
+            })}
+          </div>
+          {!loading && !visibleSequence.length && !demoMode && <div className="aman-empty-sequence">
+            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
+            <span>{trafficError || (activeArrivalRunways.length ? 'No live inbound right now. Use TEST TRAFFIC to verify multi-runway sequencing.' : 'Set at least one runway to ARR or MIX.')}</span>
+          </div>}
+        </div>
+      </section>
+
+      <aside className="aman-side-stack">
+        <section className="aman-panel aman-inbound-panel">
+          <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span></div>
+          <div className="aman-inbound-list">
+            <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span></div>
+            {displayInboundRows.map((item) => <div className="aman-inbound-row multi" key={item.id} title={item.title}><span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span><strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong><span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span></div>)}
+            {!loading && !displayInboundRows.length && <p>No connected inbound traffic for {airportScope}.</p>}
+          </div>
+        </section>
+
+        <section className="aman-panel aman-system-panel">
+          <div className="aman-panel-header compact"><div><span className="aman-eyebrow">SYSTEM</span><h2>Pipeline</h2></div></div>
+          <dl className="aman-status-list">
+            <div><dt>Data mode</dt><dd>{demoMode ? 'SIMULATED' : 'LIVE'}</dd></div>
+            <div><dt>IVAO inbound</dt><dd>{trafficError ? 'PARTIAL / ERROR' : 'LIVE'}</dd></div>
+            <div><dt>Airport scope</dt><dd>{airportScope}</dd></div>
+            <div><dt>Arrival runways</dt><dd>{activeArrivalRunways.length}</dd></div>
+            <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
+            <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
+            <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
+            <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
+            <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
+            <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
+            <div><dt>VTBS X-RWY</dt><dd>1.0 MIN</dd></div>
+            <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
+            <div><dt>SEP invariant</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? 'FAILED' : 'OK'}</dd></div>
+            <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
+          </dl>
+        </section>
+      </aside>
+    </main>
+
     <footer className="aman-legend"><span>DELAY</span><i className="expedite" /> Expedite <i className="nothing" /> Nothing <i className="speed" /> Speed reduction <i className="stretch" /> Path stretching <i className="holding" /> Holding</footer>
   </div>
 }
