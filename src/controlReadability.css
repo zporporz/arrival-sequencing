@@ -1,11 +1,11 @@
 .aman-multi-runway-strip {
-  grid-template-columns: 210px minmax(680px, 1.85fr) minmax(260px, .75fr) auto;
+  grid-template-columns: 250px minmax(680px, 1.85fr) minmax(260px, .75fr) auto;
   min-height: 118px;
 }
 
 .aman-airport-tabs.has-runtime-selector {
-  min-width: 210px;
-  padding: 12px 14px;
+  min-width: 250px;
+  padding: 11px 12px;
   display: flex;
   align-items: center;
   border-right: 1px solid #203048;
@@ -15,14 +15,21 @@
   display: none !important;
 }
 
-.aman-airport-scope-select {
+.aman-airport-scope-picker {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
 
-.aman-airport-scope-select > span,
+.aman-airport-picker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aman-airport-picker-heading > span,
 .aman-profile-select > span {
   color: #8ca6c5;
   font-size: 11px;
@@ -30,17 +37,50 @@
   letter-spacing: .11em;
 }
 
-.aman-airport-scope-select select {
-  width: 100%;
-  height: 42px;
-  padding: 0 12px;
-  border: 1px solid #42688e;
-  border-radius: 4px;
-  background: #0b1a2b;
-  color: #edf5fc;
+.aman-airport-picker-heading > small {
+  color: #5f7896;
   font-family: Consolas, monospace;
-  font-size: 14px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+.aman-airport-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.aman-airport-checks label {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #314b68;
+  border-radius: 4px;
+  background: #0a1726;
+  color: #9db2ca;
+  font-family: Consolas, monospace;
+  font-size: 12px;
   font-weight: 900;
+  cursor: pointer;
+  user-select: none;
+}
+
+.aman-airport-checks label:has(input:checked) {
+  border-color: #5f91c2;
+  background: #102239;
+  color: #f0f6fd;
+  box-shadow: inset 0 0 0 1px rgba(99,156,214,.12);
+}
+
+.aman-airport-checks input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #6aa7df;
   cursor: pointer;
 }
 
@@ -131,8 +171,7 @@
 
 .aman-runway-card input:focus,
 .aman-runway-card > select:focus,
-.aman-profile-select select:focus,
-.aman-airport-scope-select select:focus {
+.aman-profile-select select:focus {
   outline: 2px solid rgba(102, 164, 224, .35);
   outline-offset: 1px;
   border-color: #669fda;
@@ -172,11 +211,11 @@
 
 @media (max-width: 1450px) {
   .aman-multi-runway-strip {
-    grid-template-columns: 185px minmax(560px, 1.6fr) minmax(220px, .7fr) auto;
+    grid-template-columns: 220px minmax(560px, 1.6fr) minmax(220px, .7fr) auto;
   }
 
   .aman-airport-tabs.has-runtime-selector {
-    min-width: 185px;
+    min-width: 220px;
   }
 
   .aman-profile-select {
@@ -199,11 +238,11 @@
 
 @media (max-width: 1100px) {
   .aman-multi-runway-strip {
-    grid-template-columns: 190px 1fr;
+    grid-template-columns: 220px 1fr;
   }
 
   .aman-airport-tabs.has-runtime-selector {
-    min-width: 190px;
+    min-width: 220px;
   }
 
   .aman-runway-config-control {
@@ -232,5 +271,9 @@
     min-width: 0;
     border-right: 0;
     border-bottom: 1px solid #203048;
+  }
+
+  .aman-airport-checks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
