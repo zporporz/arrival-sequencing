@@ -122,6 +122,14 @@ export const classifyAmanDelay = (delayMinutes: number): AmanDelayAction => {
 // Thailand SME: holding is applied at the head of the STAR / feeder-entry point.
 export const AMAN_HOLDING_POINT_MODEL = 'STAR_ENTRY' as const
 
+// Bangkok TMA counter working model: 50 NM radius from BKK DVOR/DME.
+// BKK coordinates from Thailand AIP ENR 4.1: 13°53'36.8"N 100°35'46.3"E.
+export const BKK_VOR_COORDINATES = {
+  lat: 13.8935556,
+  lon: 100.5961944,
+} as const
+export const BANGKOK_TMA_WORKING_RADIUS_NM = 50
+
 // MAESTRO timeline display model.
 // The current-time line stays fixed while the time scale and flight labels move downward as UTC advances.
 export const AMAN_TIMELINE_MAJOR_TICK_MINUTES = 5
