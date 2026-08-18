@@ -1,16 +1,14 @@
 # Thailand AMAN — Temporary Sequencing Constants
 
 **Baseline:** 2026-08-18  
-**Evidence:** TH-SME / project-owner supplied operational values.  
-**Implementation status:** temporary hard-code baseline for the clean rebuild; revisit when a published Thailand configuration/manual is available.
+**Evidence:** TH-SME / project-owner supplied operational values and screenshots.  
+**Implementation status:** working hard-code baseline for the clean rebuild; keep centralised so values can be changed later.
 
 ---
 
-## TLDT gap / separation values
+## 1. Runway spacing and TLDT time conversion
 
-### Reference conversion
-
-Use **140 kt** as the temporary final-speed reference when converting a runway spacing distance into a TLDT time gap.
+Use **140 kt** as the temporary final-speed reference when converting configured runway spacing into a TLDT time-equivalent.
 
 Formula:
 
@@ -18,85 +16,135 @@ Formula:
 
 At 140 kt:
 
-- 5 NM → **2.14 min** (2 min 09 sec)
-- 5.5 NM → **2.36 min** (2 min 21 sec)
-- 6 NM → **2.57 min** (2 min 34 sec)
+- 5 NM → **2.14 min**
+- 5.5 NM → **2.36 min**
+- 6 NM → **2.57 min**
 - 7 NM → **3.00 min**
-- 7.1 NM → **3.04 min** (3 min 03 sec)
-- 8 NM → **3.43 min** (3 min 26 sec)
+- 7.1 NM → **3.04 min**
+- 8 NM → **3.43 min**
 
-The time value is a derived planning equivalent; the configured runway spacing itself remains the NM value.
+The configured value remains the NM spacing. The time value is derived for TLDT sequencing.
 
 ### Default runway spacing profiles
 
-These are the normal/default settings supplied for the current Thailand MAESTRO configuration. Controllers/settings may use different values, so the rebuild should eventually expose these as configuration rather than permanently hard-code them.
-
 #### VTBD
 
-| Runway | Default spacing | Time-equivalent @ 140 kt |
+| Runway | Default spacing | Time @ 140 kt |
 |---|---:|---:|
 | 21R | 5.0 NM | 2.14 min |
 | 21L | 7.1 NM | 3.04 min |
 
 #### VTBS
 
-| Runway | Default spacing | Time-equivalent @ 140 kt |
+| Runway | Default spacing | Time @ 140 kt |
 |---|---:|---:|
 | 19 | 5.5 NM | 2.36 min |
 | 20L | 8.0 NM | 3.43 min |
 | 20R | 6.0 NM | 2.57 min |
 
-These values match the supplied MAESTRO screenshot/configuration view.
+These are default/operator settings, not immutable separation rules.
 
-### Normal generic gap
+### Special aircraft values currently known
 
-- Normal generic gap reference: **5 NM**.
-- Reference final speed: **140 kt**.
-- Time-equivalent: **2.14 min**.
+- ATR operational separation: **4 min** (described as about 10 NM).
+- A380 distance setting: **7 NM** → **3.00 min @ 140 kt**.
 
-### ATR separation
-
-- **ATR separation = 4 min**.
-- Operational description: approximately **10 NM**.
-- Pure distance conversion at 140 kt for 4 min is about **9.33 NM**; keep the operational value as 4 min when ATR-specific separation applies.
-
-### A380 separation
-
-- Distance setting: **7 NM**.
-- At 140 kt the time-equivalent is exactly **3.0 min**.
+How special-aircraft rules combine with the runway baseline is intentionally left for later clarification.
 
 ---
 
-## Sequencing implementation rule
+## 2. VTBS feeder / STAR nominal times
 
-The runway spacing profile is a **setting**, not a universal fixed rule. For a given runway/configuration:
+The supplied timing table contains separate `STAR19` and `STAR01` timing sets.
 
-1. read the configured spacing in NM;
-2. convert it to a time-equivalent using the working reference speed when a TLDT time gap is required;
-3. apply any special aircraft-category rule (e.g. ATR/A380) where applicable;
-4. later replace the temporary hard-coded defaults with editable airport/runway configuration.
+### STAR19 timing set
 
-The exact MAESTRO pairwise sequencing algorithm and how it combines runway spacing, wake turbulence, special aircraft categories, and runway dependencies still require confirmation.
+The project owner confirmed that **VTBS RWY 19 / 20L / 20R use the same STAR19 timing set**.
 
----
-
-## VTBS IAWP / STAR nominal times
-
-Temporary hard-coded nominal times from feeder/IAWP to landing for the clean rebuild:
-
-| VTBS IAWP | Nominal time |
+| Feeder / STAR head | Time to landing |
 |---|---:|
-| EASTE | 18 min |
+| LEBIM | 21 min |
+| DOLNI | 20 min |
+| EASTE | 19 min |
+| WILLA | 21 min |
 | NORTA | 20 min |
-| LEBIM | 18 min |
-| TUMGA | 20 min |
 
-### WILLA
+The table also states **Short cut time reduce at least: 5 min** for STAR19.
 
-No value has been supplied yet. **Do not infer a WILLA time from another feeder.** Keep WILLA unset/TODO until confirmed.
+### STAR01 timing set
+
+| Feeder / STAR head | Time to landing |
+|---|---:|
+| LEBIM | 20 min |
+| DOLNI | 17 min |
+| EASTE | 19 min |
+| WILLA | 24 min |
+| NORTA | 22 min |
+
+The table states **Short cut time reduce at least: 2 min** for STAR01.
+
+Do not infer additional runway mapping for STAR01 until the owner confirms it explicitly.
 
 ---
 
-## Intended use
+## 3. VTBD feeder / STAR nominal times
 
-These values are temporary implementation constants for sequence/TLDT/TTO modelling. They are not claimed to be the internal MAESTRO configuration schema. Keep them centralised so they can be replaced by airport/runway configuration later without changing sequencing code in multiple places.
+Use the following supplied values as the current hard-code baseline:
+
+| Fix / STAR head | Time |
+|---|---:|
+| NAKON | 13 min |
+| WEHHA | 13 min |
+| ENDUU | 17 min |
+| SABAI | 20 min |
+| SEHNA | 25 min |
+| HOTEL | 21 min |
+| TL | 18 min |
+| UBLOD | 19 min |
+| NODEG | 13 min |
+| OPERA | 13 min |
+
+### Explicit shortcut reductions in the supplied table
+
+- ENDUU → OPERA: **reduce 4 min**
+- SABAI → NODEG: **reduce 7 min**
+- SEHNA → NODEG: **reduce 12 min**
+
+These are stored as explicit shortcut relationships rather than being inferred from generic route geometry.
+
+---
+
+## 4. Holding point model
+
+**TH-SME confirmed:** holding is at the **head of the STAR / feeder-entry point**.
+
+For the rebuild, model the primary AMAN holding point as the STAR-entry / feeder fix unless a procedure-specific exception is later supplied.
+
+---
+
+## 5. Delay colour thresholds — current working baseline
+
+For now, treat the following as the confirmed working implementation baseline; they may be changed later when better operational detail is supplied:
+
+- `< 0 min` → Expedite
+- `0 min` → Nothing
+- `1–2 min` → Speed reduction
+- `3–4 min` → Path Stretching
+- `>= 5 min` → Holding
+
+Keep these thresholds centralised in code and configuration.
+
+---
+
+## 6. Known deferred logic
+
+Do **not** invent these yet:
+
+- exact pairwise rule when ATR/A380/special wake interacts with runway spacing;
+- multi-runway dependency/reallocation logic;
+- go-around reinsertion;
+- emergency/priority sequencing;
+- runway-change behaviour;
+- exact controller manual override workflow.
+
+The owner has indicated some of these exist operationally but are difficult to describe from memory. Preserve them as deferred design questions rather than guessing.
