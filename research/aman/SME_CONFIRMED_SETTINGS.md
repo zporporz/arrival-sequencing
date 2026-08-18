@@ -125,6 +125,27 @@ For the IVAO rebuild, exact real-world gate/runway optimisation is **not require
 
 ---
 
+## VTBD compact feeder / STAR codes
+
+**Confirmed concept:** VTBD uses the **first letter of the feeder/STAR entry name** as its compact sequence code.
+
+Working display mapping for the rebuild:
+
+- `E` = ENDUU
+- `N` = NAKON
+- `S` = SABAI
+- `s` underlined = SEHNA
+- `W` = WEHHA
+
+SABAI and SEHNA both begin with `S`, so they must be visually distinguished. The current project convention is:
+
+- **SABAI:** uppercase `S`
+- **SEHNA:** lowercase `s` with underline
+
+Implementation note: store SEHNA as plain lowercase `s` plus an `UNDERLINE` presentation style instead of relying on a Unicode combining underline, so rendering stays consistent across browsers/fonts.
+
+---
+
 ## Scope decision — Approach first
 
 The current rebuild is **Approach AMAN only**. Centre-oriented inbound planning columns such as `NFL`, `ETN`, `CFL`, `RFL`, and `LFUNC` are research for a future phase and are not required for the first Approach implementation.
