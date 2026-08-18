@@ -20,6 +20,14 @@ type OnlineController = {
   airportView: string | null
 }
 
+const HTML_ESCAPE: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}
+
 function currentAirportView() {
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.aman-airport-scope-picker input[type="checkbox"]:checked'))
     .map((input) => input.value.trim().toUpperCase())
@@ -39,13 +47,7 @@ function sinceLabel(value: string | null) {
 }
 
 function safeText(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[character] || character)
+  return value.replace(/[&<>"']/g, (character) => HTML_ESCAPE[character] || character)
 }
 
 function ensurePresenceMenu() {
