@@ -21,15 +21,7 @@ Need to confirm cases such as:
 - whether the larger of runway-spacing and aircraft-specific separation is used;
 - whether wake category and runway dependency add further rules.
 
-### 3. `ΔT` calculation population
-
-Meaning is confirmed as average Delay Required, but exact population still needs confirmation:
-
-- all active arrivals or only a selected runway/stream;
-- whether Expedite/negative values are included;
-- whether holding/Frozen traffic remains in the average.
-
-### 4. Controller manual sequence interaction
+### 3. Controller manual sequence interaction
 
 For a future interactive version, still need to know what Approach controllers can manually alter in the real HMI:
 
@@ -40,6 +32,16 @@ For a future interactive version, still need to know what Approach controllers c
 - lock/force a sequence position.
 
 This is not required for the first display-first MVP.
+
+## Closed / confirmed
+
+### `ΔT`
+
+Confirmed: `ΔT` is calculated per runway/sequence box directly from the signed Delay Required values displayed for the aircraft in that runway sequence.
+
+`ΔT = sum(delay values) / number of aircraft`
+
+Negative Expedite values are part of the arithmetic average; if the sequence has no net delay, ΔT can be zero or negative depending on the displayed delay values.
 
 ## Product/technical decisions — do not require Thailand SME answers now
 
