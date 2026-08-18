@@ -16,5 +16,13 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src"]
+  "include": [
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/AuthGate.tsx",
+    "src/browserIdentity.ts",
+    "src/core/**/*.ts",
+    "src/lib/**/*.ts",
+    "src/types.ts"
+  ]
 }
