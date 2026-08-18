@@ -19,6 +19,11 @@ function forwardMinutes(fromHm: string, toHm: string) {
 }
 
 function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
+  // Explicit controller RETURN TO AUTO resets the row to the system-managed
+  // Unstable state (blue). Keep that state until the controller commits a new
+  // manual target/runway action on the row.
+  if (row.dataset.forceAutoUnstable === 'true') return 'UNSTABLE'
+
   const cells = row.children
   const tldtHm = cells.item(0)?.textContent?.trim() || ''
   const ttoHm = cells.item(4)?.textContent?.trim() || ''
@@ -84,8 +89,57 @@ function refreshFlightStatuses() {
   })
 }
 
+function updateInteractionHint() {
+  const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
+  if (hint) hint.textContent = 'DRAG = SET TARGET · DBL CLICK = RETURN TO AUTO'
+}
+
+function rowFromEventTarget(target: EventTarget | null) {
+  return target instanceof Element ? target.closest<HTMLElement>('.aman-flight-row') : null
+}
+
 export function installFlightStatusRuntime() {
+  const onDoubleClick = (event: MouseEvent) => {
+    const row = rowFromEventTarget(event.target)
+    if (!row) return
+    if (event.target instanceof Element && event.target.closest('select')) return
+    row.dataset.forceAutoUnstable = 'true'
+    applyStatusClass(row, 'UNSTABLE')
+    window.setTimeout(refreshFlightStatuses, 0)
+  }
+
+  const onPointerDown = (event: PointerEvent) => {
+    const row = rowFromEventTarget(event.target)
+    if (!row) return
+    if (event.target instanceof Element && event.target.closest('select')) return
+    // A new controller drag/action commits the flight again, so release the
+    // forced auto-Unstable reset marker before React marks it Stable.
+    delete row.dataset.forceAutoUnstable
+  }
+
+  const onChange = (event: Event) => {
+    const row = rowFromEventTarget(event.target)
+    if (!row) return
+    if (event.target instanceof Element && event.target.closest('.runway-assignment select')) {
+      delete row.dataset.forceAutoUnstable
+    }
+  }
+
+  document.addEventListener('dblclick', onDoubleClick)
+  document.addEventListener('pointerdown', onPointerDown)
+  document.addEventListener('change', onChange)
+
+  updateInteractionHint()
   refreshFlightStatuses()
-  const timer = window.setInterval(refreshFlightStatuses, 1_000)
-  return () => window.clearInterval(timer)
+  const timer = window.setInterval(() => {
+    updateInteractionHint()
+    refreshFlightStatuses()
+  }, 1_000)
+
+  return () => {
+    window.clearInterval(timer)
+    document.removeEventListener('dblclick', onDoubleClick)
+    document.removeEventListener('pointerdown', onPointerDown)
+    document.removeEventListener('change', onChange)
+  }
 }
