@@ -120,6 +120,14 @@ export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: str
   return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`)
 }
 
+export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string) {
+  return apiPost<TGeometry>('/api/sequence/route-geometry', {
+    origin: origin.trim().toUpperCase(),
+    destination: destination.trim().toUpperCase(),
+    route: route.trim().toUpperCase(),
+  })
+}
+
 export function sequenceRequest<T>(path: string, body: Record<string, unknown>) {
   return apiPost<T>(path, body)
 }
