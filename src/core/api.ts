@@ -37,6 +37,7 @@ export type IvaoArrivalTrafficFlight = {
   departure: string | null
   arrival: string
   route: string | null
+  flightRules: string | null
   state: string | null
   onGround: boolean | null
   trackTimestamp: string | null
