@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import ivaoThailandLogo from './assets/ivao-thailand-logo.png'
 import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
@@ -18,6 +18,7 @@ import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
   autoSequenceUnstableArrivals,
   averageDelayMinutes,
+  calculateArrivalMetrics,
   type AmanArrivalPrediction,
   type AmanSequenceRow,
 } from './core/arrivalSequencing'
@@ -47,6 +48,13 @@ type DemoSpec = {
   wakeTurbulence: string
   refFix: string
   naturalLandingOffsetMinutes: number
+}
+
+type DragState = {
+  id: string
+  pointerId: number
+  startY: number
+  startTldtMs: number
 }
 
 const RUNWAYS: Record<AirportCode, readonly string[]> = {
@@ -85,6 +93,7 @@ const DEMO_SPECS: Record<AirportCode, readonly DemoSpec[]> = {
 const PX_PER_MINUTE = 10
 const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
+const DRAG_SNAP_MS = 15_000
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function formatUtc(date: Date) {
@@ -211,6 +220,10 @@ export default function App() {
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [demoMode, setDemoMode] = useState(false)
   const [demoAnchor, setDemoAnchor] = useState<Date | null>(null)
+  const [manualTldt, setManualTldt] = useState<Record<string, string>>({})
+  const [stableIds, setStableIds] = useState<Record<string, true>>({})
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const dragRef = useRef<DragState | null>(null)
 
   const ticks = useMemo(() => timelineTicks(now), [now])
   const liveRouteCount = useMemo(
@@ -230,7 +243,7 @@ export default function App() {
     [inbound],
   )
 
-  const demoSequence = useMemo(() => {
+  const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchor) return []
     const spacingMinutes = (
       AMAN_DEFAULT_RUNWAY_SPACING_MINUTES[airport] as Record<string, number>
@@ -243,12 +256,50 @@ export default function App() {
     )
   }, [airport, demoAnchor, demoMode, runway])
 
+  const demoSequence = useMemo(() => {
+    const adjusted = demoBaseSequence.map((row) => {
+      const target = manualTldt[row.id]
+      if (!target) return row
+      const metrics = calculateArrivalMetrics(row, target)
+      return {
+        ...metrics,
+        sequenceIndex: row.sequenceIndex,
+        autoShiftSeconds: Math.max(0, Math.round((new Date(target).getTime() - new Date(metrics.naturalLandingAt).getTime()) / 1000)),
+      } satisfies AmanSequenceRow
+    })
+
+    return adjusted
+      .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime() || a.callsign.localeCompare(b.callsign))
+      .map((row, index) => ({ ...row, sequenceIndex: index + 1 }))
+  }, [demoBaseSequence, manualTldt])
+
   const activeSequence = demoMode ? demoSequence : sequence
   const averageDelay = useMemo(() => averageDelayMinutes(activeSequence), [activeSequence])
   const visibleSequence = useMemo(() => {
     const cutoff = now.getTime() - historyMinutes * 60_000
     return activeSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
   }, [activeSequence, historyMinutes, now])
+
+  const separationConflictIds = useMemo(() => {
+    const conflicts = new Set<string>()
+    const spacingMinutes = (
+      AMAN_DEFAULT_RUNWAY_SPACING_MINUTES[airport] as Record<string, number>
+    )[runway]
+    if (!Number.isFinite(spacingMinutes)) return conflicts
+    const requiredMs = spacingMinutes * 60_000
+    const ordered = [...activeSequence].sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime())
+    for (let index = 1; index < ordered.length; index += 1) {
+      const leader = ordered[index - 1]
+      const follower = ordered[index]
+      if (leader.runway !== follower.runway) continue
+      const gapMs = new Date(follower.tldt).getTime() - new Date(leader.tldt).getTime()
+      if (gapMs + 500 < requiredMs) {
+        conflicts.add(leader.id)
+        conflicts.add(follower.id)
+      }
+    }
+    return conflicts
+  }, [activeSequence, airport, runway])
 
   const displayInboundRows = useMemo<DisplayInboundRow[]>(() => {
     if (demoMode) {
@@ -258,7 +309,7 @@ export default function App() {
         aircraft: row.aircraftType || '----',
         refFix: row.refFix,
         eta: row.predictedIawpAt,
-        title: 'SIMULATED TEST TRAFFIC',
+        title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL / STABLE' : 'SIMULATED TEST TRAFFIC',
       }))
     }
 
@@ -270,7 +321,7 @@ export default function App() {
       eta: item.predictedIawpAt,
       title: `${item.source}${item.reason ? ` · ${item.reason}` : ''}`,
     }))
-  }, [demoMode, demoSequence, inbound])
+  }, [demoMode, demoSequence, inbound, stableIds])
 
   const displayTmaCount = demoMode ? Math.min(4, demoSequence.length) : liveTmaCount
   const displayTotCount = demoMode ? demoSequence.length : inbound.length
@@ -283,6 +334,13 @@ export default function App() {
   useEffect(() => {
     setRunway(RUNWAYS[airport][0])
   }, [airport])
+
+  useEffect(() => {
+    setManualTldt({})
+    setStableIds({})
+    setDraggingId(null)
+    dragRef.current = null
+  }, [airport, runway])
 
   useEffect(() => {
     let disposed = false
@@ -397,6 +455,10 @@ export default function App() {
   }, [airport, runway])
 
   const toggleDemo = () => {
+    setManualTldt({})
+    setStableIds({})
+    setDraggingId(null)
+    dragRef.current = null
     if (demoMode) {
       setDemoMode(false)
       setDemoAnchor(null)
@@ -404,6 +466,58 @@ export default function App() {
     }
     setDemoAnchor(new Date())
     setDemoMode(true)
+  }
+
+  const startDemoDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    if (!demoMode) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      id: row.id,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startTldtMs: new Date(row.tldt).getTime(),
+    }
+    setDraggingId(row.id)
+  }
+
+  const moveDemoDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    const drag = dragRef.current
+    if (!demoMode || !drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    const deltaY = event.clientY - drag.startY
+    const deltaMinutes = -deltaY / PX_PER_MINUTE
+    const rawTargetMs = drag.startTldtMs + deltaMinutes * 60_000
+    const snappedTargetMs = Math.round(rawTargetMs / DRAG_SNAP_MS) * DRAG_SNAP_MS
+    setManualTldt((current) => ({
+      ...current,
+      [row.id]: new Date(snappedTargetMs).toISOString(),
+    }))
+  }
+
+  const endDemoDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
+    const drag = dragRef.current
+    if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    dragRef.current = null
+    setDraggingId(null)
+    setStableIds((current) => ({ ...current, [row.id]: true }))
+  }
+
+  const resetDemoRow = (row: AmanSequenceRow) => {
+    if (!demoMode) return
+    setManualTldt((current) => {
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
+    setStableIds((current) => {
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
   }
 
   return (
@@ -455,7 +569,7 @@ export default function App() {
 
         <div className="aman-config-label">
           <span>APPROACH VIEW</span>
-          <strong>{airport} · RWY {runway} · {demoMode ? 'SIMULATED TEST SEQUENCE' : 'AUTO UNSTABLE SEQUENCE'}</strong>
+          <strong>{airport} · RWY {runway} · {demoMode ? 'ATC DRAG TEST SEQUENCE' : 'AUTO UNSTABLE SEQUENCE'}</strong>
         </div>
 
         <div className="aman-counters">
@@ -487,6 +601,7 @@ export default function App() {
                   ))}
                 </select>
               </label>
+              {demoMode && <span className="is-drag-enabled">DRAG ROWS · DBL CLICK RESET</span>}
               <button
                 type="button"
                 className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`}
@@ -523,12 +638,20 @@ export default function App() {
                 const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
                 const isPast = offsetMinutes < 0
                 const offsetPx = Math.round(-offsetMinutes * PX_PER_MINUTE)
+                const isStable = Boolean(stableIds[row.id])
+                const hasConflict = separationConflictIds.has(row.id)
+                const isDragging = draggingId === row.id
                 return (
                   <div
                     key={row.id}
-                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}`}
+                    className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
                     style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                    title={`Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min${isPast ? ' · assumed landed' : ''}`}
+                    title={`${demoMode ? 'Drag vertically to set TLDT · double-click to reset · ' : ''}Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min${isStable ? ' · ATC manual / Stable' : ''}${hasConflict ? ' · SEPARATION CONFLICT' : ''}${isPast ? ' · assumed landed' : ''}`}
+                    onPointerDown={(event) => startDemoDrag(event, row)}
+                    onPointerMove={(event) => moveDemoDrag(event, row)}
+                    onPointerUp={(event) => endDemoDrag(event, row)}
+                    onPointerCancel={(event) => endDemoDrag(event, row)}
+                    onDoubleClick={() => resetDemoRow(row)}
                   >
                     <span className="tldt">{formatHm(row.tldt)}</span>
                     <strong>{row.callsign}</strong>
@@ -573,7 +696,7 @@ export default function App() {
               </div>
               {displayInboundRows.map((item) => (
                 <div className="aman-inbound-row" key={item.id} title={item.title}>
-                  <strong>{item.callsign}</strong>
+                  <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
                   <span>{item.aircraft}</span>
                   <span>{item.refFix}</span>
                   <span>{formatHm(item.eta)}</span>
@@ -597,7 +720,9 @@ export default function App() {
               <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
               <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
               <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
-              <div><dt>Sequence</dt><dd>AUTO UNSTABLE</dd></div>
+              <div><dt>Sequence</dt><dd>{demoMode ? 'AUTO + ATC DRAG' : 'AUTO UNSTABLE'}</dd></div>
+              <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
+              <div><dt>SEP conflict</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? separationConflictIds.size : 'NONE'}</dd></div>
               <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
             </dl>
           </section>
