@@ -1,8 +1,44 @@
-export const VTBS_IAWP_NOMINAL_MINUTES = {
-  EASTE: 18,
+export const VTBS_STAR19_NOMINAL_MINUTES = {
+  LEBIM: 21,
+  DOLNI: 20,
+  EASTE: 19,
+  WILLA: 21,
   NORTA: 20,
-  LEBIM: 18,
-  TUMGA: 20,
+} as const
+
+export const VTBS_STAR01_NOMINAL_MINUTES = {
+  LEBIM: 20,
+  DOLNI: 17,
+  EASTE: 19,
+  WILLA: 24,
+  NORTA: 22,
+} as const
+
+// Current working arrival group: RWY 19 / 20L / 20R use the same STAR19 timing set.
+export const VTBS_IAWP_NOMINAL_MINUTES = VTBS_STAR19_NOMINAL_MINUTES
+
+export const VTBS_SHORTCUT_REDUCTION_AT_LEAST_MINUTES = {
+  STAR19: 5,
+  STAR01: 2,
+} as const
+
+export const VTBD_IAWP_NOMINAL_MINUTES = {
+  NAKON: 13,
+  WEHHA: 13,
+  ENDUU: 17,
+  SABAI: 20,
+  SEHNA: 25,
+  HOTEL: 21,
+  TL: 18,
+  UBLOD: 19,
+  NODEG: 13,
+  OPERA: 13,
+} as const
+
+export const VTBD_SHORTCUT_REDUCTION_MINUTES = {
+  ENDUU_TO_OPERA: 4,
+  SABAI_TO_NODEG: 7,
+  SEHNA_TO_NODEG: 12,
 } as const
 
 export const AMAN_REFERENCE_SPEED_KT = 140
@@ -46,4 +82,25 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_MINUTES = {
   },
 } as const
 
-export type VtbsIawpWithNominalTime = keyof typeof VTBS_IAWP_NOMINAL_MINUTES
+// Working Thailand delay-colour thresholds. Keep centralised so they can be changed later.
+export const AMAN_DELAY_THRESHOLDS_MINUTES = {
+  NOTHING: 0,
+  SPEED_REDUCTION_MAX: 2,
+  PATH_STRETCHING_MAX: 4,
+  HOLDING_MIN: 5,
+} as const
+
+export type AmanDelayAction = 'EXPEDITE' | 'NOTHING' | 'SPEED_REDUCTION' | 'PATH_STRETCHING' | 'HOLDING'
+
+export const classifyAmanDelay = (delayMinutes: number): AmanDelayAction => {
+  if (delayMinutes < 0) return 'EXPEDITE'
+  if (delayMinutes === 0) return 'NOTHING'
+  if (delayMinutes <= AMAN_DELAY_THRESHOLDS_MINUTES.SPEED_REDUCTION_MAX) return 'SPEED_REDUCTION'
+  if (delayMinutes <= AMAN_DELAY_THRESHOLDS_MINUTES.PATH_STRETCHING_MAX) return 'PATH_STRETCHING'
+  return 'HOLDING'
+}
+
+// Thailand SME: holding is applied at the head of the STAR / feeder-entry point.
+export const AMAN_HOLDING_POINT_MODEL = 'STAR_ENTRY' as const
+
+export type VtbsIawpWithNominalTime = keyof typeof VTBS_STAR19_NOMINAL_MINUTES
