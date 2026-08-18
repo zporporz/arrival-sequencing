@@ -78,8 +78,29 @@ Still to confirm:
 
 ---
 
-## TOT — Meaning not yet recalled/confirmed
+## TOT — Total traffic inbound in system
 
-`TOT` is visible in the real Thailand MAESTRO HMI, but its exact meaning has **not yet been re-confirmed by the SME**.
+**Confirmed label/meaning:** `TOT` means **Total traffic inbound in system**.
 
-Do not infer or hard-code a meaning from generic ATM terminology. Keep `TOT` marked **UNKNOWN** until confirmed.
+Operationally, this is best interpreted as the **total number of inbound arrival aircraft currently known to / participating in the MAESTRO AMAN system for the relevant view**, not only aircraft already inside the TMA.
+
+This distinction matters:
+
+- `TMA` = aircraft currently inside the TMA;
+- `TOT` = all inbound aircraft currently in the AMAN system/planning population for that view;
+- `HLD` = aircraft currently holding.
+
+Therefore `TMA` is conceptually a subset of `TOT` for arrivals, while `TOT` can include aircraft still outside the TMA but already created/tracked by AMAN within its planning horizon.
+
+This interpretation is consistent with generic AMAN architecture, where inbound flights are acquired and sequenced before they reach the TMA. In the Thailand MAESTRO status model, flights can exist in the system while still in Unstable/Stable planning stages well outside the TMA.
+
+### Still to confirm
+
+The phrase **"in system"** still needs a precise Thailand implementation boundary before hard-coding the counter. Specifically:
+
+- exactly when an inbound first becomes part of `TOT` (e.g. after ABI/flight creation, planning-horizon entry, or another trigger);
+- exactly when a flight leaves `TOT` (landing, cancellation, diversion, go-around handling, manual removal, etc.);
+- whether `TOT` is airport-wide or filtered by selected runway/stream/sector/view;
+- whether arrivals assigned to another runway/configuration but visible to the same AMAN view are counted.
+
+Until those boundaries are confirmed, treat the displayed definition as authoritative but keep the membership/filter rule configurable.
