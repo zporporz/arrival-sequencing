@@ -1,77 +1,138 @@
+const MAX_SELECTED_AIRPORTS = 3
+
 function buttonValue(button: HTMLButtonElement) {
   return (button.textContent || '').trim().toUpperCase()
 }
 
-function optionLabel(value: string) {
-  return value === 'BOTH' ? 'ALL AIRPORTS' : value
+function airportButtons(host: HTMLElement) {
+  return Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    .filter((button) => buttonValue(button) !== 'BOTH')
+}
+
+function allButton(host: HTMLElement) {
+  return Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    .find((button) => buttonValue(button) === 'BOTH') ?? null
 }
 
 export function installAirportScopeRuntime() {
   let host: HTMLElement | null = null
-  let wrapper: HTMLLabelElement | null = null
-  let select: HTMLSelectElement | null = null
+  let wrapper: HTMLDivElement | null = null
   let optionSignature = ''
+  let syncing = false
 
-  const onChange = () => {
-    if (!host || !select) return
-    const target = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => buttonValue(button) === select?.value)
-    target?.click()
+  const selectedValues = () => {
+    if (!wrapper) return []
+    return Array.from(wrapper.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'))
+      .map((input) => input.value)
+  }
+
+  const syncUnderlyingScope = (changedInput?: HTMLInputElement) => {
+    if (!host || !wrapper || syncing) return
+
+    let selected = selectedValues()
+
+    if (!selected.length && changedInput) {
+      changedInput.checked = true
+      return
+    }
+
+    if (selected.length > MAX_SELECTED_AIRPORTS && changedInput) {
+      changedInput.checked = false
+      selected = selectedValues()
+    }
+
+    syncing = true
+    try {
+      const buttons = airportButtons(host)
+      if (selected.length === 1) {
+        buttons.find((button) => buttonValue(button) === selected[0])?.click()
+      } else {
+        // Current sequencing engine represents the supported multi-airport set with the
+        // hidden BOTH scope. The picker UI intentionally exposes individual airports only.
+        allButton(host)?.click()
+      }
+    } finally {
+      syncing = false
+    }
   }
 
   const detach = () => {
-    if (select) select.removeEventListener('change', onChange)
     wrapper?.remove()
     host?.classList.remove('has-runtime-selector')
     wrapper = null
-    select = null
     host = null
     optionSignature = ''
+  }
+
+  const buildPicker = (values: string[]) => {
+    if (!host) return
+
+    wrapper?.remove()
+    wrapper = document.createElement('div')
+    wrapper.className = 'aman-airport-scope-picker'
+
+    const heading = document.createElement('div')
+    heading.className = 'aman-airport-picker-heading'
+
+    const caption = document.createElement('span')
+    caption.textContent = 'AIRPORT VIEW'
+
+    const limit = document.createElement('small')
+    limit.textContent = `SELECT UP TO ${MAX_SELECTED_AIRPORTS}`
+
+    heading.append(caption, limit)
+
+    const choices = document.createElement('div')
+    choices.className = 'aman-airport-checks'
+
+    for (const value of values) {
+      const label = document.createElement('label')
+      const input = document.createElement('input')
+      input.type = 'checkbox'
+      input.value = value
+      input.setAttribute('aria-label', `Show ${value}`)
+      input.addEventListener('change', () => syncUnderlyingScope(input))
+
+      const text = document.createElement('span')
+      text.textContent = value
+
+      label.append(input, text)
+      choices.appendChild(label)
+    }
+
+    wrapper.append(heading, choices)
+    host.appendChild(wrapper)
   }
 
   const attach = () => {
     const nextHost = document.querySelector<HTMLElement>('.aman-airport-tabs')
     if (!nextHost) return
 
-    if (host !== nextHost || !wrapper || !select || !nextHost.contains(wrapper)) {
-      if (host && host !== nextHost) detach()
+    if (host !== nextHost) {
+      if (host) detach()
       host = nextHost
       host.classList.add('has-runtime-selector')
-
-      wrapper = document.createElement('label')
-      wrapper.className = 'aman-airport-scope-select'
-
-      const caption = document.createElement('span')
-      caption.textContent = 'AIRPORT VIEW'
-
-      select = document.createElement('select')
-      select.setAttribute('aria-label', 'Airport view')
-      select.addEventListener('change', onChange)
-
-      wrapper.append(caption, select)
-      host.appendChild(wrapper)
-      optionSignature = ''
     }
 
-    const buttons = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    const buttons = airportButtons(nextHost)
     const values = buttons.map(buttonValue).filter(Boolean)
     const signature = values.join('|')
 
-    if (select && signature !== optionSignature) {
-      select.replaceChildren(...values.map((value) => {
-        const option = document.createElement('option')
-        option.value = value
-        option.textContent = optionLabel(value)
-        return option
-      }))
+    if (!wrapper || !nextHost.contains(wrapper) || signature !== optionSignature) {
+      buildPicker(values)
       optionSignature = signature
     }
 
-    const active = buttons.find((button) => button.classList.contains('is-active'))
-    if (select && active) {
-      const value = buttonValue(active)
-      if (select.value !== value) select.value = value
-    }
+    if (!wrapper || syncing) return
+
+    const active = Array.from(nextHost.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.classList.contains('is-active'))
+    const activeValue = active ? buttonValue(active) : ''
+    const multiActive = activeValue === 'BOTH'
+
+    wrapper.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((input) => {
+      input.checked = multiActive ? true : input.value === activeValue
+    })
   }
 
   attach()
