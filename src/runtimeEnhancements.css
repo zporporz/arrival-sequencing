@@ -1,0 +1,147 @@
+.aman-flight-row[data-connection-state="GHOST"]{
+  opacity:.72;
+  outline:1px dashed rgba(255,190,72,.75);
+  outline-offset:1px;
+}
+.aman-flight-row[data-connection-state="GHOST"]::after,
+.aman-flight-row[data-connection-state="RECONNECTED"]::after,
+.aman-flight-row[data-connection-state="POSITION_JUMP"]::after{
+  content:attr(data-link-label);
+  position:absolute;
+  top:-16px;
+  right:4px;
+  padding:2px 5px;
+  border:1px solid #765b24;
+  border-radius:3px;
+  background:#211a0b;
+  color:#ffd36a;
+  font:800 8px/1.2 Consolas,monospace;
+  letter-spacing:.04em;
+  white-space:nowrap;
+  pointer-events:none;
+}
+.aman-flight-row[data-display-side="LEFT"][data-connection-state]::after{
+  right:auto;
+  left:4px;
+}
+.aman-flight-row[data-connection-state="RECONNECTED"]::after{
+  border-color:#2d6c53;
+  background:#0d241b;
+  color:#77d9aa;
+}
+.aman-flight-row[data-connection-state="POSITION_JUMP"]{
+  outline:1px solid rgba(239,89,77,.8);
+  outline-offset:1px;
+}
+.aman-flight-row[data-connection-state="POSITION_JUMP"]::after{
+  border-color:#7d302b;
+  background:#2a1010;
+  color:#ff8e83;
+}
+.aman-inbound-row strong[data-connection-state="GHOST"]::after,
+.aman-inbound-row strong[data-connection-state="RECONNECTED"]::after,
+.aman-inbound-row strong[data-connection-state="POSITION_JUMP"]::after{
+  content:' ' attr(data-link-label);
+  display:block;
+  margin-top:2px;
+  color:#ffd36a;
+  font-size:8px;
+  line-height:1.1;
+  white-space:nowrap;
+}
+.aman-inbound-row strong[data-connection-state="RECONNECTED"]::after{color:#77d9aa}
+.aman-inbound-row strong[data-connection-state="POSITION_JUMP"]::after{color:#ff8e83}
+.aman-runtime-reconnect-status dd.is-warning{color:#ff8e83!important}
+
+.aman-session{position:relative}
+.aman-online-menu{position:relative;flex:0 0 auto}
+.aman-online-menu>summary{
+  list-style:none;
+  height:32px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:0 9px;
+  border:1px solid #29415d;
+  border-radius:3px;
+  background:#0a1726;
+  color:#9fc0df;
+  cursor:pointer;
+  user-select:none;
+}
+.aman-online-menu>summary::-webkit-details-marker{display:none}
+.aman-online-menu>summary i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#67d59e;
+  box-shadow:0 0 6px rgba(103,213,158,.5);
+}
+.aman-online-menu>summary strong{
+  font:900 10px/1 Consolas,monospace;
+  letter-spacing:.04em;
+  white-space:nowrap;
+}
+.aman-online-menu[open]>summary{border-color:#4f769f;color:#d8e9f8}
+.aman-online-popover{
+  position:absolute;
+  top:38px;
+  right:0;
+  z-index:50;
+  width:360px;
+  max-height:440px;
+  overflow:auto;
+  border:1px solid #314b68;
+  border-radius:4px;
+  background:#081421;
+  box-shadow:0 16px 40px rgba(0,0,0,.45);
+}
+.aman-online-heading{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 12px;
+  border-bottom:1px solid #1d3148;
+  background:#0d1b2b;
+}
+.aman-online-heading>div{display:flex;flex-direction:column;gap:3px}
+.aman-online-heading b{color:#edf5fd;font-size:12px}
+.aman-online-heading span{color:#6f87a2;font-size:9px}
+.aman-online-heading>strong{color:#72d7a9;font:900 16px/1 Consolas,monospace}
+.aman-online-list{display:flex;flex-direction:column}
+.aman-online-item{
+  display:grid;
+  grid-template-columns:32px minmax(0,1fr) auto;
+  align-items:center;
+  gap:9px;
+  padding:9px 11px;
+  border-bottom:1px solid #14263a;
+}
+.aman-online-item>i{
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  border:1px solid #34506f;
+  border-radius:50%;
+  background:#102136;
+  color:#c5ddf4;
+  font:900 10px/1 Consolas,monospace;
+  font-style:normal;
+}
+.aman-online-item>div{min-width:0;display:flex;flex-direction:column;gap:2px}
+.aman-online-item>div strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#edf5fd;font-size:11px}
+.aman-online-item>div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8199b2;font:700 9px/1.25 Consolas,monospace}
+.aman-online-item>div small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5f7893;font-size:8px}
+.aman-online-item>em{color:#66809b;font:800 8px/1 Consolas,monospace;font-style:normal;white-space:nowrap}
+.aman-online-popover>small{display:block;padding:9px 11px;color:#5c738d;font-size:8px}
+
+@media(max-width:900px){
+  .aman-online-menu>summary{padding:0 7px}
+  .aman-online-menu>summary strong{font-size:9px}
+  .aman-online-popover{right:-60px;width:320px}
+}
+@media(max-width:700px){
+  .aman-online-menu{display:none}
+}
