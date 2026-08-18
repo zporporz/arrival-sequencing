@@ -35,6 +35,25 @@ export const VTBD_IAWP_NOMINAL_MINUTES = {
   OPERA: 13,
 } as const
 
+// VTBD compact IAWP codes use the first letter. SABAI and SEHNA both start with S,
+// so the rebuild distinguishes them visually: SABAI = uppercase S, SEHNA = lowercase underlined s.
+// Keep the underline as presentation metadata rather than a combining Unicode character.
+export const VTBD_IAWP_COMPACT_CODES = {
+  ENDUU: 'E',
+  NAKON: 'N',
+  SABAI: 'S',
+  SEHNA: 's',
+  WEHHA: 'W',
+} as const
+
+export const VTBD_IAWP_COMPACT_CODE_STYLE = {
+  ENDUU: 'NORMAL',
+  NAKON: 'NORMAL',
+  SABAI: 'NORMAL',
+  SEHNA: 'UNDERLINE',
+  WEHHA: 'NORMAL',
+} as const
+
 export const VTBD_SHORTCUT_REDUCTION_MINUTES = {
   ENDUU_TO_OPERA: 4,
   SABAI_TO_NODEG: 7,
