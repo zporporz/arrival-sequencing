@@ -1,0 +1,69 @@
+/* Keep the airport picker self-contained so L/R controls never intrude into runway config. */
+.aman-multi-runway-strip {
+  grid-template-columns: 370px minmax(680px, 1.85fr) minmax(260px, .75fr) auto;
+}
+
+.aman-airport-tabs.has-runtime-selector {
+  min-width: 370px;
+  overflow: hidden;
+}
+
+.aman-airport-scope-picker,
+.aman-airport-checks,
+.aman-airport-checks .aman-airport-choice {
+  min-width: 0;
+}
+
+.aman-airport-checks {
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.aman-airport-checks .aman-airport-choice {
+  width: 100%;
+  grid-template-columns: 16px minmax(0, 1fr) 62px;
+}
+
+.aman-airport-choice-code {
+  min-width: 0;
+}
+
+.aman-airport-side-controls {
+  width: 62px;
+  justify-content: flex-end;
+  flex: 0 0 62px;
+}
+
+@media (max-width: 1450px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 350px minmax(560px, 1.6fr) minmax(220px, .7fr) auto;
+  }
+
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 350px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 350px 1fr;
+  }
+
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 350px;
+  }
+}
+
+@media (max-width: 700px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 0;
+  }
+
+  .aman-airport-checks {
+    grid-template-columns: 1fr;
+  }
+}
