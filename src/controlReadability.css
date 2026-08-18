@@ -118,6 +118,15 @@
   border-color: #3a5878;
   font-size: 15px;
   text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.aman-runway-card input::-webkit-inner-spin-button,
+.aman-runway-card input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .aman-runway-card input:focus,
