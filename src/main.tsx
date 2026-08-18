@@ -7,18 +7,22 @@ import './timelineWindow.css'
 import './timelineAxisRuntime.css'
 import './flightStatus.css'
 import './multiRunway.css'
+import './controlReadability.css'
 import AuthGate from './AuthGate'
 import App from './App'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
+import { installAirportScopeRuntime } from './airportScopeRuntime'
 
 function AppWithRuntime() {
   useEffect(() => {
     const removeTimelineRuntime = installTimelineAxisRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
+    const removeAirportScopeRuntime = installAirportScopeRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
+      removeAirportScopeRuntime()
     }
   }, [])
 
