@@ -62,11 +62,7 @@ function compactStaffPosition(value: string) {
 
   if (words.length === 1 && words[0].length <= 8) return `TH-${words[0]}`
 
-  const acronym = words
-    .map((word) => word[0])
-    .join('')
-    .slice(0, 6)
-
+  const acronym = words.map((word) => word[0]).join('').slice(0, 6)
   return acronym ? `TH-${acronym}` : 'TH STAFF'
 }
 
@@ -82,11 +78,9 @@ function controllerIdentity(user: AuthUser) {
 
   const apiCodes = [...new Set((user.staffPositionCodes ?? []).map((code) => code.trim().toUpperCase()).filter(Boolean))]
   const compactPositions = apiCodes.length ? apiCodes : positions.map(compactStaffPosition)
-
-  // Show every compact role in the topbar. Full position names remain in the account menu.
   const positionLabel = compactPositions.length ? compactPositions.join(' / ') : 'TH STAFF'
-
   const positionDetail = positions.length ? positions.join(' · ') : 'Thailand Division Staff'
+
   return {
     displayName: `${positionLabel} · ${user.vid}`,
     tooltip: `${user.name} · VID ${user.vid} · ${positionDetail}`,
@@ -150,7 +144,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       <main className="auth-page">
         <section className="auth-card auth-loading-card">
           <div className="auth-spinner" />
-          <strong>Checking IVAO session…</strong>
+          <strong>Checking IVAO session...</strong>
         </section>
       </main>
     )
@@ -161,11 +155,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       <main className="auth-page">
         <section className="auth-card">
           <div className="auth-eyebrow">THAILAND APPROACH TOOLS</div>
-          <h1>Bangkok FIR Arrival Sequencing</h1>
-          <p className="auth-copy">Sign in with your IVAO account to open the shared arrival sequencing workspace.</p>
+          <h1>Arrival Sequencing</h1>
+          <p className="auth-copy">Sign in with IVAO to continue to the new frontend baseline.</p>
           {error && <div className="auth-error">{error}</div>}
           <a className="auth-login-button" href="/api/auth/login">Sign in with IVAO</a>
-          <small>Thailand Division staff accounts are automatically granted staff access.</small>
+          <small>The existing authentication and staff-role API integration is preserved.</small>
         </section>
       </main>
     )
