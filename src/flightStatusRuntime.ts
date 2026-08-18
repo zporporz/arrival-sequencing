@@ -65,8 +65,7 @@ function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function headingDifference(left: number, right: number) {
-  const diff = Math.abs(((left - right + 540) % 360) - 180)
-  return diff
+  return Math.abs(((left - right + 540) % 360) - 180)
 }
 
 function rowAirport(row: HTMLElement): 'VTBD' | 'VTBS' | null {
@@ -110,11 +109,6 @@ function isLiveTenNmFinal(row: HTMLElement) {
 }
 
 function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
-  // Explicit controller RETURN TO AUTO resets the row to the system-managed
-  // Unstable state (blue). Keep that state until the controller commits a new
-  // manual target/runway action on the row.
-  if (row.dataset.forceAutoUnstable === 'true') return 'UNSTABLE'
-
   const cells = row.children
   const tldtHm = cells.item(0)?.textContent?.trim() || ''
   const ttoHm = cells.item(4)?.textContent?.trim() || ''
@@ -122,7 +116,11 @@ function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   const delayMinutes = Number.parseFloat(delayText)
   const nominalMinutes = forwardMinutes(ttoHm, tldtHm)
-  const manualStable = row.classList.contains('is-stable')
+
+  // Flight lifecycle and controller ownership are intentionally independent.
+  // Dragging/assigning a runway marks the target as MANUAL in App, but it does not
+  // promote the aircraft to Stable. Likewise RETURN TO AUTO does not force Unstable.
+  // The colour/status below is always driven by predicted flight progress.
 
   // MAESTRO reference: Frozen is 4 minutes before landing / about 10 NM Final.
   // The live-position branch supplements the prediction so a real aircraft on
@@ -130,12 +128,13 @@ function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
   if (isLiveTenNmFinal(row)) return 'FROZEN'
 
   if (!Number.isFinite(offsetPx) || !Number.isFinite(delayMinutes) || nominalMinutes == null) {
-    return manualStable ? 'STABLE' : 'UNSTABLE'
+    return 'UNSTABLE'
   }
 
   // The row is positioned from TLDT with 10 px/minute. Reconstructing TLDT from the
-  // timeline position preserves roughly six-second precision, then use the displayed
-  // Delay Required to recover the current predicted IAWP time.
+  // timeline position preserves roughly six-second precision, then use displayed
+  // Delay Required to recover the current predicted IAWP time. This still works for
+  // a manual target because Delay Required keeps updating against the live prediction.
   const targetTldtMs = now.getTime() - (offsetPx / PX_PER_MINUTE) * 60_000
   const targetTtoMs = targetTldtMs - nominalMinutes * 60_000
   const predictedIawpMs = targetTtoMs - delayMinutes * 60_000
@@ -146,7 +145,7 @@ function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
 
   if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
   if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
-  if (manualStable || minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
+  if (minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
   return 'UNSTABLE'
 }
 
@@ -162,6 +161,21 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
   )
   element.classList.add(className)
   element.dataset.flightStatus = status
+}
+
+function updateManualLabels() {
+  document.querySelectorAll<HTMLElement>('.aman-flight-row, .aman-inbound-row').forEach((element) => {
+    const title = element.getAttribute('title')
+    if (!title) return
+    const next = title
+      .replaceAll('ATC manual / Stable', 'ATC MANUAL TARGET')
+      .replaceAll('ATC MANUAL / STABLE', 'ATC MANUAL TARGET')
+    if (next !== title) element.setAttribute('title', next)
+  })
+
+  document.querySelectorAll<HTMLElement>('.aman-status-list dt').forEach((label) => {
+    if (label.textContent?.trim() === 'Manual stable') label.textContent = 'Manual target'
+  })
 }
 
 function refreshFlightStatuses() {
@@ -183,6 +197,8 @@ function refreshFlightStatuses() {
     const status = byCallsign.get(callsign) || 'UNSTABLE'
     applyStatusClass(callsignElement, status)
   })
+
+  updateManualLabels()
 }
 
 function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
@@ -226,41 +242,7 @@ function updateInteractionHint() {
   if (hint) hint.textContent = 'DRAG = SET TARGET · DBL CLICK = RETURN TO AUTO'
 }
 
-function rowFromEventTarget(target: EventTarget | null) {
-  return target instanceof Element ? target.closest<HTMLElement>('.aman-flight-row') : null
-}
-
 export function installFlightStatusRuntime() {
-  const onDoubleClick = (event: MouseEvent) => {
-    const row = rowFromEventTarget(event.target)
-    if (!row) return
-    if (event.target instanceof Element && event.target.closest('select')) return
-    row.dataset.forceAutoUnstable = 'true'
-    applyStatusClass(row, 'UNSTABLE')
-    window.setTimeout(refreshFlightStatuses, 0)
-  }
-
-  const onPointerDown = (event: PointerEvent) => {
-    const row = rowFromEventTarget(event.target)
-    if (!row) return
-    if (event.target instanceof Element && event.target.closest('select')) return
-    // A new controller drag/action commits the flight again, so release the
-    // forced auto-Unstable reset marker before React marks it Stable.
-    delete row.dataset.forceAutoUnstable
-  }
-
-  const onChange = (event: Event) => {
-    const row = rowFromEventTarget(event.target)
-    if (!row) return
-    if (event.target instanceof Element && event.target.closest('.runway-assignment select')) {
-      delete row.dataset.forceAutoUnstable
-    }
-  }
-
-  document.addEventListener('dblclick', onDoubleClick)
-  document.addEventListener('pointerdown', onPointerDown)
-  document.addEventListener('change', onChange)
-
   updateInteractionHint()
   refreshFlightStatuses()
   void refreshLiveFinalData()
@@ -274,8 +256,5 @@ export function installFlightStatusRuntime() {
   return () => {
     window.clearInterval(statusTimer)
     window.clearInterval(liveFinalTimer)
-    document.removeEventListener('dblclick', onDoubleClick)
-    document.removeEventListener('pointerdown', onPointerDown)
-    document.removeEventListener('change', onChange)
   }
 }
