@@ -248,6 +248,7 @@ export async function onRequestGet(context) {
         const domestic = await legacyDomesticTiming(pilot, detailed, context.env);
         const aircraftSummary = detailed?.aircraft || fp?.aircraft || {};
         const filedEetSeconds = finiteNumber(detailed?.eet, fp?.eet);
+        const flightRules = cleanUpper(detailed?.rules) || cleanUpper(fp?.rules);
 
         return {
           sessionId: String(pilot.id ?? ''),
@@ -258,6 +259,7 @@ export async function onRequestGet(context) {
           departure: cleanUpper(detailed?.departureId) || cleanUpper(fp?.departureId),
           arrival: airport,
           route: cleanUpper(detailed?.route) || cleanUpper(fp?.route),
+          flightRules,
           state: track.state ? String(track.state).trim() : null,
           onGround: typeof track.onGround === 'boolean' ? track.onGround : null,
           trackTimestamp: track.timestamp || null,
@@ -288,7 +290,10 @@ export async function onRequestGet(context) {
     return json({
       airport,
       fetchedAt: new Date().toISOString(),
-      flights: flights.filter((flight) => flight.callsign).sort((a, b) => a.callsign.localeCompare(b.callsign)),
+      flights: flights
+        .filter((flight) => flight.callsign)
+        .filter((flight) => !['V', 'VFR'].includes(flight.flightRules || ''))
+        .sort((a, b) => a.callsign.localeCompare(b.callsign)),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
