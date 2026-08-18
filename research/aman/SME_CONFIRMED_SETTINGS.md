@@ -43,3 +43,43 @@ Still to confirm before hard-coding the exact calculation scope:
 - whether Frozen/landed/holding aircraft are included or excluded.
 
 Until those scope rules are confirmed, the semantic definition above is authoritative but the exact population/filter used in the average remains configurable/TODO.
+
+---
+
+## TMA — Aircraft currently inside the TMA
+
+**Confirmed meaning:** the `TMA` counter shows **how many aircraft are currently inside the TMA** for the relevant MAESTRO view/context.
+
+### Implementation note
+
+Treat this as a live calculated counter, not a manually entered setting.
+
+Still to confirm:
+
+- the exact TMA volume/filter represented by each controller/view;
+- whether the count includes all controlled arrivals or only flights participating in the active AMAN sequence;
+- how boundary transitions are handled at the exact entry/exit instant.
+
+---
+
+## HLD — Aircraft currently holding
+
+**Confirmed meaning:** the `HLD` counter shows **how many aircraft are currently in holding** for the relevant MAESTRO view/context.
+
+### Implementation note
+
+Treat this as a live calculated counter. It should be derived from operational flight/holding state rather than entered manually.
+
+Still to confirm:
+
+- whether only published holding fixes associated with the active arrival flow are counted;
+- whether multiple holds/holding areas are aggregated into one total;
+- how an aircraft is classified during hold entry/exit transitions.
+
+---
+
+## TOT — Meaning not yet recalled/confirmed
+
+`TOT` is visible in the real Thailand MAESTRO HMI, but its exact meaning has **not yet been re-confirmed by the SME**.
+
+Do not infer or hard-code a meaning from generic ATM terminology. Keep `TOT` marked **UNKNOWN** until confirmed.
