@@ -17,7 +17,7 @@ For the rebuild:
 
 - `departureTime` is the filed departure-time / EOBT-equivalent timing input;
 - `eet` provides the filed elapsed-time input;
-- `actualDepartureTime`, when populated and trustworthy, should be preferred over reconstructing actual departure from track history;
+- `actualDepartureTime`, when populated and trustworthy, is available as an actual-departure timing source;
 - live track / route-position ETA remains the preferred tactical estimate once airborne.
 
 ## Aircraft / wake data
@@ -32,19 +32,43 @@ For the rebuild:
 
 Therefore no separate external wake-category provider is required for the MVP. Use `aircraft.wakeTurbulence` directly for wake/separation classification, with aircraft ICAO type available from `aircraft.icaoCode` / `aircraftId`.
 
-## API conclusion
+## Implemented project API contract
 
-For the Approach AMAN MVP, the existing IVAO Tracker API is sufficient for:
+`/api/sequence/ivao-traffic` now enriches inbound traffic with the detailed IVAO flight plan and exposes the AMAN inputs needed by the clean core:
 
-- callsign / aircraft type;
-- origin / destination;
-- route;
-- filed departure time;
-- filed EET;
-- actual departure time;
-- wake turbulence category;
-- airport coordinates;
-- live track/position data through Tracker endpoints;
-- track history when fallback takeoff detection is needed.
+- `filedDepartureTimeSeconds`
+- `actualDepartureTimeSeconds`
+- `filedEetSeconds`
+- `wakeTurbulence`
+- `aircraft`
+- `route`
+- `onGround`
+- `trackTimestamp`
+- latitude / longitude / altitude / groundspeed / heading
+- flight-plan ID and revision
+- legacy tracked-takeoff fields retained for fallback compatibility
 
-The remaining work is implementation: expose these fields through the project's `/api/sequence/ivao-traffic` response and consume them in the sequencing engine. No additional external API is required before engine work starts.
+Detailed-flight-plan calls are cached and concurrency-limited so opening a busy arrival airport does not fire an unbounded request burst.
+
+## ETA engine implementation
+
+`src/core/arrivalEta.ts` implements the progressive IVAO estimate priority:
+
+1. live route/track ETA to IAWP;
+2. `actualDepartureTime + EET - nominal STAR time`;
+3. tracked takeoff + EET - nominal STAR time;
+4. filed `departureTime + EET - nominal STAR time` as low-confidence provisional timing.
+
+## Sequencing engine implementation
+
+`src/core/arrivalSequencing.ts` provides the first clean AMAN sequencing core:
+
+- natural landing time from predicted IAWP + nominal STAR time;
+- full timestamp precision for ordering;
+- automatic Unstable sequencing by configured runway separation;
+- optional pairwise-separation hook for future ATR/A380/wake rules;
+- TLDT/TTO calculation;
+- Delay Required calculation and action classification;
+- signed average Delay Required (`ΔT`).
+
+No additional external API is required before continuing the Approach AMAN engine/UI build.
