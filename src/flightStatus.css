@@ -19,7 +19,3 @@
   color: #91a4ff;
   text-shadow: 0 0 6px rgba(145, 164, 255, .22);
 }
-
-.aman-flight-row.status-stable.is-stable strong {
-  color: #f2a64a;
-}
