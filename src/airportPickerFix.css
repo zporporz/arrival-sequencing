@@ -1,10 +1,13 @@
-/* Keep the airport picker self-contained and visually compact. */
+/* Keep the airport picker self-contained. Airport choices are stacked vertically so
+   checkbox + ICAO + L/R controls never compete for horizontal space with runway config. */
 .aman-multi-runway-strip {
-  grid-template-columns: 360px minmax(680px, 1.85fr) minmax(260px, .75fr) auto;
+  grid-template-columns: 280px minmax(680px, 1.85fr) minmax(260px, .75fr) auto;
+  min-height: 126px;
 }
 
 .aman-airport-tabs.has-runtime-selector {
-  min-width: 360px;
+  min-width: 280px;
+  padding: 10px 12px;
   overflow: hidden;
 }
 
@@ -16,38 +19,44 @@
 
 .aman-airport-checks {
   width: 100%;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  grid-template-columns: 1fr;
+  gap: 6px;
 }
 
 .aman-airport-checks .aman-airport-choice {
   width: 100%;
-  min-height: 44px;
-  grid-template-columns: 16px minmax(52px, 1fr) auto;
+  min-height: 38px;
+  grid-template-columns: 16px minmax(64px, 1fr) auto;
   gap: 8px;
-  padding: 5px 7px 5px 9px;
+  padding: 4px 7px 4px 9px;
+  overflow: hidden;
 }
 
 .aman-airport-choice-code {
   min-width: 0;
   font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .aman-airport-side-controls {
+  display: flex;
   width: auto;
+  min-width: 0;
   justify-content: flex-end;
   flex: 0 0 auto;
-  gap: 2px;
+  gap: 3px;
 }
 
 .aman-airport-side-button {
-  width: 32px;
-  height: 30px;
+  width: 34px;
+  height: 28px;
   font-size: 10px;
+  flex: 0 0 34px;
 }
 
-/* A disabled airport does not need ghost side controls. They only add visual noise. */
+/* A disabled airport does not need ghost side controls. */
 .aman-airport-choice:not(:has(input:checked)) .aman-airport-side-controls {
   visibility: hidden;
   pointer-events: none;
@@ -59,21 +68,21 @@
 
 @media (max-width: 1450px) {
   .aman-multi-runway-strip {
-    grid-template-columns: 340px minmax(560px, 1.6fr) minmax(220px, .7fr) auto;
+    grid-template-columns: 260px minmax(560px, 1.6fr) minmax(220px, .7fr) auto;
   }
 
   .aman-airport-tabs.has-runtime-selector {
-    min-width: 340px;
+    min-width: 260px;
   }
 }
 
 @media (max-width: 1100px) {
   .aman-multi-runway-strip {
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: 260px 1fr;
   }
 
   .aman-airport-tabs.has-runtime-selector {
-    min-width: 340px;
+    min-width: 260px;
   }
 }
 
