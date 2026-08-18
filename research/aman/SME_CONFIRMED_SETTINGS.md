@@ -9,19 +9,28 @@ This file records Thailand-specific MAESTRO meanings confirmed for the project. 
 
 ## ΔT — Average Delay
 
-**Confirmed meaning:** `ΔT` is the **average delay of the aircraft in the arrival sequence / STAR flow**.
+**Confirmed meaning:** `ΔT` is the arithmetic average of the **Delay Required values shown in the last delay column for the aircraft belonging to that runway/sequence box**.
 
-Conceptually:
+Conceptually, for one runway:
 
-`ΔT = sum of aircraft Delay Required values / number of aircraft included`
+`ΔT(runway) = sum(displayed Delay Required values for aircraft assigned to runway) / number of those aircraft`
 
-It is an aggregate/summary indicator derived from the per-aircraft Delay Required values, not another target time.
+The displayed delay values are used as signed values, so Expedite/negative values reduce the average and positive delay increases it. This matches the real HMI, where the runway header box has its own `ΔT` value and the sequence rows show positive/negative delay values.
 
-Still to refine later:
+Example:
 
-- exact population/filter used in the average;
-- whether negative/Expedite values are included as signed values;
-- whether scope is airport/runway/STAR/IAWP/view-specific.
+- Aircraft A delay = 0 min
+- Aircraft B delay = -2 min
+- Aircraft C delay = -1 min
+- Aircraft D delay = +3 min
+
+Then:
+
+`ΔT = (0 - 2 - 1 + 3) / 4 = 0 min`
+
+If all aircraft in that runway sequence have zero delay, `ΔT = 0`.
+
+Implementation rule: derive `ΔT` directly from the same per-aircraft Delay Required values that are displayed to ATC. Do not maintain a separate manually entered ΔT value.
 
 ---
 
