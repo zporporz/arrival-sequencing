@@ -66,29 +66,24 @@ export function installAirportScopeRuntime() {
     })
   }
 
-  const setDisplaySide = (airport: string, side: DisplaySide) => {
-    displaySides[airport] = side
-
-    const opposite: DisplaySide = side === 'LEFT' ? 'RIGHT' : 'LEFT'
-    for (const other of selectedValues()) {
-      if (other !== airport && displaySides[other] === side) displaySides[other] = opposite
-    }
-
-    saveDisplaySides()
-    syncSideButtons()
-    applyTimelineSides()
-  }
-
   const applyTimelineSides = () => {
     const selected = selectedValues()
     const selectedSet = new Set(selected)
 
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-      row.classList.remove('display-left', 'display-right')
       const title = row.getAttribute('title') || ''
       const airport = selected.find((value) => title.includes(`${value} RWY`))
-      if (!airport || !selectedSet.has(airport)) return
-      row.classList.add(displaySides[airport] === 'LEFT' ? 'display-left' : 'display-right')
+
+      // Do not use runtime-added classes for side placement. React rewrites className on
+      // every drag frame, which made LEFT rows briefly fall back to the default RIGHT side.
+      // A data attribute is not owned by React here, so it remains stable while TLDT updates.
+      if (!airport || !selectedSet.has(airport)) {
+        delete row.dataset.displaySide
+        return
+      }
+
+      const side = displaySides[airport]
+      if (row.dataset.displaySide !== side) row.dataset.displaySide = side
     })
 
     const stage = document.querySelector<HTMLElement>('.aman-timeline-stage')
@@ -108,6 +103,19 @@ export function installAirportScopeRuntime() {
     const rightNode = guide.querySelector<HTMLElement>('.right')
     if (leftNode) leftNode.textContent = left.length ? `LEFT · ${left.join(' / ')}` : 'LEFT · —'
     if (rightNode) rightNode.textContent = right.length ? `RIGHT · ${right.join(' / ')}` : 'RIGHT · —'
+  }
+
+  const setDisplaySide = (airport: string, side: DisplaySide) => {
+    displaySides[airport] = side
+
+    const opposite: DisplaySide = side === 'LEFT' ? 'RIGHT' : 'LEFT'
+    for (const other of selectedValues()) {
+      if (other !== airport && displaySides[other] === side) displaySides[other] = opposite
+    }
+
+    saveDisplaySides()
+    syncSideButtons()
+    applyTimelineSides()
   }
 
   const syncUnderlyingScope = (changedInput?: HTMLInputElement) => {
@@ -151,6 +159,7 @@ export function installAirportScopeRuntime() {
     host?.classList.remove('has-runtime-selector')
     document.querySelector('.aman-airport-side-guide')?.remove()
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+      delete row.dataset.displaySide
       row.classList.remove('display-left', 'display-right')
     })
     wrapper = null
@@ -242,7 +251,6 @@ export function installAirportScopeRuntime() {
 
     if (!wrapper || syncing) return
 
-    // Read active state only from the original direct-child React buttons.
     const active = scopeButtons(nextHost).find((button) => button.classList.contains('is-active'))
     const activeValue = active ? buttonValue(active) : ''
     const multiActive = activeValue === 'BOTH'
