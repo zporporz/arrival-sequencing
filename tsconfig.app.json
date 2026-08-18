@@ -3,6 +3,7 @@
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -23,6 +24,7 @@
     "src/browserIdentity.ts",
     "src/core/**/*.ts",
     "src/lib/**/*.ts",
-    "src/types.ts"
+    "src/types.ts",
+    "src/vite-env.d.ts"
   ]
 }
