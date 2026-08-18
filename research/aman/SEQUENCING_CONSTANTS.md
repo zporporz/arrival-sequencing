@@ -10,10 +10,17 @@
 
 ### Normal TLDT gap
 
-- Operational gap setting: **5 NM = 2.8 min**.
-- Reference speed supplied with the setting: **140 kt**.
+- Normal gap setting: **5 NM**.
+- Reference final speed: **140 kt**.
+- Time-equivalent: **2.14 min** (about 2 min 9 sec).
 
-Important: this project stores **2.8 min as the operational AMAN gap setting supplied by the SME**. It should not be silently replaced by a pure distance/speed conversion. A simple 5 NM / 140 kt calculation would be about 2.14 min, so the 2.8 min value may include an operational/configuration assumption that is not yet documented.
+Formula:
+
+`time_min = distance_nm / speed_kt × 60`
+
+`5 / 140 × 60 = 2.142857... min`
+
+For the temporary AMAN model, use **2.14 min** as the 5 NM TLDT gap time-equivalent at 140 kt.
 
 ### ATR separation
 
@@ -24,15 +31,15 @@ Important: this project stores **2.8 min as the operational AMAN gap setting sup
 ### A380 separation
 
 - Distance setting: **7 NM**.
-- At the same 140 kt reference speed, pure time conversion is exactly **3.0 min**.
-
-Formula:
-
-`time_min = distance_nm / speed_kt × 60`
+- At the same 140 kt reference speed, the time-equivalent is exactly **3.0 min**.
 
 `7 / 140 × 60 = 3.0 min`
 
-Until a Thailand MAESTRO-specific time value is supplied, use **3.0 min** as the temporary A380 time-equivalent when the implementation needs a time value derived from the 7 NM rule.
+Therefore the current temporary values are:
+
+- 5 NM → **2.14 min** @ 140 kt
+- 7 NM → **3.00 min** @ 140 kt
+- 10 NM → **4.29 min** @ 140 kt (distance conversion only; ATR operational value remains 4 min)
 
 ---
 
