@@ -3,30 +3,7 @@ export type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 const STABLE_BEFORE_IAWP_MINUTES = 15
 const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
 const FROZEN_BEFORE_LANDING_MINUTES = 4
-
-function parseHmNearNow(value: string, now: Date) {
-  const match = value.match(/^(\d{2}):(\d{2})$/)
-  if (!match) return null
-
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-
-  const base = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-    hour,
-    minute,
-    0,
-    0,
-  )
-
-  const candidates = [base - 86_400_000, base, base + 86_400_000]
-  return candidates.reduce((best, candidate) =>
-    Math.abs(candidate - now.getTime()) < Math.abs(best - now.getTime()) ? candidate : best,
-  candidates[0])
-}
+const PX_PER_MINUTE = 10
 
 function forwardMinutes(fromHm: string, toHm: string) {
   const from = fromHm.match(/^(\d{2}):(\d{2})$/)
@@ -42,25 +19,29 @@ function forwardMinutes(fromHm: string, toHm: string) {
 }
 
 function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
-  const title = row.getAttribute('title') || ''
-  const predictedMatch = title.match(/Predicted IAWP\s+(\d{2}:\d{2})Z/i)
   const cells = row.children
-  const tldt = cells.item(0)?.textContent?.trim() || ''
-  const tto = cells.item(4)?.textContent?.trim() || ''
-
-  const predictedIawpMs = predictedMatch ? parseHmNearNow(predictedMatch[1], now) : null
-  const nominalMinutes = forwardMinutes(tto, tldt)
+  const tldtHm = cells.item(0)?.textContent?.trim() || ''
+  const ttoHm = cells.item(4)?.textContent?.trim() || ''
+  const delayText = cells.item(5)?.textContent?.trim() || ''
+  const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
+  const delayMinutes = Number.parseFloat(delayText)
+  const nominalMinutes = forwardMinutes(ttoHm, tldtHm)
   const manualStable = row.classList.contains('is-stable')
 
-  if (predictedIawpMs == null) return manualStable ? 'STABLE' : 'UNSTABLE'
+  if (!Number.isFinite(offsetPx) || !Number.isFinite(delayMinutes) || nominalMinutes == null) {
+    return manualStable ? 'STABLE' : 'UNSTABLE'
+  }
+
+  // The row is positioned from TLDT with 10 px/minute. Reconstructing TLDT from the
+  // timeline position preserves roughly six-second precision, then use the displayed
+  // Delay Required to recover the current predicted IAWP time.
+  const targetTldtMs = now.getTime() - (offsetPx / PX_PER_MINUTE) * 60_000
+  const targetTtoMs = targetTldtMs - nominalMinutes * 60_000
+  const predictedIawpMs = targetTtoMs - delayMinutes * 60_000
+  const predictedLandingMs = predictedIawpMs + nominalMinutes * 60_000
 
   const minutesToIawp = (predictedIawpMs - now.getTime()) / 60_000
-  const predictedLandingMs = nominalMinutes == null
-    ? null
-    : predictedIawpMs + nominalMinutes * 60_000
-  const minutesToLanding = predictedLandingMs == null
-    ? Number.POSITIVE_INFINITY
-    : (predictedLandingMs - now.getTime()) / 60_000
+  const minutesToLanding = (predictedLandingMs - now.getTime()) / 60_000
 
   if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
   if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
