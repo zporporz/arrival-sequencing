@@ -1,0 +1,218 @@
+/* Keep the operational controls in one compact row so the timeline keeps its height. */
+.aman-multi-runway-strip {
+  grid-template-columns: 230px minmax(0, 1fr) 205px auto;
+  min-height: 96px;
+  height: 96px;
+  max-height: 96px;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.aman-airport-tabs.has-runtime-selector {
+  min-width: 230px;
+  width: 230px;
+  padding: 7px 8px;
+  overflow: hidden;
+}
+
+.aman-airport-scope-picker {
+  gap: 5px;
+}
+
+.aman-airport-picker-heading > span {
+  font-size: 9px;
+}
+
+.aman-airport-picker-heading > small {
+  font-size: 7px;
+}
+
+.aman-airport-checks {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.aman-airport-checks .aman-airport-choice {
+  min-height: 31px;
+  height: 31px;
+  grid-template-columns: 14px minmax(44px, 1fr) auto;
+  gap: 6px;
+  padding: 3px 5px 3px 7px;
+}
+
+.aman-airport-checks input {
+  width: 13px;
+  height: 13px;
+}
+
+.aman-airport-choice-code {
+  font-size: 10px;
+}
+
+.aman-airport-side-button {
+  width: 27px;
+  height: 24px;
+  font-size: 9px;
+}
+
+.aman-runway-config-control {
+  min-width: 0;
+  height: 96px;
+  gap: 10px;
+  padding: 6px 8px;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.aman-runway-config-block {
+  flex: 0 0 auto;
+  min-width: max-content;
+  gap: 7px;
+  padding-right: 9px;
+}
+
+.aman-profile-select {
+  min-width: 160px;
+  width: 160px;
+  gap: 4px;
+}
+
+.aman-profile-select > span {
+  font-size: 9px;
+}
+
+.aman-profile-select select {
+  width: 160px;
+  max-width: 160px;
+  height: 32px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.aman-runway-cards {
+  gap: 5px;
+}
+
+.aman-runway-card {
+  min-width: 116px;
+  width: 116px;
+  grid-template-columns: 36px 66px;
+  grid-template-rows: 28px 31px;
+  gap: 4px 5px;
+  padding: 6px;
+}
+
+.aman-runway-card > b {
+  font-size: 14px;
+}
+
+.aman-runway-card > select {
+  width: 66px;
+  height: 28px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.aman-runway-card > label {
+  gap: 3px;
+  padding-top: 9px;
+}
+
+.aman-runway-card > label::before {
+  top: -1px;
+  font-size: 7px;
+  letter-spacing: .05em;
+}
+
+.aman-runway-card input {
+  width: 48px;
+  height: 25px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.aman-runway-card label span {
+  padding-bottom: 6px;
+  font-size: 8px;
+}
+
+.aman-multi-runway-strip .aman-config-label {
+  min-width: 205px;
+  width: 205px;
+  padding: 9px 10px;
+  overflow: hidden;
+}
+
+.aman-multi-runway-strip .aman-config-label span {
+  font-size: 9px;
+}
+
+.aman-multi-runway-strip .aman-config-label strong {
+  max-width: 185px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.aman-multi-runway-strip .aman-counters > div {
+  min-width: 58px;
+}
+
+.aman-multi-runway-strip .aman-counters span {
+  font-size: 8px;
+}
+
+.aman-multi-runway-strip .aman-counters strong {
+  font-size: 12px;
+}
+
+.aman-workspace,
+.scope-both .aman-workspace {
+  height: calc(100vh - 208px);
+}
+
+@media (max-width: 1450px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 220px minmax(0, 1fr) 180px auto;
+  }
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 220px;
+    width: 220px;
+  }
+  .aman-multi-runway-strip .aman-config-label {
+    min-width: 180px;
+    width: 180px;
+  }
+  .aman-multi-runway-strip .aman-config-label strong {
+    max-width: 160px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .aman-multi-runway-strip {
+    grid-template-columns: 210px minmax(0, 1fr);
+    height: 96px;
+    min-height: 96px;
+    max-height: 96px;
+  }
+  .aman-airport-tabs.has-runtime-selector {
+    min-width: 210px;
+    width: 210px;
+  }
+  .aman-multi-runway-strip .aman-config-label,
+  .aman-multi-runway-strip .aman-counters {
+    display: none;
+  }
+  .aman-runway-config-control {
+    grid-column: 2;
+    border-right: 0;
+  }
+  .aman-workspace,
+  .scope-both .aman-workspace {
+    height: auto;
+  }
+}
