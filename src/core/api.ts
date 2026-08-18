@@ -1,0 +1,91 @@
+export type WorkspaceAirport = {
+  id: string
+  icao: string
+  name: string
+}
+
+export type WorkspaceRunway = {
+  id: string
+  airport_id: string
+  flow: string
+  label: string
+  timing_status: 'ACTIVE' | 'PENDING' | 'DISABLED'
+}
+
+export type WorkspaceStar = {
+  id: string
+  runway_config_id: string
+  designator: string
+  entry_fix: string | null
+  effective_from: string | null
+  effective_to: string | null
+  active: boolean
+}
+
+export type WorkspacePayload = {
+  airports: WorkspaceAirport[]
+  runwayConfigs: WorkspaceRunway[]
+  starProcedures: WorkspaceStar[]
+}
+
+export type IvaoTrafficPayload<TFlight = Record<string, unknown>> = {
+  airport: string
+  fetchedAt: string
+  flights?: TFlight[]
+  inbound?: TFlight[]
+  departures?: TFlight[]
+  error?: string
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const payload = await response.json() as T & { error?: string }
+  if (!response.ok) {
+    const message = typeof payload === 'object' && payload && 'error' in payload && payload.error
+      ? String(payload.error)
+      : `API returned ${response.status}`
+    throw new Error(message)
+  }
+  return payload
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  return readJson<T>(response)
+}
+
+export async function apiPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  return readJson<T>(response)
+}
+
+export function readWorkspaces() {
+  return apiGet<Partial<WorkspacePayload>>('/api/workspaces').then((payload) => ({
+    airports: payload.airports ?? [],
+    runwayConfigs: payload.runwayConfigs ?? [],
+    starProcedures: payload.starProcedures ?? [],
+  }))
+}
+
+export function readIvaoTraffic<TFlight = Record<string, unknown>>(airport: string, mode?: 'summary') {
+  const params = new URLSearchParams({ airport: airport.trim().toUpperCase() })
+  if (mode) params.set('mode', mode)
+  return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`)
+}
+
+export function sequenceRequest<T>(path: string, body: Record<string, unknown>) {
+  return apiPost<T>(path, body)
+}
