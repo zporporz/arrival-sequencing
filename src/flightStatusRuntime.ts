@@ -7,18 +7,19 @@ const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
 const FROZEN_BEFORE_LANDING_MINUTES = 4
 const FINAL_TRIGGER_RADIUS_NM = 10
 const FINAL_HEADING_TOLERANCE_DEGREES = 40
+const FINAL_BEARING_TOLERANCE_DEGREES = 35
 const LIVE_FINAL_REFRESH_MS = 30_000
 const PX_PER_MINUTE = 10
 
-// Approximate aerodrome reference points. The 10 NM trigger is deliberately a
-// tactical awareness fallback, not a replacement for the normal 4-min prediction.
+// Approximate aerodrome reference points. The 10 NM trigger is a tactical
+// awareness supplement to the normal 4-minute prediction.
 const AIRPORT_REFERENCE: Record<'VTBD' | 'VTBS', { lat: number; lon: number }> = {
   VTBD: { lat: 13.9126, lon: 100.6068 },
   VTBS: { lat: 13.6811, lon: 100.7473 },
 }
 
-// Approximate inbound runway magnetic courses used only to avoid classifying an
-// aircraft on downwind/base inside the 10 NM airport radius as FINAL.
+// Approximate inbound runway magnetic courses used to build a simple final-course
+// corridor test. This avoids treating a downwind/base aircraft inside 10 NM as final.
 const RUNWAY_FINAL_HEADING: Record<string, number> = {
   'VTBD:21R': 210,
   'VTBD:21L': 210,
@@ -31,6 +32,7 @@ type LiveFinalInfo = {
   airport: 'VTBD' | 'VTBS'
   callsign: string
   distanceNm: number
+  bearingToAirport: number
   state: string
   heading: number | null
   onGround: boolean | null
@@ -55,6 +57,10 @@ function toRadians(value: number) {
   return value * Math.PI / 180
 }
 
+function toDegrees(value: number) {
+  return value * 180 / Math.PI
+}
+
 function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const earthRadiusNm = 3440.065
   const dLat = toRadians(lat2 - lat1)
@@ -62,6 +68,15 @@ function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const a = Math.sin(dLat / 2) ** 2
     + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2
   return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const phi1 = toRadians(lat1)
+  const phi2 = toRadians(lat2)
+  const dLon = toRadians(lon2 - lon1)
+  const y = Math.sin(dLon) * Math.cos(phi2)
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon)
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360
 }
 
 function headingDifference(left: number, right: number) {
@@ -96,13 +111,18 @@ function isLiveTenNmFinal(row: HTMLElement) {
   const info = liveFinalByKey.get(`${airport}:${callsign}`)
   if (!info || info.onGround === true || info.distanceNm > FINAL_TRIGGER_RADIUS_NM) return false
 
-  const stateLooksApproach = info.state === 'approach' || info.state === 'final'
   const expectedHeading = RUNWAY_FINAL_HEADING[`${airport}:${runway}`]
-  const headingLooksFinal = info.heading != null
-    && Number.isFinite(expectedHeading)
-    && headingDifference(info.heading, expectedHeading) <= FINAL_HEADING_TOLERANCE_DEGREES
+  if (!Number.isFinite(expectedHeading)) return false
 
-  const final = stateLooksApproach || headingLooksFinal
+  const stateLooksApproach = info.state === 'approach' || info.state === 'final'
+  const headingLooksFinal = info.heading != null
+    && headingDifference(info.heading, expectedHeading) <= FINAL_HEADING_TOLERANCE_DEGREES
+  const bearingLooksFinal = headingDifference(info.bearingToAirport, expectedHeading) <= FINAL_BEARING_TOLERANCE_DEGREES
+
+  // Require the aircraft to be geographically on the inbound side of the runway
+  // final course. IVAO state can support the decision, but cannot by itself make a
+  // downwind/base aircraft Frozen.
+  const final = bearingLooksFinal && (stateLooksApproach || headingLooksFinal)
   row.dataset.finalDistanceNm = info.distanceNm.toFixed(1)
   row.dataset.finalTenNm = final ? 'true' : 'false'
   return final
@@ -204,10 +224,13 @@ function refreshFlightStatuses() {
 function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
   if (!flight.callsign || !Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return null
   const reference = AIRPORT_REFERENCE[airport]
+  const latitude = flight.latitude as number
+  const longitude = flight.longitude as number
   return {
     airport,
     callsign: flight.callsign.trim().toUpperCase(),
-    distanceNm: distanceNm(reference.lat, reference.lon, flight.latitude as number, flight.longitude as number),
+    distanceNm: distanceNm(reference.lat, reference.lon, latitude, longitude),
+    bearingToAirport: bearingDegrees(latitude, longitude, reference.lat, reference.lon),
     state: String(flight.state || '').trim().toLowerCase(),
     heading: Number.isFinite(flight.heading) ? Number(flight.heading) : null,
     onGround: flight.onGround,
