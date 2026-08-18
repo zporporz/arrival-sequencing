@@ -29,7 +29,13 @@ Still to refine later:
 
 **Confirmed meaning:** `TMA` shows **how many aircraft are currently inside the TMA** for the relevant MAESTRO context.
 
-Treat this as a live calculated counter.
+### Bangkok working boundary for the IVAO rebuild
+
+For the current Approach-only rebuild, use a **50 NM radius from BKK VOR** as the working Bangkok TMA counting boundary.
+
+This gives a practical implementation model using IVAO aircraft latitude/longitude and a BKK VOR reference coordinate. It is a project operational simplification for the counter and is not intended to reproduce every vertical/lateral legal boundary of Bangkok TMA airspace.
+
+Treat `TMA` as a live calculated counter.
 
 ---
 
@@ -41,7 +47,25 @@ Treat this as a live calculated counter.
 
 **Confirmed:** the operational holding point is at the **head of the STAR / feeder-entry point**.
 
-For the rebuild, the default AMAN holding-point model is therefore the STAR head / feeder fix. Procedure-specific exceptions can be added later if supplied.
+### MAESTRO presentation / leave-hold concept
+
+For the controller, the important output is primarily the **red Holding indication** plus an expected/target leave-hold time. If the aircraft must absorb another 5 minutes in hold, the expected leave-hold time is effectively moved 5 minutes later.
+
+Example concept:
+
+- current/previous target leave time = 10:20
+- another 5 min must be absorbed in hold
+- revised expected leave-hold time = 10:25
+
+The real radar/track behaviour is still monitored by ATC; MAESTRO provides the sequencing/time indication rather than physically detecting or commanding the manoeuvre itself.
+
+### IVAO implementation still to decide
+
+IVAO does not directly provide a definitive "ATC has instructed HOLD" state. For the rebuild, the project still needs to choose whether HLD is:
+
+- manually marked by the controller; or
+- inferred from aircraft track behaviour around the holding fix; or
+- a hybrid where manual state is authoritative and track behaviour is advisory.
 
 ---
 
@@ -54,10 +78,10 @@ For the IVAO rebuild, the current working interpretation is the total inbound tr
 Conceptually:
 
 - `TOT` = all inbound traffic in the AMAN population;
-- `TMA` = subset currently inside the TMA;
+- `TMA` = subset currently inside the 50 NM Bangkok working boundary;
 - `HLD` = subset currently holding.
 
-Exact membership boundaries can be refined later for disconnect, landing, diversion, go-around and filtering by view.
+Exact lifecycle details for disconnect, landing, diversion and go-around can be refined later.
 
 ---
 
@@ -71,7 +95,7 @@ The Thailand MAESTRO HMI uses:
 - Orange — Path Stretching
 - Red — Holding
 
-For the current rebuild, the project owner has confirmed the following **working threshold baseline**. These values are intentionally centralised so they can be changed later if a more exact operational table is recalled or supplied.
+For the current rebuild, use the following **working threshold baseline** until a more exact operational table is supplied:
 
 - `< 0 min` → Expedite
 - `0 min` → Nothing
@@ -79,4 +103,28 @@ For the current rebuild, the project owner has confirmed the following **working
 - `3–4 min` → Path Stretching
 - `>= 5 min` → Holding
 
-Do not spread these numeric bands across UI code; reference the central AMAN constants/configuration.
+These values are intentionally centralised so they can be changed later.
+
+---
+
+## Flight stability states — display/awareness role
+
+The Thailand sequence uses the known lifecycle:
+
+`Unstable → Stable → Superstable → Frozen`
+
+For the current rebuild, treat these primarily as **status/awareness indicators for ATC**, not as an automatic assumption that the UI must hard-lock edits at Frozen. The AEROTHAI timing thresholds remain the source for when the status changes.
+
+---
+
+## Multi-runway assignment — operational idea versus rebuild choice
+
+Operationally, multi-runway arrival assignment may consider where the aircraft will park, with aircraft normally assigned to a landing runway that is convenient for the destination gate/parking area.
+
+For the IVAO rebuild, exact real-world gate/runway optimisation is **not required for the first version**. Runway assignment can use a project-defined rule and be refined later.
+
+---
+
+## Scope decision — Approach first
+
+The current rebuild is **Approach AMAN only**. Centre-oriented inbound planning columns such as `NFL`, `ETN`, `CFL`, `RFL`, and `LFUNC` are research for a future phase and are not required for the first Approach implementation.
