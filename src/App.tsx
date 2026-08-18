@@ -8,8 +8,8 @@ import {
   VTBD_IAWP_NOMINAL_MINUTES,
   VTBS_STAR19_NOMINAL_MINUTES,
 } from './core/amanConstants'
-import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
-import { estimateIawpArrival } from './core/arrivalEta'
+import { readIvaoTraffic, readRouteGeometry, type IvaoArrivalTrafficFlight } from './core/api'
+import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
   autoSequenceUnstableArrivals,
   averageDelayMinutes,
@@ -38,6 +38,7 @@ const ENTRY_FIXES: Record<AirportCode, readonly string[]> = {
 }
 
 const PX_PER_MINUTE = 22
+const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function formatUtc(date: Date) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}:${String(date.getUTCSeconds()).padStart(2, '0')}Z`
@@ -92,6 +93,28 @@ function timelineTicks(now: Date) {
   })
 }
 
+function routeKey(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
+  if (!flight.departure || !flight.route) return null
+  return `${flight.departure}|${airport}|${flight.route}`
+}
+
+function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
+  const key = routeKey(flight, airport)
+  if (!key || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
+
+  const existing = routeGeometryCache.get(key)
+  if (existing) return existing
+
+  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route)
+    .catch(() => {
+      routeGeometryCache.delete(key)
+      return null
+    })
+
+  routeGeometryCache.set(key, request)
+  return request
+}
+
 export default function App() {
   const user = useAuthUser()
   const [now, setNow] = useState(() => new Date())
@@ -105,6 +128,10 @@ export default function App() {
 
   const ticks = useMemo(() => timelineTicks(now), [now])
   const averageDelay = useMemo(() => averageDelayMinutes(sequence), [sequence])
+  const liveRouteCount = useMemo(
+    () => inbound.filter((item) => item.source === 'LIVE_ROUTE').length,
+    [inbound],
+  )
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000)
@@ -122,63 +149,73 @@ export default function App() {
       try {
         const payload = await readIvaoTraffic(airport)
         const flights = payload.flights ?? []
-        const previews: InboundPreview[] = []
-        const predictions: AmanArrivalPrediction[] = []
 
-        for (const flight of flights) {
+        const resolved = await Promise.all(flights.map(async (flight) => {
           const match = findAipIawp(airport, flight.route, [...ENTRY_FIXES[airport]])
           if (!match) {
-            previews.push({
-              flight,
-              refFix: null,
-              predictedIawpAt: null,
-              source: 'UNRESOLVED',
-              reason: 'IAWP not resolved from filed route',
-            })
-            continue
+            return {
+              preview: {
+                flight,
+                refFix: null,
+                predictedIawpAt: null,
+                source: 'UNRESOLVED',
+                reason: 'IAWP not resolved from filed route',
+              } satisfies InboundPreview,
+              prediction: null,
+            }
           }
 
           const nominalSeconds = nominalStarSeconds(airport, match.entryFix)
           if (nominalSeconds == null) {
-            previews.push({
-              flight,
-              refFix: match.entryFix,
-              predictedIawpAt: null,
-              source: 'NO TIMING',
-              reason: 'No nominal STAR timing configured',
-            })
-            continue
+            return {
+              preview: {
+                flight,
+                refFix: match.entryFix,
+                predictedIawpAt: null,
+                source: 'NO TIMING',
+                reason: 'No nominal STAR timing configured',
+              } satisfies InboundPreview,
+              prediction: null,
+            }
           }
 
+          const geometry = await resolveRouteGeometry(flight, airport)
           const eta = estimateIawpArrival(
             flight,
-            null,
+            geometry,
             match.entryFix,
             nominalSeconds,
             payload.fetchedAt,
           )
 
-          previews.push({
+          const preview = {
             flight,
             refFix: match.entryFix,
             predictedIawpAt: eta.predictedIawpAt,
             source: eta.source,
             reason: eta.reason,
-          })
+          } satisfies InboundPreview
 
-          if (eta.predictedIawpAt) {
-            predictions.push({
-              id: flight.sessionId,
-              callsign: flight.callsign,
-              aircraftType: flight.aircraft,
-              wakeTurbulence: flight.wakeTurbulence,
-              runway,
-              refFix: match.entryFix,
-              predictedIawpAt: eta.predictedIawpAt,
-              nominalStarSeconds: nominalSeconds,
-            })
-          }
-        }
+          const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt
+            ? {
+                id: flight.sessionId,
+                callsign: flight.callsign,
+                aircraftType: flight.aircraft,
+                wakeTurbulence: flight.wakeTurbulence,
+                runway,
+                refFix: match.entryFix,
+                predictedIawpAt: eta.predictedIawpAt,
+                nominalStarSeconds: nominalSeconds,
+              }
+            : null
+
+          return { preview, prediction }
+        }))
+
+        const previews = resolved.map((item) => item.preview)
+        const predictions = resolved
+          .map((item) => item.prediction)
+          .filter((item): item is AmanArrivalPrediction => item !== null)
 
         const spacingMinutes = (
           AMAN_DEFAULT_RUNWAY_SPACING_MINUTES[airport] as Record<string, number>
@@ -221,7 +258,7 @@ export default function App() {
     <div className="aman-app">
       <header className="aman-topbar">
         <div className="aman-brand">
-          <img src="/assets/ivao-thailand-logo.png" alt="IVAO Thailand" />
+          <img src="/ivao-thailand-logo.png" alt="IVAO Thailand" />
           <div className="aman-brand-copy">
             <span>Thailand Approach AMAN</span>
             <strong>Arrival Sequencing</strong>
@@ -361,7 +398,7 @@ export default function App() {
                 <span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span>
               </div>
               {inbound.map((item) => (
-                <div className="aman-inbound-row" key={item.flight.sessionId} title={item.reason || item.source}>
+                <div className="aman-inbound-row" key={item.flight.sessionId} title={`${item.source}${item.reason ? ` · ${item.reason}` : ''}`}>
                   <strong>{item.flight.callsign}</strong>
                   <span>{item.flight.aircraft || '----'}</span>
                   <span>{item.refFix || '----'}</span>
@@ -382,7 +419,8 @@ export default function App() {
             <dl className="aman-status-list">
               <div><dt>IVAO inbound</dt><dd>{trafficError ? 'ERROR' : 'LIVE'}</dd></div>
               <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
-              <div><dt>ETA source</dt><dd>FPL / ACTUAL</dd></div>
+              <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
+              <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
               <div><dt>Sequence</dt><dd>AUTO UNSTABLE</dd></div>
               <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
             </dl>
