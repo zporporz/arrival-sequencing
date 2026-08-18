@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './reset.css'
 import './live.css'
+import './logo.css'
 import AuthGate from './AuthGate'
 import App from './App'
 
