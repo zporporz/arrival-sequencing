@@ -1,0 +1,166 @@
+.aman-control-strip {
+  grid-template-columns: auto auto minmax(220px, 1fr) auto;
+}
+
+.aman-runway-control {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 10px;
+  border-right: 1px solid #203048;
+}
+.aman-runway-control > span {
+  color: #5f7693;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+.aman-runway-control select,
+.aman-history-control select {
+  border: 1px solid #294260;
+  border-radius: 3px;
+  background: #0d1b2c;
+  color: #c9d9ea;
+  outline: none;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 800;
+}
+.aman-runway-control select {
+  width: 74px;
+  height: 27px;
+  padding: 0 6px;
+}
+
+.aman-history-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+}
+.aman-history-control > span {
+  padding: 5px 7px;
+}
+.aman-history-control select {
+  height: 24px;
+  padding: 0 4px;
+}
+
+.aman-major-tick {
+  top: calc(44% + var(--offset-px, 0px));
+}
+
+.aman-flight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.aman-flight-row {
+  position: absolute;
+  left: calc(50% + 18px);
+  top: calc(44% + var(--offset-px, 0px));
+  width: min(620px, calc(50% - 34px));
+  min-height: 23px;
+  display: grid;
+  grid-template-columns: 42px minmax(72px, 1.25fr) 46px 28px 42px 34px 40px;
+  align-items: center;
+  gap: 7px;
+  transform: translateY(-50%);
+  color: #dce8f6;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.aman-flight-row::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  width: 13px;
+  height: 1px;
+  background: #4f6682;
+}
+.aman-flight-row .tldt { color: #90a8c3; text-align: right; }
+.aman-flight-row strong { color: #f1f6fc; font-size: 11px; }
+.aman-flight-row span { color: #a9bdd3; }
+.aman-flight-row .fix-code { color: #d7e6f5; font-weight: 900; text-align: center; }
+.aman-flight-row .fix-code.is-underlined { text-decoration: underline; text-underline-offset: 2px; }
+.aman-flight-row b { font-weight: 900; text-align: right; }
+.aman-flight-row em { color: #8ed5ad; font-style: normal; font-weight: 900; text-align: right; }
+.aman-flight-row.is-past { opacity: .42; filter: saturate(.65); }
+
+.aman-flight-row.action-expedite b { color: #8ef05a; }
+.aman-flight-row.action-nothing b { color: #d8dadd; }
+.aman-flight-row.action-speed_reduction b { color: #f4ed43; }
+.aman-flight-row.action-path_stretching b { color: #e9a33a; }
+.aman-flight-row.action-holding b { color: #e25b47; }
+
+.aman-inbound-list { min-height: 180px; }
+.aman-inbound-head,
+.aman-inbound-row {
+  display: grid;
+  grid-template-columns: 1.2fr .72fr .82fr .72fr;
+  gap: 8px;
+  align-items: center;
+}
+.aman-inbound-head {
+  padding: 8px 11px;
+  border-bottom: 1px solid #182b43;
+  background: #0a1625;
+  color: #617c9c;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.aman-inbound-row {
+  min-height: 31px;
+  padding: 6px 11px;
+  border-bottom: 1px solid #11233a;
+  color: #93aac4;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+.aman-inbound-row:hover { background: #0c1b2d; }
+.aman-inbound-row strong { color: #dce9f7; font-size: 10px; }
+.aman-inbound-list > p {
+  margin: 0;
+  padding: 24px 12px;
+  color: #4a617d;
+  font-size: 10px;
+  text-align: center;
+}
+
+.aman-live-pill.is-error {
+  border-color: #6a3038;
+  background: #2b141b;
+  color: #ff929a;
+}
+
+@media (max-width: 1100px) {
+  .aman-flight-row {
+    grid-template-columns: 38px minmax(70px, 1.2fr) 42px 24px 38px 30px 36px;
+    gap: 5px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 980px) {
+  .aman-control-strip { grid-template-columns: auto auto 1fr; }
+  .aman-counters { grid-column: 1 / -1; }
+}
+
+@media (max-width: 700px) {
+  .aman-control-strip { grid-template-columns: 1fr 1fr; }
+  .aman-config-label { grid-column: 1 / -1; }
+  .aman-flight-row {
+    left: calc(50% + 10px);
+    width: calc(50% - 18px);
+    grid-template-columns: 34px minmax(58px, 1fr) 34px 20px 34px 28px;
+    gap: 3px;
+    font-size: 8px;
+  }
+  .aman-flight-row > em { display: none; }
+}
