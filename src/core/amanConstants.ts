@@ -122,4 +122,14 @@ export const classifyAmanDelay = (delayMinutes: number): AmanDelayAction => {
 // Thailand SME: holding is applied at the head of the STAR / feeder-entry point.
 export const AMAN_HOLDING_POINT_MODEL = 'STAR_ENTRY' as const
 
+// MAESTRO timeline display model.
+// The current-time line stays fixed while the time scale and flight labels move downward as UTC advances.
+export const AMAN_TIMELINE_MAJOR_TICK_MINUTES = 5
+export const AMAN_TIMELINE_MINOR_TICK_MINUTES = 1
+
+// Flights whose target/landing time has passed the fixed current-time line are treated as landed for display.
+// Keep them visible below the line for a selectable history window.
+export const AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES = [5, 10, 15, 20] as const
+export const AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES = 10
+
 export type VtbsIawpWithNominalTime = keyof typeof VTBS_STAR19_NOMINAL_MINUTES
