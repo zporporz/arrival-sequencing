@@ -2,6 +2,7 @@ const WHAZZUP_TTL_MS = 15000;
 const FLIGHT_PLAN_TTL_MS = 5 * 60 * 1000;
 const TAKEOFF_FOUND_TTL_MS = 6 * 60 * 60 * 1000;
 const TAKEOFF_PENDING_TTL_MS = 30 * 1000;
+const FLIGHT_PLAN_ENRICH_CONCURRENCY = 8;
 
 let whazzupCache = { expiresAt: 0, data: null };
 const flightPlanCache = new Map();
@@ -15,6 +16,11 @@ const json = (body, status = 200) => Response.json(body, {
 function cleanAirport(value) {
   const airport = String(value || '').trim().toUpperCase();
   return /^[A-Z0-9]{4}$/.test(airport) ? airport : null;
+}
+
+function cleanUpper(value) {
+  const text = String(value || '').trim().toUpperCase();
+  return text || null;
 }
 
 function finiteNumber(...values) {
@@ -43,6 +49,22 @@ function trimCache(cache, limit = 500) {
     if (firstKey == null) return;
     cache.delete(firstKey);
   }
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 async function trackerJson(path, env, cacheTtl = 0) {
@@ -109,40 +131,28 @@ async function getTrackedTakeoff(sessionId, env) {
   return value;
 }
 
-async function domesticContext(pilot, env) {
+function isAirborneNow(pilot) {
+  const state = String(pilot?.lastTrack?.state || '').trim().toLowerCase();
+  return pilot?.lastTrack?.onGround === false || ['initial climb', 'en route', 'approach'].includes(state);
+}
+
+async function legacyDomesticTiming(pilot, detailedFlightPlan, env) {
   const summary = pilot?.flightPlan || {};
-  let departureCountryId = cleanCountryId(summary?.departure?.countryId);
-  let arrivalCountryId = cleanCountryId(summary?.arrival?.countryId);
-  let filedEetSeconds = null;
-  let detailedFlightPlan = null;
-  let enrichmentError = null;
-
-  const countryUnknown = !departureCountryId || !arrivalCountryId;
-  const summaryLooksDomestic = departureCountryId === 'TH' && arrivalCountryId === 'TH';
-
-  if (countryUnknown || summaryLooksDomestic) {
-    try {
-      detailedFlightPlan = await getLatestFlightPlan(pilot.id, env);
-      departureCountryId = cleanCountryId(detailedFlightPlan?.departure?.countryId) || departureCountryId;
-      arrivalCountryId = cleanCountryId(detailedFlightPlan?.arrival?.countryId) || arrivalCountryId;
-      filedEetSeconds = finiteNumber(detailedFlightPlan?.eet);
-    } catch (error) {
-      enrichmentError = error instanceof Error ? error.message : String(error);
-    }
-  }
-
+  const detailed = detailedFlightPlan || {};
+  const departureCountryId = cleanCountryId(detailed?.departure?.countryId) || cleanCountryId(summary?.departure?.countryId);
+  const arrivalCountryId = cleanCountryId(detailed?.arrival?.countryId) || cleanCountryId(summary?.arrival?.countryId);
+  const filedEetSeconds = finiteNumber(detailed?.eet, summary?.eet);
   const isDomesticThailand = departureCountryId === 'TH' && arrivalCountryId === 'TH';
+
   if (!isDomesticThailand) {
     return {
       departureCountryId,
       arrivalCountryId,
       isDomesticThailand: false,
-      filedEetSeconds: null,
       trackedTakeoffAt: null,
       filedDestinationEtaAt: null,
       domesticTriggerStatus: 'NOT_DOMESTIC',
-      domesticTriggerError: enrichmentError,
-      detailedFlightPlan,
+      domesticTriggerError: null,
     };
   }
 
@@ -151,36 +161,31 @@ async function domesticContext(pilot, env) {
       departureCountryId,
       arrivalCountryId,
       isDomesticThailand: true,
-      filedEetSeconds,
       trackedTakeoffAt: null,
       filedDestinationEtaAt: null,
       domesticTriggerStatus: 'EET_UNAVAILABLE',
-      domesticTriggerError: enrichmentError,
-      detailedFlightPlan,
+      domesticTriggerError: null,
     };
   }
 
-  const state = String(pilot?.lastTrack?.state || '').trim().toLowerCase();
-  const airborneNow = pilot?.lastTrack?.onGround === false || ['initial climb', 'en route', 'approach'].includes(state);
-  if (!airborneNow) {
+  if (!isAirborneNow(pilot)) {
     return {
       departureCountryId,
       arrivalCountryId,
       isDomesticThailand: true,
-      filedEetSeconds,
       trackedTakeoffAt: null,
       filedDestinationEtaAt: null,
       domesticTriggerStatus: 'WAITING_TAKEOFF',
-      domesticTriggerError: enrichmentError,
-      detailedFlightPlan,
+      domesticTriggerError: null,
     };
   }
 
   let trackedTakeoffAt = null;
+  let domesticTriggerError = null;
   try {
     trackedTakeoffAt = await getTrackedTakeoff(pilot.id, env);
   } catch (error) {
-    enrichmentError = error instanceof Error ? error.message : String(error);
+    domesticTriggerError = error instanceof Error ? error.message : String(error);
   }
 
   if (!trackedTakeoffAt) {
@@ -188,12 +193,10 @@ async function domesticContext(pilot, env) {
       departureCountryId,
       arrivalCountryId,
       isDomesticThailand: true,
-      filedEetSeconds,
       trackedTakeoffAt: null,
       filedDestinationEtaAt: null,
       domesticTriggerStatus: 'TAKEOFF_UNAVAILABLE',
-      domesticTriggerError: enrichmentError,
-      detailedFlightPlan,
+      domesticTriggerError,
     };
   }
 
@@ -206,12 +209,10 @@ async function domesticContext(pilot, env) {
     departureCountryId,
     arrivalCountryId,
     isDomesticThailand: true,
-    filedEetSeconds,
     trackedTakeoffAt,
     filedDestinationEtaAt,
     domesticTriggerStatus: filedDestinationEtaAt ? 'READY' : 'TAKEOFF_UNAVAILABLE',
-    domesticTriggerError: enrichmentError,
-    detailedFlightPlan,
+    domesticTriggerError,
   };
 }
 
@@ -229,52 +230,60 @@ export async function onRequestGet(context) {
       .filter((pilot) => String(pilot?.flightPlan?.arrivalId || '').trim().toUpperCase() === airport)
       .filter((pilot) => !terminalStates.has(String(pilot?.lastTrack?.state || '').trim().toLowerCase()));
 
-    const flights = await Promise.all(inboundPilots.map(async (pilot) => {
-      const fp = pilot.flightPlan || {};
-      const track = pilot.lastTrack || {};
-      let domestic = {
-        departureCountryId: cleanCountryId(fp?.departure?.countryId),
-        arrivalCountryId: cleanCountryId(fp?.arrival?.countryId),
-        isDomesticThailand: false,
-        filedEetSeconds: null,
-        trackedTakeoffAt: null,
-        filedDestinationEtaAt: null,
-        domesticTriggerStatus: 'UNKNOWN',
-        detailedFlightPlan: null,
-      };
+    const flights = await mapWithConcurrency(
+      inboundPilots,
+      FLIGHT_PLAN_ENRICH_CONCURRENCY,
+      async (pilot) => {
+        const fp = pilot.flightPlan || {};
+        const track = pilot.lastTrack || {};
+        let detailed = {};
+        let flightPlanDetailError = null;
 
-      try {
-        domestic = await domesticContext(pilot, context.env);
-      } catch {
-        // Domestic enrichment is optional. Keep the live traffic row usable if IVAO detail endpoints fail.
-      }
+        try {
+          detailed = await getLatestFlightPlan(pilot.id, context.env) || {};
+        } catch (error) {
+          flightPlanDetailError = error instanceof Error ? error.message : String(error);
+        }
 
-      const detailed = domestic.detailedFlightPlan || {};
-      return {
-        sessionId: String(pilot.id ?? ''),
-        vid: pilot.userId != null ? String(pilot.userId) : null,
-        callsign: String(pilot.callsign || '').trim().toUpperCase(),
-        aircraft: fp.aircraftId ? String(fp.aircraftId).trim().toUpperCase() : null,
-        departure: fp.departureId ? String(fp.departureId).trim().toUpperCase() : null,
-        arrival: airport,
-        route: fp.route ? String(fp.route).trim().toUpperCase() : (detailed.route ? String(detailed.route).trim().toUpperCase() : null),
-        state: track.state ? String(track.state).trim() : null,
-        altitude: finiteNumber(track.altitude, pilot.altitude),
-        groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
-        latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
-        longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
-        heading: finiteNumber(track.heading, track.course, pilot.heading),
-        connectedAt: pilot.createdAt || null,
-        airlineIcao: airlineIcaoFromCallsign(pilot.callsign),
-        departureCountryId: domestic.departureCountryId,
-        arrivalCountryId: domestic.arrivalCountryId,
-        isDomesticThailand: domestic.isDomesticThailand,
-        filedEetSeconds: domestic.filedEetSeconds,
-        trackedTakeoffAt: domestic.trackedTakeoffAt,
-        filedDestinationEtaAt: domestic.filedDestinationEtaAt,
-        domesticTriggerStatus: domestic.domesticTriggerStatus,
-      };
-    }));
+        const domestic = await legacyDomesticTiming(pilot, detailed, context.env);
+        const aircraftSummary = detailed?.aircraft || fp?.aircraft || {};
+        const filedEetSeconds = finiteNumber(detailed?.eet, fp?.eet);
+
+        return {
+          sessionId: String(pilot.id ?? ''),
+          vid: pilot.userId != null ? String(pilot.userId) : null,
+          callsign: String(pilot.callsign || '').trim().toUpperCase(),
+          aircraft: cleanUpper(detailed?.aircraftId) || cleanUpper(fp?.aircraftId) || cleanUpper(aircraftSummary?.icaoCode),
+          wakeTurbulence: cleanUpper(aircraftSummary?.wakeTurbulence),
+          departure: cleanUpper(detailed?.departureId) || cleanUpper(fp?.departureId),
+          arrival: airport,
+          route: cleanUpper(detailed?.route) || cleanUpper(fp?.route),
+          state: track.state ? String(track.state).trim() : null,
+          onGround: typeof track.onGround === 'boolean' ? track.onGround : null,
+          trackTimestamp: track.timestamp || null,
+          altitude: finiteNumber(track.altitude, pilot.altitude),
+          groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
+          latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
+          longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
+          heading: finiteNumber(track.heading, track.course, pilot.heading),
+          connectedAt: pilot.createdAt || null,
+          airlineIcao: airlineIcaoFromCallsign(pilot.callsign),
+          flightPlanId: detailed?.id != null ? String(detailed.id) : null,
+          flightPlanRevision: finiteNumber(detailed?.revision),
+          filedDepartureTimeSeconds: finiteNumber(detailed?.departureTime, fp?.departureTime),
+          actualDepartureTimeSeconds: finiteNumber(detailed?.actualDepartureTime, fp?.actualDepartureTime),
+          filedEetSeconds,
+          departureCountryId: domestic.departureCountryId,
+          arrivalCountryId: domestic.arrivalCountryId,
+          isDomesticThailand: domestic.isDomesticThailand,
+          trackedTakeoffAt: domestic.trackedTakeoffAt,
+          filedDestinationEtaAt: domestic.filedDestinationEtaAt,
+          domesticTriggerStatus: domestic.domesticTriggerStatus,
+          domesticTriggerError: domestic.domesticTriggerError,
+          flightPlanDetailError,
+        };
+      },
+    );
 
     return json({
       airport,
