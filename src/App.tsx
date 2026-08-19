@@ -6,6 +6,7 @@ import {
   AMAN_DEFAULT_RUNWAY_SPACING_NM,
   AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES,
   AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES,
+  AMAN_SPECIAL_SEPARATION_MINUTES,
   BANGKOK_TMA_WORKING_RADIUS_NM,
   BKK_VOR_COORDINATES,
   VTBD_IAWP_COMPACT_CODES,
@@ -27,6 +28,7 @@ import {
 type AirportCode = 'VTBD' | 'VTBS'
 type AirportScope = AirportCode | 'BOTH'
 type RunwayMode = 'ARR' | 'DEP' | 'MIX' | 'CLOSED'
+type PlanningState = 'SEQUENCED' | 'MONITORED' | 'LATE'
 
 type InboundPreview = {
   airport: AirportCode
@@ -46,6 +48,7 @@ type DisplayInboundRow = {
   refFix: string
   eta: string | null
   title: string
+  planningState: PlanningState
 }
 
 type DemoSpec = {
@@ -137,6 +140,8 @@ const PX_PER_MINUTE = 10
 const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
 const DRAG_SNAP_MS = 15_000
+const PLANNING_HORIZON_MINUTES = 40
+const LATE_INSERT_MARGIN_MS = 15_000
 // Project working rule for VTBS multi-runway sequencing: landing targets on different
 // active arrival runways are staggered by at least one minute. This is deliberately
 // separate from the per-runway NM landing spacing and can be made configurable later.
@@ -244,6 +249,41 @@ function activeRunwaysForAirport(airport: AirportCode, runwayModes: Record<Airpo
   return RUNWAYS[airport].filter((runway) => isArrivalMode(runwayModes[airport][runway]))
 }
 
+function naturalLandingTimeMs(prediction: Pick<AmanArrivalPrediction, 'predictedIawpAt' | 'nominalStarSeconds'>) {
+  return new Date(prediction.predictedIawpAt).getTime() + Math.max(0, prediction.nominalStarSeconds) * 1000
+}
+
+function isWithinPlanningHorizon(prediction: AmanArrivalPrediction, nowMs: number) {
+  const iAwpMs = new Date(prediction.predictedIawpAt).getTime()
+  return Number.isFinite(iAwpMs) && iAwpMs - nowMs <= PLANNING_HORIZON_MINUTES * 60_000
+}
+
+function isAtrType(value: string | null) {
+  const type = String(value || '').trim().toUpperCase()
+  return type.startsWith('AT7') || type.startsWith('ATR')
+}
+
+function pairwiseLandingSeparationSeconds(
+  leader: AmanArrivalPrediction,
+  follower: AmanArrivalPrediction,
+  runwayBaseSeconds: number,
+) {
+  let required = Math.max(0, runwayBaseSeconds)
+  const leaderType = String(leader.aircraftType || '').trim().toUpperCase()
+  const leaderWake = String(leader.wakeTurbulence || '').trim().toUpperCase()
+
+  // Current Thailand project working values supplied by the operational SME:
+  // A380: at least 3 minutes / about 7 NM. ATR operation: 4 minutes / about 10 NM.
+  // Keep the runway-configured base as the floor and only increase it when a pair rule applies.
+  if (leaderWake === 'J' || leaderType === 'A388') {
+    required = Math.max(required, AMAN_SPECIAL_SEPARATION_MINUTES.A380 * 60)
+  }
+  if (isAtrType(leader.aircraftType) || isAtrType(follower.aircraftType)) {
+    required = Math.max(required, AMAN_SPECIAL_SEPARATION_MINUTES.ATR * 60)
+  }
+  return required
+}
+
 function candidateLandingTime(
   airport: AirportCode,
   runway: string,
@@ -277,14 +317,10 @@ function assignPredictionsToRunways(
   if (!activeRunways.length) return []
 
   const lastTargetByRunway = new Map<string, number>()
-  const ordered = [...predictions].sort((a, b) =>
-    (new Date(a.predictedIawpAt).getTime() + a.nominalStarSeconds * 1000)
-      - (new Date(b.predictedIawpAt).getTime() + b.nominalStarSeconds * 1000)
-      || a.callsign.localeCompare(b.callsign),
-  )
+  const ordered = [...predictions].sort((a, b) => naturalLandingTimeMs(a) - naturalLandingTimeMs(b) || a.callsign.localeCompare(b.callsign))
 
   return ordered.map((prediction) => {
-    const naturalMs = new Date(prediction.predictedIawpAt).getTime() + prediction.nominalStarSeconds * 1000
+    const naturalMs = naturalLandingTimeMs(prediction)
     const requestedRunway = manualRunways[prediction.id]
     const forcedRunway = requestedRunway && activeRunways.includes(requestedRunway) ? requestedRunway : null
 
@@ -318,8 +354,6 @@ function applyManualTargetsWithCascade(
   for (let pass = 0; pass < maxPasses; pass += 1) {
     let changed = false
 
-    // First preserve the order and spacing of each landing runway. This is what makes
-    // a controller drag push the later aircraft on that runway instead of allowing overlap.
     const byAirportRunway = new Map<string, AmanSequenceRow[]>()
     rows.forEach((row) => {
       const key = `${rowAirport(row.id)}:${row.runway}`
@@ -331,11 +365,13 @@ function applyManualTargetsWithCascade(
     for (const runwayRows of byAirportRunway.values()) {
       const ordered = [...runwayRows].sort((a, b) => a.sequenceIndex - b.sequenceIndex)
       let previousTargetMs: number | null = null
+      let previousRow: AmanSequenceRow | null = null
       for (const row of ordered) {
         let targetMs = targetById.get(row.id) ?? new Date(row.tldt).getTime()
-        if (previousTargetMs != null) {
-          const requiredMs = Math.max(0, runwaySpacingSeconds[row.runway] ?? 0) * 1000
-          const earliest = previousTargetMs + requiredMs
+        if (previousTargetMs != null && previousRow) {
+          const baseSeconds = Math.max(0, runwaySpacingSeconds[row.runway] ?? 0)
+          const requiredSeconds = pairwiseLandingSeparationSeconds(previousRow, row, baseSeconds)
+          const earliest = previousTargetMs + requiredSeconds * 1000
           if (targetMs < earliest) {
             targetMs = earliest
             targetById.set(row.id, targetMs)
@@ -343,12 +379,10 @@ function applyManualTargetsWithCascade(
           }
         }
         previousTargetMs = targetMs
+        previousRow = row
       }
     }
 
-    // VTBS working rule: different landing runways are still staggered by one minute.
-    // Pushing a row here is followed by another same-runway pass, so the movement cascades
-    // through any aircraft behind it as well.
     const vtbsRows = rows
       .filter((row) => rowAirport(row.id) === 'VTBS')
       .sort((a, b) => (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
@@ -401,11 +435,17 @@ export default function App() {
   const [manualTldt, setManualTldt] = useState<Record<string, string>>({})
   const [manualRunways, setManualRunways] = useState<Record<string, string>>({})
   const [stableIds, setStableIds] = useState<Record<string, true>>({})
+  const [latePendingIds, setLatePendingIds] = useState<Record<string, true>>({})
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const dragRef = useRef<DragState | null>(null)
+  const seenInboundIdsRef = useRef<Set<string>>(new Set())
+  const initializedAirportsRef = useRef<Set<AirportCode>>(new Set())
+  const latePendingIdsRef = useRef<Record<string, true>>({})
+  const liveSequenceRef = useRef<AmanSequenceRow[]>([])
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
   const ticks = useMemo(() => timelineTicks(now), [now])
+  const planningNowMs = Math.floor(now.getTime() / 60_000) * 60_000
   const runwaySpacingSeconds = useMemo(() => {
     const result: Record<string, number> = {}
     for (const airport of ['VTBD', 'VTBS'] as const) {
@@ -420,16 +460,23 @@ export default function App() {
     activeRunwaysForAirport(airport, runwayModes).map((runway) => ({ airport, runway })),
   ), [airports, runwayModes])
 
+  const liveSequencedPredictions = useMemo(() => livePredictions.filter((prediction) =>
+    isWithinPlanningHorizon(prediction, planningNowMs) && !latePendingIds[prediction.id]
+  ), [latePendingIds, livePredictions, planningNowMs])
+
   const liveBaseSequence = useMemo(() => {
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
-      livePredictions.filter((prediction) => rowAirport(prediction.id) === airport),
+      liveSequencedPredictions.filter((prediction) => rowAirport(prediction.id) === airport),
       airport,
       runwayModes,
       spacingNm,
       manualRunways,
     ))
-    return autoSequenceUnstableArrivals(assigned, { runwaySpacingSeconds })
-  }, [airports, livePredictions, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
+    return autoSequenceUnstableArrivals(assigned, {
+      runwaySpacingSeconds,
+      pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
+    })
+  }, [airports, liveSequencedPredictions, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchor) return []
@@ -440,7 +487,10 @@ export default function App() {
       spacingNm,
       manualRunways,
     ))
-    return autoSequenceUnstableArrivals(assigned, { runwaySpacingSeconds })
+    return autoSequenceUnstableArrivals(assigned, {
+      runwaySpacingSeconds,
+      pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
+    })
   }, [airports, demoAnchor, demoMode, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoSequence = useMemo(
@@ -451,6 +501,8 @@ export default function App() {
     () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds),
     [liveBaseSequence, manualTldt, runwaySpacingSeconds],
   )
+  liveSequenceRef.current = liveSequence
+
   const activeSequence = demoMode ? demoSequence : liveSequence
   const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE').length, [inbound])
   const liveTmaCount = useMemo(() => inbound.filter(({ flight }) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude) && distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, flight.latitude as number, flight.longitude as number) <= BANGKOK_TMA_WORKING_RADIUS_NM).length, [inbound])
@@ -462,9 +514,6 @@ export default function App() {
 
   const separationConflictIds = useMemo(() => {
     const conflicts = new Set<string>()
-
-    // Same-runway check uses the previous aircraft on that runway even if another runway's
-    // flight is visually between them on the common timeline.
     const previousByAirportRunway = new Map<string, AmanSequenceRow>()
     const ordered = [...activeSequence].sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime())
     for (const row of ordered) {
@@ -473,7 +522,9 @@ export default function App() {
       const previous = previousByAirportRunway.get(key)
       if (previous) {
         const gapMs = new Date(row.tldt).getTime() - new Date(previous.tldt).getTime()
-        if (gapMs + 500 < (runwaySpacingSeconds[row.runway] ?? 0) * 1000) {
+        const baseSeconds = Math.max(0, runwaySpacingSeconds[row.runway] ?? 0)
+        const requiredSeconds = pairwiseLandingSeparationSeconds(previous, row, baseSeconds)
+        if (gapMs + 500 < requiredSeconds * 1000) {
           conflicts.add(previous.id)
           conflicts.add(row.id)
         }
@@ -496,6 +547,7 @@ export default function App() {
     return conflicts
   }, [activeSequence, runwaySpacingSeconds])
 
+  const livePredictionById = useMemo(() => new Map(livePredictions.map((prediction) => [prediction.id, prediction])), [livePredictions])
   const displayInboundRows = useMemo<DisplayInboundRow[]>(() => demoMode
     ? demoSequence.map((row) => ({
         id: row.id,
@@ -505,18 +557,30 @@ export default function App() {
         refFix: row.refFix,
         eta: row.predictedIawpAt,
         title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL / STABLE' : 'SIMULATED TEST TRAFFIC',
+        planningState: 'SEQUENCED',
       }))
-    : inbound.map((item) => ({
-        id: item.id,
-        airport: item.airport,
-        callsign: item.flight.callsign,
-        aircraft: item.flight.aircraft || '----',
-        refFix: item.refFix || '----',
-        eta: item.predictedIawpAt,
-        title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${item.reason ? ` · ${item.reason}` : ''}`,
-      })),
-  [demoMode, demoSequence, inbound, stableIds])
+    : inbound.map((item) => {
+        const prediction = livePredictionById.get(item.id)
+        const planningState: PlanningState = latePendingIds[item.id]
+          ? 'LATE'
+          : prediction && isWithinPlanningHorizon(prediction, planningNowMs)
+            ? 'SEQUENCED'
+            : 'MONITORED'
+        return {
+          id: item.id,
+          airport: item.airport,
+          callsign: item.flight.callsign,
+          aircraft: item.flight.aircraft || '----',
+          refFix: item.refFix || '----',
+          eta: item.predictedIawpAt,
+          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${PLANNING_HORIZON_MINUTES} MIN HORIZON` : ''}${planningState === 'LATE' ? ' · LATE INSERT PENDING ATC ACCEPTANCE' : ''}${item.reason ? ` · ${item.reason}` : ''}`,
+          planningState,
+        }
+      }),
+  [demoMode, demoSequence, inbound, latePendingIds, livePredictionById, planningNowMs, stableIds])
 
+  const monitoredInboundCount = displayInboundRows.filter((item) => item.planningState === 'MONITORED').length
+  const latePendingCount = displayInboundRows.filter((item) => item.planningState === 'LATE').length
   const displayTmaCount = demoMode ? Math.min(8, demoSequence.length) : liveTmaCount
   const displayTotCount = demoMode ? demoSequence.length : inbound.length
 
@@ -551,6 +615,16 @@ export default function App() {
     if (Number.isFinite(value) && value > 0) {
       setSpacingNm((current) => ({ ...current, [spacingKey(airport, runway)]: value }))
     }
+  }
+
+  const acceptLateInsert = (id: string) => {
+    setLatePendingIds((current) => {
+      if (!current[id]) return current
+      const next = { ...current }
+      delete next[id]
+      latePendingIdsRef.current = next
+      return next
+    })
   }
 
   useEffect(() => {
@@ -597,6 +671,36 @@ export default function App() {
       const predictions = results.flatMap((result) => result.resolved.map((item) => item.prediction).filter((item): item is AmanArrivalPrediction => item !== null))
       const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
+
+      const activeIds = new Set(previews.map((item) => item.id))
+      const nextLatePending: Record<string, true> = { ...latePendingIdsRef.current }
+      for (const id of Object.keys(nextLatePending)) {
+        if (!activeIds.has(id)) delete nextLatePending[id]
+      }
+
+      const nowMs = Date.now()
+      for (const result of results) {
+        const wasInitialized = initializedAirportsRef.current.has(result.airport)
+        if (wasInitialized) {
+          const latestExistingTarget = liveSequenceRef.current
+            .filter((row) => rowAirport(row.id) === result.airport)
+            .reduce((latest, row) => Math.max(latest, new Date(row.tldt).getTime()), Number.NEGATIVE_INFINITY)
+
+          for (const item of result.resolved) {
+            const prediction = item.prediction
+            if (!prediction || seenInboundIdsRef.current.has(prediction.id) || !isWithinPlanningHorizon(prediction, nowMs)) continue
+            const naturalMs = naturalLandingTimeMs(prediction)
+            if (Number.isFinite(latestExistingTarget) && naturalMs < latestExistingTarget - LATE_INSERT_MARGIN_MS) {
+              nextLatePending[prediction.id] = true
+            }
+          }
+        }
+        initializedAirportsRef.current.add(result.airport)
+      }
+
+      previews.forEach((item) => seenInboundIdsRef.current.add(item.id))
+      latePendingIdsRef.current = nextLatePending
+      setLatePendingIds(nextLatePending)
       setInbound(previews.sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
       setLivePredictions(predictions)
       setFetchedAt(fetchedTimes.at(-1) ?? null)
@@ -657,8 +761,6 @@ export default function App() {
     const airport = rowAirport(row.id)
     if (!activeRunwaysForAirport(airport, runwayModes).includes(runway)) return
     setManualRunways((current) => ({ ...current, [row.id]: runway }))
-    // A manual runway assignment is treated as a controller commitment. Preserve the
-    // current target landing time and let the constraint engine move only what is necessary.
     setManualTldt((current) => current[row.id] ? current : ({ ...current, [row.id]: row.tldt }))
     setStableIds((current) => ({ ...current, [row.id]: true }))
   }
@@ -743,8 +845,9 @@ export default function App() {
         <div className="aman-panel-header">
           <div><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div>
           <div className="aman-panel-meta">
-            <span>5 MIN MAJOR</span><span>1 MIN MINOR</span>
+            <span>5 MIN MAJOR</span><span>1 MIN MINOR</span><span>HORIZON {PLANNING_HORIZON_MINUTES} MIN</span>
             <label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label>
+            {latePendingCount > 0 && <span className="aman-late-alert">LATE INSERT {latePendingCount}</span>}
             <span className="is-drag-enabled">CASCADE DRAG · DBL CLICK RESET</span>
             <button type="button" className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`} onClick={toggleDemo}>{demoMode ? 'TEST TRAFFIC ON' : 'TEST TRAFFIC'}</button>
             <span className={demoMode ? 'is-simulated' : ''}>{demoMode ? 'SIMULATED' : loading ? 'LOADING' : 'IVAO LIVE'}</span>
@@ -770,7 +873,7 @@ export default function App() {
                 key={row.id}
                 className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                title={`Cascade drag sets TLDT · double-click to reset · Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${hasConflict ? ' · SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
+                title={`Cascade drag sets TLDT · double-click to reset · Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
                 onPointerMove={(event) => moveDrag(event, row)}
                 onPointerUp={(event) => endDrag(event, row)}
@@ -800,8 +903,8 @@ export default function App() {
             })}
           </div>
           {!loading && !visibleSequence.length && !demoMode && <div className="aman-empty-sequence">
-            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
-            <span>{trafficError || (activeArrivalRunways.length ? 'No live inbound right now. Use TEST TRAFFIC to verify multi-runway sequencing.' : 'Set at least one runway to ARR or MIX.')}</span>
+            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : latePendingCount ? 'LATE INSERT AWAITING ATC' : monitoredInboundCount ? 'INBOUND OUTSIDE PLANNING HORIZON' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
+            <span>{trafficError || (latePendingCount ? `${latePendingCount} new inbound would enter an existing sequence. Accept it from the Inbound panel before resequencing.` : monitoredInboundCount ? `${monitoredInboundCount} inbound monitored. They enter the landing sequence at ${PLANNING_HORIZON_MINUTES} minutes to IAWP.` : activeArrivalRunways.length ? 'No live inbound inside the planning horizon right now. Use TEST TRAFFIC to verify sequencing.' : 'Set at least one runway to ARR or MIX.')}</span>
           </div>}
         </div>
       </section>
@@ -811,7 +914,15 @@ export default function App() {
           <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span></div>
           <div className="aman-inbound-list">
             <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span></div>
-            {displayInboundRows.map((item) => <div className="aman-inbound-row multi" key={item.id} title={item.title}><span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span><strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong><span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span></div>)}
+            {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} key={item.id} title={item.title}>
+              <span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span>
+              <div className="aman-inbound-acid">
+                <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
+                {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON</small>}
+                {item.planningState === 'LATE' && <button type="button" className="aman-late-insert-button" onClick={() => acceptLateInsert(item.id)}>INSERT</button>}
+              </div>
+              <span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span>
+            </div>)}
             {!loading && !displayInboundRows.length && <p>No connected inbound traffic for {airportScope}.</p>}
           </div>
         </section>
@@ -824,10 +935,14 @@ export default function App() {
             <div><dt>Airport scope</dt><dd>{airportScope}</dd></div>
             <div><dt>Arrival runways</dt><dd>{activeArrivalRunways.length}</dd></div>
             <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
+            <div><dt>Planning horizon</dt><dd>{PLANNING_HORIZON_MINUTES} MIN</dd></div>
+            <div><dt>Monitored inbound</dt><dd>{monitoredInboundCount}</dd></div>
+            <div><dt>Late insert</dt><dd className={latePendingCount ? 'is-warning' : ''}>{latePendingCount ? `${latePendingCount} PENDING` : 'NONE'}</dd></div>
             <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
             <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
             <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
             <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
+            <div><dt>Pairwise SEP</dt><dd>ACTIVE</dd></div>
             <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
             <div><dt>VTBS X-RWY</dt><dd>1.0 MIN</dd></div>
             <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
