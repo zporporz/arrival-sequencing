@@ -101,12 +101,84 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_MINUTES = {
   },
 } as const
 
-// Working Thailand delay-colour thresholds. Keep centralised so they can be changed later.
+// MAESTRO knowgood v2.4: the processing coverage is described as roughly 200-300 NM.
+// The project uses the outer 300 NM edge as the active-processing admission boundary and
+// keeps more distant destination traffic monitored in the Inbound panel.
+export const AMAN_PROCESSING_RADIUS_BAND_NM = {
+  MIN: 200,
+  MAX: 300,
+} as const
+export const AMAN_PROCESSING_RADIUS_NM = AMAN_PROCESSING_RADIUS_BAND_NM.MAX
+
+// MAESTRO knowgood v2.4: ETA-FF from TopSky is dynamically updated every 15 seconds.
+export const AMAN_ETA_FF_REFRESH_SECONDS = 15
+export const AMAN_ETA_FF_REFRESH_MS = AMAN_ETA_FF_REFRESH_SECONDS * 1000
+
+// Delay Splitting shown in the Thai MAESTRO operational matrix keeps up to four minutes
+// of positive delay in the Approach segment (ADLY); excess delay is allocated before
+// the feeder fix (EDLY). The 6/2, 7/3, 8/4, >=9/>=5 matrix rows all imply ADLY = 4.
+export const AMAN_APPROACH_DELAY_BUDGET_MINUTES = 4
+
+export type AmanDelaySplit = {
+  tdlyMinutes: number
+  edlyMinutes: number
+  adlyMinutes: number
+  gainMinutes: number
+}
+
+export const splitAmanDelay = (delayMinutes: number): AmanDelaySplit => {
+  if (!Number.isFinite(delayMinutes)) {
+    return { tdlyMinutes: 0, edlyMinutes: 0, adlyMinutes: 0, gainMinutes: 0 }
+  }
+  if (delayMinutes < 0) {
+    return { tdlyMinutes: delayMinutes, edlyMinutes: 0, adlyMinutes: 0, gainMinutes: Math.abs(delayMinutes) }
+  }
+  const adlyMinutes = Math.min(delayMinutes, AMAN_APPROACH_DELAY_BUDGET_MINUTES)
+  return {
+    tdlyMinutes: delayMinutes,
+    edlyMinutes: Math.max(0, delayMinutes - adlyMinutes),
+    adlyMinutes,
+    gainMinutes: 0,
+  }
+}
+
+export type AmanOperationalBand = 'GAIN' | 'NORMAL' | 'PERMIT_ENTRY' | 'ORBIT_PERMIT' | 'CONSIDER_HOLD' | 'OVERLOAD'
+
+export type AmanOperationalMatrixAdvice = {
+  band: AmanOperationalBand
+  primary: string
+  secondary: string
+  vectorLimit: string
+  shortLabel: string
+}
+
+// Thai MAESTRO knowgood v2.4 operational quick-reference matrix.
+export const getAmanOperationalMatrixAdvice = (delayMinutes: number): AmanOperationalMatrixAdvice => {
+  if (delayMinutes < 0) {
+    return { band: 'GAIN', primary: 'Shortcut / speed up', secondary: 'Expedite', vectorLimit: '—', shortLabel: 'GAIN' }
+  }
+  if (delayMinutes >= 9) {
+    return { band: 'OVERLOAD', primary: 'HOLD ALL', secondary: 'Issue EAT (STA-FF)', vectorLimit: 'OVERLOAD', shortLabel: 'HOLD ALL' }
+  }
+  if (delayMinutes >= 8) {
+    return { band: 'CONSIDER_HOLD', primary: 'Consider Hold', secondary: 'Runway change', vectorLimit: 'MAX LIMIT', shortLabel: 'HOLD/RWY' }
+  }
+  if (delayMinutes >= 7) {
+    return { band: 'ORBIT_PERMIT', primary: 'Orbit / Permit', secondary: 'Assess inner traffic', vectorLimit: '~30 NM', shortLabel: 'ORBIT' }
+  }
+  if (delayMinutes >= 6) {
+    return { band: 'PERMIT_ENTRY', primary: 'Permit Entry', secondary: 'Reduce Speed', vectorLimit: '<25 NM', shortLabel: 'PERMIT' }
+  }
+  return { band: 'NORMAL', primary: delayMinutes === 0 ? 'Normal flight' : 'Delay absorption', secondary: 'Speed / path as required', vectorLimit: '—', shortLabel: delayMinutes === 0 ? 'NORMAL' : 'MANAGE' }
+}
+
+// Delay-colour presentation remains a project HMI mapping. The new knowgood moves automatic
+// holding to the >=9-minute overload band; +8 is "Consider Hold" rather than HOLD ALL.
 export const AMAN_DELAY_THRESHOLDS_MINUTES = {
   NOTHING: 0,
   SPEED_REDUCTION_MAX: 2,
-  PATH_STRETCHING_MAX: 4,
-  HOLDING_MIN: 5,
+  PATH_STRETCHING_MAX: 8,
+  HOLDING_MIN: 9,
 } as const
 
 export type AmanDelayAction = 'EXPEDITE' | 'NOTHING' | 'SPEED_REDUCTION' | 'PATH_STRETCHING' | 'HOLDING'
@@ -119,8 +191,15 @@ export const classifyAmanDelay = (delayMinutes: number): AmanDelayAction => {
   return 'HOLDING'
 }
 
-// Thailand SME: holding is applied at the head of the STAR / feeder-entry point.
+// Thailand SME / MAESTRO working model: holding is applied at the STAR / feeder entry.
 export const AMAN_HOLDING_POINT_MODEL = 'STAR_ENTRY' as const
+
+// VTBS Airport Capacity Heatmap in the new MAESTRO knowgood shows ARR 37 MAX.
+// No equivalent authoritative VTBD maximum is provided by that deck, so VTBD continues
+// to use the configured runway-spacing capacity estimate in the HMI.
+export const AMAN_REFERENCE_AAR_PER_HOUR = {
+  VTBS: 37,
+} as const
 
 // Bangkok TMA counter working model: 50 NM radius from BKK DVOR/DME.
 // BKK coordinates from Thailand AIP ENR 4.1: 13°53'36.8"N 100°35'46.3"E.
