@@ -34,6 +34,23 @@ function finiteNumber(...values) {
   return null;
 }
 
+function filedCruiseAltitudeFt(detailed, summary) {
+  const direct = finiteNumber(
+    detailed?.cruiseLevel,
+    detailed?.cruiseAltitude,
+    detailed?.altitude,
+    detailed?.level,
+    summary?.cruiseLevel,
+    summary?.cruiseAltitude,
+    summary?.altitude,
+    summary?.level,
+  );
+  if (direct == null || direct <= 0) return null;
+
+  // Tracker payloads may expose either feet (e.g. 35000) or a flight level (e.g. 350).
+  return direct < 1000 ? direct * 100 : direct;
+}
+
 function cleanCountryId(value) {
   const countryId = String(value || '').trim().toUpperCase();
   return countryId || null;
@@ -266,6 +283,7 @@ export async function onRequestGet(context) {
           onGround: typeof track.onGround === 'boolean' ? track.onGround : null,
           trackTimestamp: track.timestamp || null,
           altitude: finiteNumber(track.altitude, pilot.altitude),
+          verticalSpeedFpm: finiteNumber(track.verticalSpeed, track.verticalSpeedFpm, track.vertical_rate, track.verticalRate, pilot.verticalSpeed),
           groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
           latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
           longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
@@ -274,6 +292,7 @@ export async function onRequestGet(context) {
           airlineIcao: airlineIcaoFromCallsign(pilot.callsign),
           flightPlanId: detailed?.id != null ? String(detailed.id) : null,
           flightPlanRevision: finiteNumber(detailed?.revision),
+          filedCruiseAltitudeFt: filedCruiseAltitudeFt(detailed, fp),
           filedDepartureTimeSeconds: finiteNumber(detailed?.departureTime, fp?.departureTime),
           actualDepartureTimeSeconds: finiteNumber(detailed?.actualDepartureTime, fp?.actualDepartureTime),
           filedEetSeconds,
