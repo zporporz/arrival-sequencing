@@ -22,9 +22,10 @@ import './planningProtection.css'
 import './operationalHmiReadable.css'
 import './maestroV24.css'
 import './timelineCompactRows.css'
+import './timelineScrollable.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
-import { installTimelineAxisRuntime } from './timelineAxisRuntime'
+import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
@@ -41,10 +42,10 @@ installReconnectTrafficFetch()
 
 function AppWithRuntime() {
   useEffect(() => {
-    // Compatibility decorator runs before the legacy lifecycle/advisory runtimes so
+    // Compatibility decorator runs before the lifecycle/advisory runtimes so
     // ETA-FF-labelled rows still expose the historical Predicted IAWP token they parse.
     const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
-    const removeTimelineRuntime = installTimelineAxisRuntime()
+    const removeTimelineRuntime = installTimelineScrollableRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
     const removeAirportScopeRuntime = installAirportScopeRuntime()
     const removeReconnectUiRuntime = installReconnectUiRuntime()
