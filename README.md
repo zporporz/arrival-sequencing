@@ -46,6 +46,8 @@ Primary project reference for current behavior: `research/aman/MAESTRO_V24_KNOWG
 - Configurable minutes displayed below ACTUAL.
 - Traffic labels move with time while ACTUAL stays fixed.
 - VTBD / VTBS can be placed LEFT or RIGHT on one timeline.
+- TEST TRAFFIC anchor is normalized to an exact UTC minute so displayed STA/TLDT labels align with the minute grid.
+- Timeline rows show STA/TLDT with seconds (`HH:MM:SS`) so visual position and displayed time use the same precision.
 
 ## Part 4 — Automatic sequencing
 
@@ -78,7 +80,10 @@ AUTO / MANUAL target ownership remains separate from lifecycle.
 - Manual per-flight runway assignment.
 - Automatic runway allocation chooses the earliest feasible active arrival runway and uses runway load as a tie-break.
 - VTBD + VTBS can operate on the same shared timeline.
-- Current VTBS project cross-runway rule remains **1 minute** pending local validation.
+- **VTBD dual-arrival sequencing is airport-wide:** aircraft on 21R and 21L may not land simultaneously. For cross-runway pairs, the required base separation is taken from the **follower's landing runway**.
+  - 21L → 21R uses the configured 21R LAND SEP.
+  - 21R → 21L uses the configured 21L LAND SEP.
+- **VTBS cross-runway sequencing** keeps the current project working stagger of **1 minute** between different active arrival runways, before applying any larger follower-specific special minimum.
 
 Current spacing baseline:
 
@@ -145,15 +150,43 @@ The planning-GS calculation is a project estimate, not a claim of MAESTRO's inte
 
 This also covers common IVAO late-connect / late-spawn behavior.
 
-## Part 12 — Pairwise separation
+## Part 12 — Landing separation model
 
-- Same-runway spacing can depend on leader/follower pair.
-- LAND SEP remains the floor.
-- Current project working special values:
-  - A380-related: at least **3 min**.
-  - ATR-related: at least **4 min**.
+LAND SEP is treated as a landing-sequence constraint rather than a wake rule tied to the leader.
 
-These values still require authoritative Thailand operational validation.
+### Follower-based special minima
+
+Special values belong to the **aircraft that is landing next**:
+
+- If the **follower is ATR / AT7x**, required separation is at least **4 min**.
+- If the **follower is A380 / A388 / wake J**, required separation is at least **3 min**.
+- If ATR or A380 is the leader and the following aircraft is a normal type, the following aircraft returns to its normal runway/cross-runway rule.
+
+The engine therefore applies:
+
+`required separation = MAX(base rule for follower, follower special minimum)`
+
+### Same-runway
+
+- Base rule = configured LAND SEP of the follower's runway, converted using the project reference speed.
+- Follower ATR/A380 special value can increase that requirement.
+
+### VTBD cross-runway
+
+- 21R and 21L are one airport-wide arrival sequence.
+- Aircraft cannot receive simultaneous landing targets on the two arrival runways.
+- Base rule for a cross-runway pair = configured LAND SEP of the **follower runway**.
+- Example with a 4 NM 21R setting and 7.1 NM 21L setting:
+  - `21L → 21R` = 21R rule (4 NM), unless follower special is larger.
+  - `21R → 21L` = 21L rule (7.1 NM), unless follower special is larger.
+
+### VTBS cross-runway
+
+- Different-runway base rule = **1 minute** current project working value.
+- Follower ATR/A380 special minimum can increase the 1-minute stagger.
+- Same-runway traffic continues to use the configured runway LAND SEP.
+
+These local working values still require authoritative Thailand operational validation.
 
 ## Part 13 — MAESTRO operational actions
 
@@ -263,7 +296,8 @@ When ATC sets a manual target, the target remains fixed while live ETA-FF contin
   - VTBS cross-runway stagger;
   - runway LAND SEP;
   - STAR nominal timings;
-  - ATR / A380 pairwise rules;
+  - follower-based ATR / A380 special landing minima;
+  - VTBD follower-runway cross-runway separation model;
   - final-position Frozen detector;
   - authoritative VTBD AAR.
 
