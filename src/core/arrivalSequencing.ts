@@ -34,6 +34,36 @@ export type AmanSequenceConfig = {
   ) => number
 }
 
+// The React application keeps automatic planning and manual target timing separate.
+// A controller may nevertheless drag one aircraft through another and thereby change
+// the landing order. This tiny shared-in-module order table lets the interaction runtime
+// express that order without changing the automatic ETA/STA calculations themselves.
+const manualSequenceOrder = new Map<string, number>()
+
+export function amanSequenceOrderIdentity(airport: string, callsign: string) {
+  return `${airport.trim().toUpperCase()}:${callsign.trim().toUpperCase()}`
+}
+
+function airportFromPredictionId(id: string) {
+  const upper = id.toUpperCase()
+  return upper.includes('VTBS') ? 'VTBS' : 'VTBD'
+}
+
+export function amanSequenceOrderKey(arrival: Pick<AmanArrivalPrediction, 'id' | 'callsign'>) {
+  return amanSequenceOrderIdentity(airportFromPredictionId(arrival.id), arrival.callsign)
+}
+
+export function setAmanManualSequenceOrderSnapshot(snapshot: Readonly<Record<string, number>>) {
+  manualSequenceOrder.clear()
+  for (const [key, rank] of Object.entries(snapshot)) {
+    if (Number.isFinite(rank) && rank > 0) manualSequenceOrder.set(key, rank)
+  }
+}
+
+function sequenceOrderRank(arrival: Pick<AmanArrivalPrediction, 'id' | 'callsign'>, fallback: number) {
+  return manualSequenceOrder.get(amanSequenceOrderKey(arrival)) ?? fallback
+}
+
 const toMillis = (iso: string) => {
   const value = new Date(iso).getTime()
   if (!Number.isFinite(value)) throw new Error(`Invalid UTC timestamp: ${iso}`)
@@ -139,7 +169,18 @@ export function autoSequenceUnstableArrivals(
 
   return rows
     .sort((a, b) => toMillis(a.tldt) - toMillis(b.tldt) || a.callsign.localeCompare(b.callsign))
-    .map((row, index) => ({ ...row, sequenceIndex: index + 1 }))
+    .map((row, index) => {
+      const result = { ...row } as AmanSequenceRow
+      // Keep sequenceIndex live. applyManualTargetsWithCascade reads this property on
+      // every manual-target render; changing the controller order snapshot therefore
+      // lets a dragged aircraft cross another aircraft while separation is still applied.
+      Object.defineProperty(result, 'sequenceIndex', {
+        enumerable: true,
+        configurable: true,
+        get: () => sequenceOrderRank(result, index + 1),
+      })
+      return result
+    })
 }
 
 export function averageDelayMinutes(rows: Pick<AmanSequenceRow, 'delayMinutes'>[]) {
