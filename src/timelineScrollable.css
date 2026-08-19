@@ -1,0 +1,217 @@
+/* Real-MAESTRO-inspired scrollable time strip.
+   The viewport is not asked to contain the whole planning horizon. Instead, the timeline
+   is a tall four-hour world at the existing 10 px/min scale and the controller scrolls
+   upward for later times. Aircraft stay on their true STA/TLDT Y coordinate. */
+
+.aman-timeline-stage[data-scroll-timeline="true"] {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #506986 #08111f;
+  background: #08111f !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar {
+  width: 11px;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar-track {
+  background: #08111f;
+  border-left: 1px solid #182a40;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar-thumb {
+  background: #425a74;
+  border: 2px solid #08111f;
+  border-radius: 5px;
+}
+
+.aman-timeline-scroll-spacer {
+  position: relative;
+  width: 1px;
+  min-width: 1px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"]::after {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--timeline-content-height, 2500px) !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-time-axis {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--timeline-content-height, 2500px) !important;
+  transform-origin: top left;
+  will-change: transform;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-layer {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--timeline-content-height, 2500px) !important;
+}
+
+/* The red ACTUAL line lives inside the scrollable world. If the controller scrolls
+   toward +4h it can leave the viewport, just like looking away from current time. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-current-line {
+  position: absolute !important;
+}
+
+.aman-timeline-now-button {
+  height: 29px;
+  padding: 0 10px;
+  border: 1px solid #35516f;
+  border-radius: 3px;
+  background: #0b1929;
+  color: #8faecc;
+  font: 900 10px/27px Consolas, monospace;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+
+.aman-timeline-now-button:hover,
+.aman-timeline-now-button.is-away {
+  border-color: #5a7da4;
+  color: #d5e8f8;
+  background: #11243a;
+}
+
+.aman-timeline-now-button.is-away::before {
+  content: '↘ ';
+  color: #ef6b64;
+}
+
+/* Match the real MAESTRO screenshot: one dense text strip, not a card. The full tooltip
+   still contains ETA-FF / EDLY / ADLY / operational detail; the timeline stays glanceable. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
+  min-height: 15px !important;
+  height: 15px !important;
+  width: min(600px, calc(50% - 34px));
+  grid-template-columns: 48px minmax(108px, 1.3fr) 46px 24px 50px 40px 54px !important;
+  gap: 6px !important;
+  padding: 0 5px !important;
+  border-left-width: 2px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+  line-height: 15px !important;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .65);
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
+  min-height: 15px !important;
+  height: 15px !important;
+  width: min(600px, calc(50% - 34px));
+  grid-template-columns: 54px 40px 50px 24px 46px minmax(108px, 1.3fr) 48px !important;
+  gap: 6px !important;
+  padding: 0 5px !important;
+  border-left: 0 !important;
+  border-right-width: 2px !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+  line-height: 15px !important;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .65);
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
+  font-size: 13px !important;
+  line-height: 15px !important;
+  font-weight: 950 !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+  font-size: 11px !important;
+  line-height: 15px !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+  height: 15px !important;
+  min-height: 15px !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+  width: 52px !important;
+  min-width: 52px !important;
+  padding: 0 3px !important;
+  border-color: rgba(58, 91, 119, .7) !important;
+  background: rgba(7, 17, 29, .72) !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > b {
+  height: 15px !important;
+  min-height: 15px !important;
+  line-height: 15px !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before {
+  font-size: 12px !important;
+  line-height: 15px !important;
+}
+
+/* Only the row under the pointer becomes a strip, so a dense bank remains legible without
+   drawing dozens of overlapping rectangles. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row:hover,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.is-dragging {
+  z-index: 30 !important;
+  background: rgba(12, 27, 44, .96) !important;
+  box-shadow: inset 0 1px rgba(103, 137, 170, .2), inset 0 -1px rgba(103, 137, 170, .2) !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.is-past {
+  opacity: .38 !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-empty-sequence {
+  transform: translateY(-50%);
+}
+
+/* Keep the centre scale prominent like the reference display. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span {
+  font-size: 12px !important;
+  font-weight: 850 !important;
+  color: #a8bbcf !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major {
+  border-top-color: rgba(103, 137, 176, .22) !important;
+}
+
+@media (max-width: 1250px) {
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
+    width: calc(50% - 28px);
+    grid-template-columns: 44px minmax(90px, 1.15fr) 40px 22px 44px 36px 48px !important;
+    gap: 4px !important;
+    font-size: 10px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
+    grid-template-columns: 48px 36px 44px 22px 40px minmax(90px, 1.15fr) 44px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
+    font-size: 12px !important;
+  }
+}
