@@ -1,3 +1,5 @@
+import { reconcileAmanFlights } from '../../_lib/amanSharedState.js';
+
 const WHAZZUP_TTL_MS = 15000;
 const FLIGHT_PLAN_TTL_MS = 5 * 60 * 1000;
 const TAKEOFF_FOUND_TTL_MS = 6 * 60 * 60 * 1000;
@@ -287,13 +289,25 @@ export async function onRequestGet(context) {
       },
     );
 
+    const fetchedAt = new Date().toISOString();
+    const liveFlights = flights
+      .filter((flight) => flight.callsign)
+      .filter((flight) => !['V', 'VFR'].includes(flight.flightRules || ''))
+      .sort((a, b) => a.callsign.localeCompare(b.callsign));
+
+    let sharedStateError = null;
+    let reconciledFlights = liveFlights;
+    try {
+      reconciledFlights = await reconcileAmanFlights(context.env, airport, liveFlights, fetchedAt);
+    } catch (error) {
+      sharedStateError = error instanceof Error ? error.message : String(error);
+    }
+
     return json({
       airport,
-      fetchedAt: new Date().toISOString(),
-      flights: flights
-        .filter((flight) => flight.callsign)
-        .filter((flight) => !['V', 'VFR'].includes(flight.flightRules || ''))
-        .sort((a, b) => a.callsign.localeCompare(b.callsign)),
+      fetchedAt,
+      flights: reconciledFlights,
+      sharedStateError,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
