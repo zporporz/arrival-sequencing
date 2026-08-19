@@ -1,7 +1,6 @@
 /* Real-MAESTRO-inspired scrollable time strip.
-   The viewport is not asked to contain the whole planning horizon. Instead, the timeline
-   is a tall four-hour world at the existing 10 px/min scale and the controller scrolls
-   upward for later times. Aircraft stay on their true STA/TLDT Y coordinate. */
+   Four hours remain scrollable rather than compressed into one viewport. The display
+   scale is now 20 px/min, so every minute has enough physical height for readable text. */
 
 .aman-timeline-stage[data-scroll-timeline="true"] {
   overflow-y: auto !important;
@@ -13,15 +12,11 @@
   background: #08111f !important;
 }
 
-.aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar {
-  width: 11px;
-}
-
+.aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar { width: 11px; }
 .aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar-track {
   background: #08111f;
   border-left: 1px solid #182a40;
 }
-
 .aman-timeline-stage[data-scroll-timeline="true"]::-webkit-scrollbar-thumb {
   background: #425a74;
   border: 2px solid #08111f;
@@ -39,28 +34,19 @@
 .aman-timeline-stage[data-scroll-timeline="true"]::after {
   top: 0 !important;
   bottom: auto !important;
-  height: var(--timeline-content-height, 2500px) !important;
+  height: var(--timeline-content-height, 5000px) !important;
 }
-
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-time-axis {
-  top: 0 !important;
-  bottom: auto !important;
-  height: var(--timeline-content-height, 2500px) !important;
-  transform-origin: top left;
-  will-change: transform;
-}
-
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-time-axis,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-layer {
   top: 0 !important;
   bottom: auto !important;
-  height: var(--timeline-content-height, 2500px) !important;
+  height: var(--timeline-content-height, 5000px) !important;
 }
-
-/* The red ACTUAL line lives inside the scrollable world. If the controller scrolls
-   toward +4h it can leave the viewport, just like looking away from current time. */
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-current-line {
-  position: absolute !important;
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-time-axis {
+  transform-origin: top left;
+  will-change: transform;
 }
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-current-line { position: absolute !important; }
 
 .aman-timeline-now-button {
   height: 29px;
@@ -73,61 +59,61 @@
   letter-spacing: .06em;
   cursor: pointer;
 }
-
 .aman-timeline-now-button:hover,
 .aman-timeline-now-button.is-away {
   border-color: #5a7da4;
   color: #d5e8f8;
   background: #11243a;
 }
+.aman-timeline-now-button.is-away::before { content: '↘ '; color: #ef6b64; }
 
-.aman-timeline-now-button.is-away::before {
-  content: '↘ ';
-  color: #ef6b64;
-}
-
-/* Match the real MAESTRO screenshot: one dense text strip, not a card. The full tooltip
-   still contains ETA-FF / EDLY / ADLY / operational detail; the timeline stays glanceable. */
+/* Flight strip: one minute is 20 px and one strip is 20 px high. This mirrors the
+   reference MAESTRO philosophy: clear text rows aligned directly to the time scale. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
-  min-height: 15px !important;
-  height: 15px !important;
-  width: min(600px, calc(50% - 34px));
-  grid-template-columns: 48px minmax(108px, 1.3fr) 46px 24px 50px 40px 54px !important;
-  gap: 6px !important;
-  padding: 0 5px !important;
+  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+  min-height: 20px !important;
+  height: 20px !important;
+  width: min(660px, calc(50% - 38px));
+  grid-template-columns: 58px minmax(116px, 1.35fr) 52px 30px 58px 42px 60px !important;
+  gap: 7px !important;
+  padding: 0 7px !important;
   border-left-width: 2px !important;
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  font-size: 11px !important;
-  line-height: 15px !important;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, .65);
+  font-size: 13px !important;
+  line-height: 20px !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.68);
+  overflow: visible !important;
 }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
-  min-height: 15px !important;
-  height: 15px !important;
-  width: min(600px, calc(50% - 34px));
-  grid-template-columns: 54px 40px 50px 24px 46px minmax(108px, 1.3fr) 48px !important;
-  gap: 6px !important;
-  padding: 0 5px !important;
+  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+  min-height: 20px !important;
+  height: 20px !important;
+  width: min(660px, calc(50% - 38px));
+  grid-template-columns: 60px 42px 58px 30px 52px minmax(116px, 1.35fr) 58px !important;
+  gap: 7px !important;
+  padding: 0 7px !important;
   border-left: 0 !important;
   border-right-width: 2px !important;
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  font-size: 11px !important;
-  line-height: 15px !important;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, .65);
+  font-size: 13px !important;
+  line-height: 20px !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.68);
+  overflow: visible !important;
 }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
-  font-size: 13px !important;
-  line-height: 15px !important;
+  font-size: 15px !important;
+  line-height: 20px !important;
   font-weight: 950 !important;
+  letter-spacing: .01em;
 }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
@@ -136,62 +122,82 @@
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-  font-size: 11px !important;
-  line-height: 15px !important;
+  font-size: 13px !important;
+  line-height: 20px !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code {
+  overflow: visible;
+  text-align: center;
 }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-  height: 15px !important;
-  min-height: 15px !important;
+  height: 20px !important;
+  min-height: 20px !important;
 }
-
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-  width: 52px !important;
-  min-width: 52px !important;
-  padding: 0 3px !important;
-  border-color: rgba(58, 91, 119, .7) !important;
-  background: rgba(7, 17, 29, .72) !important;
+  width: 58px !important;
+  min-width: 58px !important;
+  padding: 0 4px !important;
+  border-color: rgba(58,91,119,.78) !important;
+  background: rgba(7,17,29,.78) !important;
+  font-weight: 900 !important;
 }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > b {
-  height: 15px !important;
-  min-height: 15px !important;
-  line-height: 15px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  line-height: 20px !important;
 }
-
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before {
-  font-size: 12px !important;
-  line-height: 15px !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  font-weight: 950 !important;
 }
 
-/* Only the row under the pointer becomes a strip, so a dense bank remains legible without
-   drawing dozens of overlapping rectangles. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row:hover,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.is-dragging {
   z-index: 30 !important;
-  background: rgba(12, 27, 44, .96) !important;
-  box-shadow: inset 0 1px rgba(103, 137, 170, .2), inset 0 -1px rgba(103, 137, 170, .2) !important;
+  background: rgba(12,27,44,.96) !important;
+  box-shadow: inset 0 1px rgba(103,137,170,.2), inset 0 -1px rgba(103,137,170,.2) !important;
 }
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.is-past { opacity: .38 !important; }
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-empty-sequence { transform: translateY(-50%); }
 
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.is-past {
-  opacity: .38 !important;
+/* The centre scale is deliberately larger now that vertical space is scrollable. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick {
+  border-top-color: rgba(91,120,155,.11) !important;
 }
-
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-empty-sequence {
-  transform: translateY(-50%);
-}
-
-/* Keep the centre scale prominent like the reference display. */
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span {
-  font-size: 12px !important;
-  font-weight: 850 !important;
-  color: #a8bbcf !important;
-}
-
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major {
-  border-top-color: rgba(103, 137, 176, .22) !important;
+  border-top-color: rgba(113,149,190,.28) !important;
+}
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span {
+  left: calc(50% - 72px) !important;
+  top: -9px !important;
+  width: 58px !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  color: #b4c8db !important;
+}
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i {
+  height: 2px !important;
+  background: #607995 !important;
+}
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i {
+  width: 18px !important;
+  left: calc(50% - 9px) !important;
+  background: #a0b2c7 !important;
 }
 
 @media (max-width: 1250px) {
@@ -200,18 +206,21 @@
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
-    width: calc(50% - 28px);
-    grid-template-columns: 44px minmax(90px, 1.15fr) 40px 22px 44px 36px 48px !important;
-    gap: 4px !important;
-    font-size: 10px !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
-    grid-template-columns: 48px 36px 44px 22px 40px minmax(90px, 1.15fr) 44px !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
+    width: calc(50% - 30px);
+    grid-template-columns: 52px minmax(96px,1.25fr) 46px 26px 52px 38px 54px !important;
+    gap: 5px !important;
+    padding: 0 5px !important;
     font-size: 12px !important;
   }
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
+    grid-template-columns: 54px 38px 52px 26px 46px minmax(96px,1.25fr) 52px !important;
+  }
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong { font-size: 14px !important; }
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select { font-size: 12px !important; }
 }
