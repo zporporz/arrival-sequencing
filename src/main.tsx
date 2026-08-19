@@ -20,8 +20,9 @@ import './operationalAdvisory.css'
 import './callsignState.css'
 import './planningProtection.css'
 import './operationalHmiReadable.css'
+import './maestroV24.css'
 import AuthGate from './AuthGate'
-import App from './App'
+import App from './AppMaestroV24'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
@@ -31,24 +32,26 @@ import { installSystemPanelRuntime } from './systemPanelRuntime'
 import { installSharedAmanRuntime } from './sharedAmanRuntime'
 import { installOperationalAdvisoryRuntime } from './operationalAdvisoryRuntime'
 import { installInteractionGuardRuntime } from './interactionGuardRuntime'
+import { installMaestroV24CompatRuntime } from './maestroV24CompatRuntime'
 
 installReconnectTrafficFetch()
 
 function AppWithRuntime() {
   useEffect(() => {
+    // Compatibility decorator runs before the legacy lifecycle/advisory runtimes so
+    // ETA-FF-labelled rows still expose the historical Predicted IAWP token they parse.
+    const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
     const removeTimelineRuntime = installTimelineAxisRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
     const removeAirportScopeRuntime = installAirportScopeRuntime()
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
-    // Install the interaction guard before sharedAmanRuntime so a plain click/double-click
-    // can be filtered at document bubble phase after React handles it but before shared
-    // pointer-up persistence mistakes the click for a drag.
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     return () => {
+      removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
       removeFlightStatusRuntime()
       removeAirportScopeRuntime()
