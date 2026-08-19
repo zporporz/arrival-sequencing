@@ -63,6 +63,29 @@ export type IvaoArrivalTrafficFlight = {
   flightPlanDetailError: string | null
 }
 
+export type AircraftPerformanceProfile = {
+  source: 'SIMBRIEF'
+  aircraftType: string
+  aircraftName: string | null
+  aircraftDefaultCruise: string | null
+  aircraftSpeed: string | null
+  descentProfile: string
+  descentMach: number
+  descentIasKt: number
+  descentBelow10000IasKt: number
+}
+
+export type AircraftPerformancePayload = {
+  type: string
+  found: boolean
+  profile?: AircraftPerformanceProfile
+  fallback?: {
+    descentMach: number | null
+    descentIasKt: number
+    descentBelow10000IasKt: number
+  }
+}
+
 export type IvaoTrafficPayload<TFlight = IvaoArrivalTrafficFlight> = {
   airport: string
   fetchedAt: string
@@ -119,6 +142,11 @@ export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: str
   const params = new URLSearchParams({ airport: airport.trim().toUpperCase() })
   if (mode) params.set('mode', mode)
   return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`)
+}
+
+export function readAircraftPerformance(type: string) {
+  const params = new URLSearchParams({ type: type.trim().toUpperCase() })
+  return apiGet<AircraftPerformancePayload>(`/api/sequence/aircraft-performance?${params.toString()}`)
 }
 
 export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string) {
