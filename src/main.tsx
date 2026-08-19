@@ -34,6 +34,8 @@ import { installSharedAmanRuntime } from './sharedAmanRuntime'
 import { installOperationalAdvisoryRuntime } from './operationalAdvisoryRuntime'
 import { installInteractionGuardRuntime } from './interactionGuardRuntime'
 import { installMaestroV24CompatRuntime } from './maestroV24CompatRuntime'
+import { installManualSequenceReorderRuntime } from './manualSequenceReorderRuntime'
+import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 
 installReconnectTrafficFetch()
 
@@ -50,7 +52,9 @@ function AppWithRuntime() {
     const removeSystemPanelRuntime = installSystemPanelRuntime()
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
+    const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
+    const removeTimelineReadableRuntime = installTimelineReadableRuntime()
     return () => {
       removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
@@ -61,7 +65,9 @@ function AppWithRuntime() {
       removeSystemPanelRuntime()
       removeInteractionGuardRuntime()
       removeSharedAmanRuntime()
+      removeManualSequenceReorderRuntime()
       removeOperationalAdvisoryRuntime()
+      removeTimelineReadableRuntime()
     }
   }, [])
 
