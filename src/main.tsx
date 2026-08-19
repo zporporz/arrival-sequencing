@@ -21,11 +21,10 @@ import './callsignState.css'
 import './planningProtection.css'
 import './operationalHmiReadable.css'
 import './maestroV24.css'
-import './timelineLabelPacking.css'
+import './timelineCompactRows.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
-import { installTimelineLabelPackingRuntime } from './timelineLabelPackingRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
@@ -52,7 +51,6 @@ function AppWithRuntime() {
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
-    const removeTimelineLabelPackingRuntime = installTimelineLabelPackingRuntime()
     return () => {
       removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
@@ -64,7 +62,6 @@ function AppWithRuntime() {
       removeInteractionGuardRuntime()
       removeSharedAmanRuntime()
       removeOperationalAdvisoryRuntime()
-      removeTimelineLabelPackingRuntime()
     }
   }, [])
 

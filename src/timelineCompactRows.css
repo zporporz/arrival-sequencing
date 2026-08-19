@@ -1,0 +1,219 @@
+/* Compact true-time timeline rows.
+   Every row stays exactly on its real STA/TLDT anchor. No visual packing, no leader lines.
+   The row is deliberately close to one minute of the 10 px/min scale so busy streams
+   remain time-readable instead of turning into displaced callout cards. */
+
+.aman-flight-row,
+.aman-flight-row[data-display-side="RIGHT"],
+.aman-flight-row.display-right {
+  transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
+  min-height: 18px !important;
+  height: 18px !important;
+  width: min(720px, calc(50% - 34px));
+  grid-template-columns: 45px minmax(78px, 1.2fr) 40px 22px 45px 166px 48px !important;
+  gap: 4px !important;
+  padding: 1px 5px !important;
+  border-left-width: 2px !important;
+  background: rgba(7, 15, 27, .78) !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+.aman-flight-row[data-display-side="LEFT"],
+.aman-flight-row.display-left {
+  transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
+  min-height: 18px !important;
+  height: 18px !important;
+  width: min(720px, calc(50% - 34px));
+  grid-template-columns: 48px 166px 45px 22px 40px minmax(78px, 1.2fr) 45px !important;
+  gap: 4px !important;
+  padding: 1px 5px !important;
+  border-left: 0 !important;
+  border-right-width: 2px !important;
+  background: rgba(7, 15, 27, .78) !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+.aman-flight-row .tldt,
+.aman-flight-row > span:nth-child(3),
+.aman-flight-row > span:nth-child(5),
+.aman-flight-row .fix-code,
+.aman-flight-row > em,
+.aman-flight-row .runway-assignment,
+.aman-flight-row .runway-assignment select {
+  font-size: 9px !important;
+  line-height: 1 !important;
+}
+
+.aman-flight-row .tldt {
+  font-weight: 900;
+}
+
+.aman-flight-row > strong {
+  font-size: 10px !important;
+  line-height: 1 !important;
+  font-weight: 950;
+}
+
+.aman-flight-row .fix-code {
+  font-weight: 950;
+}
+
+.aman-flight-row .runway-assignment,
+.aman-flight-row .runway-assignment select {
+  height: 16px !important;
+  min-height: 16px !important;
+}
+
+.aman-flight-row .runway-assignment select {
+  width: 46px !important;
+  min-width: 46px !important;
+  padding: 0 2px !important;
+  border-radius: 2px !important;
+}
+
+/* TDLY + EDLY/ADLY + matrix + LEAVE/GS are kept on one horizontal line. */
+.aman-flight-row > b,
+.aman-delay-stack {
+  min-width: 0 !important;
+  height: 16px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 3px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+  text-align: right !important;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > b,
+.aman-flight-row.display-left > b {
+  justify-content: flex-start !important;
+  text-align: left !important;
+}
+
+.aman-delay-stack > span {
+  flex: 0 0 auto;
+  font-size: 10px !important;
+  line-height: 1 !important;
+}
+
+.aman-delay-split,
+.aman-matrix-label,
+.aman-gap-label {
+  flex: 0 0 auto;
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 0 2px !important;
+  border-radius: 2px !important;
+  font-size: 7px !important;
+  line-height: 12px !important;
+}
+
+.aman-flight-row > b[data-advisory] {
+  overflow: visible !important;
+}
+
+.aman-flight-row > b[data-advisory]::after {
+  content: attr(data-advisory);
+  flex: 0 0 auto;
+  display: inline-block !important;
+  margin: 0 !important;
+  padding: 0 2px !important;
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font: 900 7px/12px Consolas, monospace !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+}
+
+/* A compact row should not create extra vertical badges above/below itself. */
+.aman-flight-row[data-connection-state="GHOST"]::after,
+.aman-flight-row[data-connection-state="RECONNECTED"]::after,
+.aman-flight-row[data-connection-state="POSITION_JUMP"]::after {
+  top: 0 !important;
+  right: 2px !important;
+  transform: translateY(-100%);
+  font-size: 7px !important;
+  padding: 1px 3px !important;
+}
+
+.aman-flight-row[data-display-side="LEFT"][data-connection-state]::after {
+  right: auto !important;
+  left: 2px !important;
+}
+
+/* If two aircraft are exceptionally close, preserving the correct time is more important
+   than creating an opaque pile of boxes. The translucent rows let the time order remain visible. */
+.aman-flight-row:hover,
+.aman-flight-row.is-dragging {
+  z-index: 20 !important;
+  background: rgba(10, 23, 39, .98) !important;
+}
+
+/* Remove every remnant of the abandoned packing presentation if a stale browser DOM has it. */
+.aman-time-anchor-link {
+  display: none !important;
+}
+
+.aman-flight-row[data-label-packed] {
+  box-shadow: none !important;
+}
+
+@media (max-width: 1250px) {
+  .aman-flight-row,
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"],
+  .aman-flight-row.display-left,
+  .aman-flight-row.display-right {
+    min-height: 17px !important;
+    height: 17px !important;
+    width: calc(50% - 28px);
+    grid-template-columns: 40px minmax(66px, 1fr) 34px 19px 40px 142px 42px !important;
+    gap: 3px !important;
+    padding: 1px 4px !important;
+    font-size: 8px !important;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row.display-left {
+    grid-template-columns: 42px 142px 40px 19px 34px minmax(66px, 1fr) 40px !important;
+  }
+
+  .aman-flight-row > strong { font-size: 9px !important; }
+  .aman-flight-row .tldt,
+  .aman-flight-row > span:nth-child(3),
+  .aman-flight-row > span:nth-child(5),
+  .aman-flight-row .fix-code { font-size: 8px !important; }
+  .aman-delay-stack > span { font-size: 9px !important; }
+  .aman-delay-split,
+  .aman-matrix-label,
+  .aman-gap-label,
+  .aman-flight-row > b[data-advisory]::after { font-size: 6.5px !important; }
+}
+
+@media (max-width: 700px) {
+  .aman-flight-row,
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"],
+  .aman-flight-row.display-left,
+  .aman-flight-row.display-right {
+    min-height: 15px !important;
+    height: 15px !important;
+  }
+
+  .aman-delay-split,
+  .aman-matrix-label,
+  .aman-gap-label {
+    display: none !important;
+  }
+}
