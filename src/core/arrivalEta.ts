@@ -1,4 +1,4 @@
-import type { IvaoArrivalTrafficFlight } from './api'
+import type { AircraftPerformanceProfile, IvaoArrivalTrafficFlight } from './api'
 
 export type Coordinates = { lat: number; lon: number }
 
@@ -44,6 +44,10 @@ export type ArrivalEtaEstimate = {
 
 const MIN_LIVE_GS_KT = 80
 const MAX_ROUTE_DEVIATION_NM = 100
+const DESCENT_PROFILE_START_ALTITUDE_FT = 30000
+const DESCENT_LOW_ALTITUDE_FT = 10000
+const FALLBACK_DESCENT_IAS_KT = 280
+const FALLBACK_LOW_DESCENT_IAS_KT = 250
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
@@ -114,13 +118,36 @@ function fixDistances(geometry: RouteGeometry, fix: string) {
   return distances.sort((a, b) => a - b)
 }
 
+function effectiveLiveSpeedKt(
+  flight: IvaoArrivalTrafficFlight,
+  performance: AircraftPerformanceProfile | null,
+) {
+  const altitude = finite(flight.altitude) ? flight.altitude : null
+  const liveGs = finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT
+    ? flight.groundSpeed
+    : null
+
+  if (altitude != null && altitude <= DESCENT_LOW_ALTITUDE_FT) {
+    return performance?.descentBelow10000IasKt ?? FALLBACK_LOW_DESCENT_IAS_KT
+  }
+
+  if (altitude != null && altitude <= DESCENT_PROFILE_START_ALTITUDE_FT) {
+    return performance?.descentIasKt ?? FALLBACK_DESCENT_IAS_KT
+  }
+
+  return liveGs
+}
+
 function liveRouteEstimate(
   flight: IvaoArrivalTrafficFlight,
   geometry: RouteGeometry,
   refFix: string,
   fetchedAt: string,
+  performance: AircraftPerformanceProfile | null,
 ): ArrivalEtaEstimate | null {
-  if (!finite(flight.groundSpeed) || flight.groundSpeed < MIN_LIVE_GS_KT) return null
+  const effectiveSpeed = effectiveLiveSpeedKt(flight, performance)
+  if (!finite(effectiveSpeed) || effectiveSpeed < MIN_LIVE_GS_KT) return null
+
   const progress = routeProgress(flight, geometry)
   if (!progress || progress.offRouteNm > MAX_ROUTE_DEVIATION_NM) return null
 
@@ -132,30 +159,33 @@ function liveRouteEstimate(
 
   if (ahead != null) {
     const remainingNm = Math.max(0, ahead - progress.progressNm) + progress.offRouteNm
-    const etaMs = trackBaseMs + remainingNm / flight.groundSpeed * 3600000
+    const etaMs = trackBaseMs + remainingNm / effectiveSpeed * 3600000
+    const usingProfile = finite(flight.altitude) && flight.altitude <= DESCENT_PROFILE_START_ALTITUDE_FT
     return {
       source: 'LIVE_ROUTE',
       predictedIawpAt: new Date(etaMs).toISOString(),
       confidence: 'HIGH',
       remainingNm,
       offRouteNm: progress.offRouteNm,
-      groundSpeedKt: flight.groundSpeed,
+      groundSpeedKt: effectiveSpeed,
       pastCrossing: false,
-      reason: null,
+      reason: usingProfile
+        ? `Descent profile ${performance?.descentProfile ?? `${FALLBACK_DESCENT_IAS_KT}/${FALLBACK_LOW_DESCENT_IAS_KT}`} applied from FL300`
+        : null,
     }
   }
 
   const passed = targets.filter((distance) => distance < progress.progressNm - 1).at(-1)
   if (passed == null) return null
   const distanceSinceFix = Math.max(0, progress.progressNm - passed) + progress.offRouteNm
-  const crossingMs = trackBaseMs - distanceSinceFix / flight.groundSpeed * 3600000
+  const crossingMs = trackBaseMs - distanceSinceFix / effectiveSpeed * 3600000
   return {
     source: 'LIVE_ROUTE',
     predictedIawpAt: new Date(crossingMs).toISOString(),
     confidence: 'MEDIUM',
     remainingNm: 0,
     offRouteNm: progress.offRouteNm,
-    groundSpeedKt: flight.groundSpeed,
+    groundSpeedKt: effectiveSpeed,
     pastCrossing: true,
     reason: 'IAWP already passed; crossing time back-estimated from current track',
   }
@@ -196,9 +226,10 @@ export function estimateIawpArrival(
   refFix: string,
   nominalStarSeconds: number,
   fetchedAt: string,
+  performance: AircraftPerformanceProfile | null = null,
 ): ArrivalEtaEstimate {
   if (geometry) {
-    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt)
+    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, performance)
     if (live) return live
   }
 
