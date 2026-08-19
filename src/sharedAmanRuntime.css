@@ -1,0 +1,26 @@
+.aman-flight-row[data-target-mode="MANUAL"]{
+  box-shadow:inset 0 0 0 1px rgba(242,166,74,.32);
+}
+.aman-flight-row[data-target-mode="MANUAL"] .tldt{
+  color:#ffc36a;
+  font-weight:900;
+}
+.aman-flight-row[data-target-mode="MANUAL"] .runway-assignment select,
+.aman-flight-row[data-target-mode="MANUAL"] .runway-assignment{
+  border-color:#a06e2f;
+}
+.aman-runway-config-block[data-shared-revision]{
+  position:relative;
+}
+.aman-runway-config-block[data-shared-revision]::after{
+  content:'SYNC';
+  position:absolute;
+  right:4px;
+  bottom:2px;
+  color:#4f7194;
+  font:800 6px/1 Consolas,monospace;
+  letter-spacing:.08em;
+  pointer-events:none;
+}
+.aman-runtime-shared-status dd{color:#72d7a9!important}
+.aman-runtime-shared-status dd.is-warning{color:#ff8078!important}
