@@ -39,6 +39,7 @@ import { installManualSequenceReorderRuntime } from './manualSequenceReorderRunt
 import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
 import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
+import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRuntime'
 
 installReconnectTrafficFetch()
 
@@ -60,6 +61,7 @@ function AppWithRuntime() {
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
     const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
+    const removeKnownInboundAdmissionRuntime = installKnownInboundAdmissionRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -76,6 +78,7 @@ function AppWithRuntime() {
       removeManualSequenceReorderRuntime()
       removeTimelineDisplayScaleRuntime()
       removeManualTargetSyncCompatRuntime()
+      removeKnownInboundAdmissionRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
