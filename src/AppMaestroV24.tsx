@@ -205,6 +205,13 @@ function formatHm(value: string | null) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
 }
 
+function formatHms(value: string | null) {
+  if (!value) return '--:--:--'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '--:--:--'
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}:${String(date.getUTCSeconds()).padStart(2, '0')}`
+}
+
 function formatDelay(minutes: number) {
   const rounded = Math.round(minutes * 10) / 10
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(rounded % 1 === 0 ? 0 : 1)}`
@@ -319,22 +326,41 @@ function isAtrType(value: string | null) {
   return type.startsWith('AT7') || type.startsWith('ATR')
 }
 
-function pairwiseLandingSeparationSeconds(
-  leader: AmanArrivalPrediction,
+function followerLandingSeparationSeconds(
   follower: AmanArrivalPrediction,
   runwayBaseSeconds: number,
 ) {
   let required = Math.max(0, runwayBaseSeconds)
-  const leaderType = String(leader.aircraftType || '').trim().toUpperCase()
-  const leaderWake = String(leader.wakeTurbulence || '').trim().toUpperCase()
+  const followerType = String(follower.aircraftType || '').trim().toUpperCase()
+  const followerWake = String(follower.wakeTurbulence || '').trim().toUpperCase()
 
-  if (leaderWake === 'J' || leaderType === 'A388') {
+  if (followerWake === 'J' || followerType === 'A388' || followerType === 'A380') {
     required = Math.max(required, AMAN_SPECIAL_SEPARATION_MINUTES.A380 * 60)
   }
-  if (isAtrType(leader.aircraftType) || isAtrType(follower.aircraftType)) {
+  if (isAtrType(follower.aircraftType)) {
     required = Math.max(required, AMAN_SPECIAL_SEPARATION_MINUTES.ATR * 60)
   }
   return required
+}
+
+function pairwiseLandingSeparationSeconds(
+  _leader: AmanArrivalPrediction,
+  follower: AmanArrivalPrediction,
+  runwayBaseSeconds: number,
+) {
+  return followerLandingSeparationSeconds(follower, runwayBaseSeconds)
+}
+
+function crossRunwayLandingSeparationSeconds(
+  airport: AirportCode,
+  leader: AmanArrivalPrediction,
+  follower: AmanArrivalPrediction,
+  runwaySpacingSeconds: Record<string, number>,
+) {
+  const baseSeconds = airport === 'VTBD'
+    ? Math.max(0, runwaySpacingSeconds[follower.runway] ?? 0)
+    : VTBS_CROSS_RUNWAY_STAGGER_SECONDS
+  return pairwiseLandingSeparationSeconds(leader, follower, baseSeconds)
 }
 
 function candidateLandingTime(
@@ -353,14 +379,15 @@ function candidateLandingTime(
   if (previousSameRunway != null) {
     const requiredSeconds = previousPrediction
       ? pairwiseLandingSeparationSeconds(previousPrediction, prediction, runwayBaseSeconds)
-      : runwayBaseSeconds
+      : followerLandingSeparationSeconds(prediction, runwayBaseSeconds)
     candidate = Math.max(candidate, previousSameRunway + requiredSeconds * 1000)
   }
 
   if (airport === 'VTBS') {
     for (const [otherRunway, previousOtherRunway] of lastTargetByRunway.entries()) {
       if (otherRunway === runway) continue
-      candidate = Math.max(candidate, previousOtherRunway + VTBS_CROSS_RUNWAY_STAGGER_SECONDS * 1000)
+      const requiredSeconds = followerLandingSeparationSeconds(prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
+      candidate = Math.max(candidate, previousOtherRunway + requiredSeconds * 1000)
     }
   }
 
@@ -453,20 +480,24 @@ function applyManualTargetsWithCascade(
       }
     }
 
-    const vtbsRows = rows
-      .filter((row) => rowAirport(row.id) === 'VTBS')
-      .sort((a, b) => (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
+    for (const airport of ['VTBD', 'VTBS'] as const) {
+      const airportRows = rows
+        .filter((row) => rowAirport(row.id) === airport)
+        .sort((a, b) => (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
 
-    for (let index = 1; index < vtbsRows.length; index += 1) {
-      const leader = vtbsRows[index - 1]
-      const follower = vtbsRows[index]
-      if (leader.runway === follower.runway) continue
-      const leaderTarget = targetById.get(leader.id) ?? new Date(leader.tldt).getTime()
-      const followerTarget = targetById.get(follower.id) ?? new Date(follower.tldt).getTime()
-      const earliest = leaderTarget + (VTBS_CROSS_RUNWAY_STAGGER_SECONDS + Math.max(0, gapAfterSeconds[leader.id] ?? 0)) * 1000
-      if (followerTarget < earliest) {
-        targetById.set(follower.id, earliest)
-        changed = true
+      for (let index = 1; index < airportRows.length; index += 1) {
+        const leader = airportRows[index - 1]
+        const follower = airportRows[index]
+        if (leader.runway === follower.runway) continue
+        const leaderTarget = targetById.get(leader.id) ?? new Date(leader.tldt).getTime()
+        const followerTarget = targetById.get(follower.id) ?? new Date(follower.tldt).getTime()
+        const requiredSeconds = crossRunwayLandingSeparationSeconds(airport, leader, follower, runwaySpacingSeconds)
+          + Math.max(0, gapAfterSeconds[leader.id] ?? 0)
+        const earliest = leaderTarget + requiredSeconds * 1000
+        if (followerTarget < earliest) {
+          targetById.set(follower.id, earliest)
+          changed = true
+        }
       }
     }
 
@@ -700,16 +731,19 @@ export default function App() {
       previousByAirportRunway.set(key, row)
     }
 
-    const vtbsRows = ordered.filter((row) => rowAirport(row.id) === 'VTBS')
-    for (let index = 1; index < vtbsRows.length; index += 1) {
-      const leader = vtbsRows[index - 1]
-      const follower = vtbsRows[index]
-      if (leader.runway === follower.runway) continue
-      const gapMs = new Date(follower.tldt).getTime() - new Date(leader.tldt).getTime()
-      const requiredMs = (VTBS_CROSS_RUNWAY_STAGGER_SECONDS + Math.max(0, gapAfterSecondsById[leader.id] ?? 0)) * 1000
-      if (gapMs + 500 < requiredMs) {
-        conflicts.add(leader.id)
-        conflicts.add(follower.id)
+    for (const airport of ['VTBD', 'VTBS'] as const) {
+      const airportRows = ordered.filter((row) => rowAirport(row.id) === airport)
+      for (let index = 1; index < airportRows.length; index += 1) {
+        const leader = airportRows[index - 1]
+        const follower = airportRows[index]
+        if (leader.runway === follower.runway) continue
+        const gapMs = new Date(follower.tldt).getTime() - new Date(leader.tldt).getTime()
+        const requiredSeconds = crossRunwayLandingSeparationSeconds(airport, leader, follower, runwaySpacingSeconds)
+          + Math.max(0, gapAfterSecondsById[leader.id] ?? 0)
+        if (gapMs + 500 < requiredSeconds * 1000) {
+          conflicts.add(leader.id)
+          conflicts.add(follower.id)
+        }
       }
     }
 
@@ -928,7 +962,9 @@ export default function App() {
       setDemoAnchor(null)
       return
     }
-    setDemoAnchor(new Date())
+    const anchor = new Date()
+    anchor.setUTCSeconds(0, 0)
+    setDemoAnchor(anchor)
     setDemoMode(true)
   }
 
@@ -1103,7 +1139,7 @@ export default function App() {
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHm(row.predictedIawpAt)}Z · STA/TLDT ${formatHm(row.tldt)}Z · STA-FF/TTO ${formatHm(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
+                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
                 onPointerMove={(event) => moveDrag(event, row)}
                 onPointerUp={(event) => endDrag(event, row)}
@@ -1114,7 +1150,7 @@ export default function App() {
                   if (!demoMode) setOpsMenu({ rowId: row.id, x: event.clientX, y: event.clientY })
                 }}
               >
-                <span className="tldt">{formatHm(row.tldt)}</span>
+                <span className="tldt">{formatHms(row.tldt)}</span>
                 <strong>{row.callsign}</strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
@@ -1192,8 +1228,9 @@ export default function App() {
             <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
             <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
             <div><dt>Runway allocation</dt><dd>AUTO EARLIEST FEASIBLE</dd></div>
-            <div><dt>Pairwise SEP</dt><dd>ACTIVE</dd></div>
+            <div><dt>Pairwise SEP</dt><dd>FOLLOWER SPECIAL</dd></div>
             <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
+            <div><dt>VTBD X-RWY</dt><dd>FOLLOWER RWY SEP</dd></div>
             <div><dt>VTBS X-RWY</dt><dd>1.0 MIN</dd></div>
             <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
             <div><dt>SEP invariant</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? 'FAILED' : 'OK'}</dd></div>
