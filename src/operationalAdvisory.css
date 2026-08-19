@@ -1,0 +1,30 @@
+.aman-flight-row > b[data-advisory]{
+  line-height:1;
+  overflow:visible;
+}
+.aman-flight-row > b[data-advisory]::after{
+  content:attr(data-advisory);
+  display:block;
+  margin-top:2px;
+  font:900 7px/1 Consolas,monospace;
+  letter-spacing:.02em;
+  white-space:nowrap;
+  text-align:right;
+}
+.aman-flight-row > b[data-advisory-kind="holding"]::after{color:#ff7468}
+.aman-flight-row > b[data-advisory-kind="speed"]::after{color:#f4ed43}
+.aman-flight-row > b[data-advisory-kind="expedite"]::after{color:#8ef05a}
+.aman-flight-row[data-display-side="LEFT"] > b[data-advisory]::after{text-align:left}
+.aman-flight-row[data-holding-active="true"]{
+  background:linear-gradient(90deg,rgba(95,24,24,.22),rgba(8,17,31,.94));
+}
+.aman-flight-row[data-display-side="LEFT"][data-holding-active="true"]{
+  background:linear-gradient(270deg,rgba(95,24,24,.22),rgba(8,17,31,.94));
+}
+.aman-counters > div.has-holding{
+  background:rgba(89,22,22,.2);
+  box-shadow:inset 0 -2px 0 #d54735;
+}
+.aman-counters > div.has-holding strong{color:#ff7a6f}
+.aman-runtime-holding-status dd:not(:empty){color:#ff8a7f}
+.aman-runtime-speed-status dd:not(:empty){color:#f4ed43}
