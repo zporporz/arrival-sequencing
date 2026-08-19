@@ -1,0 +1,190 @@
+/* Final operational readability pass.
+   Keep the timeline geometry unchanged; make the information inside each flight row
+   and the right-hand inbound/system area readable at normal desktop viewing distance. */
+
+.aman-flight-row {
+  width: min(760px, calc(50% - 42px));
+  min-height: 38px;
+  grid-template-columns: 64px minmax(112px, 1.35fr) 58px 34px 64px 104px 64px;
+  gap: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.aman-flight-row .tldt {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.aman-flight-row > strong {
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: .01em;
+}
+
+.aman-flight-row > span:nth-child(3),
+.aman-flight-row > span:nth-child(5) {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.aman-flight-row .fix-code {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.aman-flight-row > b {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.05;
+  text-align: right;
+}
+
+.aman-flight-row > em,
+.aman-flight-row .runway-assignment select {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.aman-flight-row .runway-assignment select {
+  min-width: 58px;
+  height: 27px;
+  padding: 0 5px;
+}
+
+/* Operational advisory: LEAVE / GS / SPD+PATH must be readable, not a 7px footnote. */
+.aman-flight-row > b[data-advisory] {
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.aman-flight-row > b[data-advisory]::after {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: rgba(4, 10, 18, .86);
+  font: 900 9px/1.15 Consolas, monospace;
+  letter-spacing: .025em;
+  white-space: nowrap;
+  text-align: center;
+  opacity: .98;
+}
+
+.aman-flight-row > b[data-advisory-kind="holding"]::after {
+  color: #ff8175;
+  background: rgba(70, 19, 19, .92);
+}
+
+.aman-flight-row > b[data-advisory-kind="speed"]::after {
+  color: #f6ef5a;
+  background: rgba(52, 48, 10, .88);
+}
+
+.aman-flight-row > b[data-advisory-kind="expedite"]::after {
+  color: #9af477;
+  background: rgba(22, 54, 16, .88);
+}
+
+.aman-flight-row[data-display-side="LEFT"] {
+  grid-template-columns: 64px 104px 64px 34px 58px minmax(112px, 1.35fr) 64px;
+}
+
+.aman-flight-row[data-display-side="LEFT"] > b[data-advisory]::after {
+  text-align: center;
+}
+
+/* Right-side inbound list. */
+.aman-inbound-head.multi,
+.aman-inbound-row.multi {
+  gap: 9px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.aman-inbound-head.multi {
+  font-size: 10px;
+}
+
+.aman-inbound-row.multi {
+  min-height: 38px;
+  font-size: 12px;
+}
+
+.aman-inbound-row.multi strong,
+.aman-inbound-acid > strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.aman-planning-badge {
+  padding: 3px 5px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.aman-late-insert-button {
+  height: 24px;
+  padding: 0 7px;
+  font-size: 9px;
+  line-height: 22px;
+}
+
+/* Collapsed system health is intended to be glanceable. */
+.aman-system-summary {
+  min-height: 36px;
+}
+
+.aman-system-summary .title {
+  font-size: 10px;
+}
+
+.aman-system-summary .health {
+  font-size: 9px;
+  gap: 5px;
+}
+
+/* Top operational counters stay compact but readable. */
+.aman-multi-runway-strip .aman-counters span {
+  font-size: 9px;
+}
+
+.aman-multi-runway-strip .aman-counters strong {
+  font-size: 15px;
+}
+
+@media (max-width: 1250px) {
+  .aman-flight-row {
+    width: calc(50% - 32px);
+    grid-template-columns: 54px minmax(88px, 1.2fr) 48px 28px 54px 82px 54px;
+    gap: 5px;
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .aman-flight-row > strong { font-size: 12px; }
+  .aman-flight-row .tldt,
+  .aman-flight-row .fix-code,
+  .aman-flight-row > b { font-size: 11px; }
+  .aman-flight-row > b[data-advisory]::after { font-size: 8px; padding: 2px 3px; }
+
+  .aman-flight-row[data-display-side="LEFT"] {
+    grid-template-columns: 54px 82px 54px 28px 48px minmax(88px, 1.2fr) 54px;
+  }
+}
+
+@media (max-width: 700px) {
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"],
+  .aman-flight-row {
+    min-height: 32px;
+    font-size: 9px;
+  }
+
+  .aman-flight-row > b[data-advisory]::after {
+    font-size: 7px;
+    padding: 1px 2px;
+  }
+}
