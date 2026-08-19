@@ -37,13 +37,12 @@ import { installInteractionGuardRuntime } from './interactionGuardRuntime'
 import { installMaestroV24CompatRuntime } from './maestroV24CompatRuntime'
 import { installManualSequenceReorderRuntime } from './manualSequenceReorderRuntime'
 import { installTimelineReadableRuntime } from './timelineReadableRuntime'
+import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
 
 installReconnectTrafficFetch()
 
 function AppWithRuntime() {
   useEffect(() => {
-    // Compatibility decorator runs before the lifecycle/advisory runtimes so
-    // ETA-FF-labelled rows still expose the historical Predicted IAWP token they parse.
     const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
     const removeTimelineRuntime = installTimelineScrollableRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
@@ -51,9 +50,15 @@ function AppWithRuntime() {
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
+
+    // Register the 5-minute gain guard and manual reorder before the display-scale
+    // pointer adapter. They inspect the real physical 20 px/min drag first; the adapter
+    // then translates that accepted movement back to React's historical 10 px/min math.
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
+    const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
+
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
     return () => {
@@ -67,6 +72,7 @@ function AppWithRuntime() {
       removeInteractionGuardRuntime()
       removeSharedAmanRuntime()
       removeManualSequenceReorderRuntime()
+      removeTimelineDisplayScaleRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
