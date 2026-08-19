@@ -1,3 +1,8 @@
+import {
+  TIMELINE_DISPLAY_PX_PER_MINUTE,
+  TIMELINE_LOGICAL_PX_PER_MINUTE,
+} from './timelineScale'
+
 type ReactRowProps = {
   onPointerMove?: (event: FakePointerEvent) => void
   onDoubleClick?: () => void
@@ -24,9 +29,8 @@ type DragGuard = {
   wasManual: boolean
 }
 
-const PX_PER_MINUTE = 10
 const MAX_MANUAL_GAIN_MINUTES = 5
-const CLICK_MOVE_TOLERANCE_PX = 2
+const CLICK_MOVE_TOLERANCE_PX = 3
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -35,8 +39,9 @@ function reactProps<T>(element: Element): T | null {
 }
 
 function currentTargetMs(row: HTMLElement) {
+  // --offset-px is still React's historical 10 px/min logical coordinate.
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
-  if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / PX_PER_MINUTE * 60_000
+  if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / TIMELINE_LOGICAL_PX_PER_MINUTE * 60_000
   return null
 }
 
@@ -103,8 +108,6 @@ export function installInteractionGuardRuntime() {
     const startTldtMs = currentTargetMs(row)
     if (startTldtMs == null) return
 
-    // Delay Required = target landing - natural landing prediction. Reconstruct
-    // natural landing so a controller may gain at most five minutes ahead of it.
     const naturalLandingMs = startTldtMs - delayMinutes(row) * 60_000
     drag = {
       row,
@@ -121,7 +124,8 @@ export function installInteractionGuardRuntime() {
     if (!drag || drag.pointerId !== event.pointerId) return
     if (Math.abs(event.clientY - drag.startY) > CLICK_MOVE_TOLERANCE_PX) drag.moved = true
 
-    const requestedMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000
+    // Pointer travel is now measured against the 20 px/min display scale.
+    const requestedMs = drag.startTldtMs + (-(event.clientY - drag.startY) / TIMELINE_DISPLAY_PX_PER_MINUTE) * 60_000
     if (requestedMs >= drag.earliestTargetMs) {
       delete drag.row.dataset.gainLimit
       return
@@ -134,16 +138,14 @@ export function installInteractionGuardRuntime() {
     const props = reactProps<ReactRowProps>(drag.row)
     if (!props?.onPointerMove) return
 
+    // Direct React callback still expects the 10 px/min logical coordinate.
     const limitedDeltaMinutes = (drag.earliestTargetMs - drag.startTldtMs) / 60_000
-    const limitedClientY = drag.startY - limitedDeltaMinutes * PX_PER_MINUTE
+    const limitedClientY = drag.startY - limitedDeltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE
     drag.row.dataset.gainLimit = `${MAX_MANUAL_GAIN_MINUTES} MIN MAX GAIN`
     drag.row.title = `${drag.row.title.replace(/ · MAX GAIN .*$/i, '')} · MAX GAIN ${MAX_MANUAL_GAIN_MINUTES} MIN`
     props.onPointerMove(fakePointer(event.pointerId, limitedClientY, drag.row))
   }
 
-  // This listener is intentionally bubble-phase and this runtime is installed before
-  // sharedAmanRuntime. React has already processed pointerup at its root, but a plain
-  // click/double-click must not be mistaken by the shared runtime for a completed drag.
   const onPointerUp = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
     const snapshot = drag
@@ -151,11 +153,8 @@ export function installInteractionGuardRuntime() {
     drag = null
 
     if (snapshot.moved) return
-
     event.stopImmediatePropagation()
 
-    // App currently marks pointer-up as a manual commitment. Undo that local-only mark
-    // for a plain click on an AUTO row; a real drag is left untouched.
     if (!snapshot.wasManual) {
       window.requestAnimationFrame(() => {
         reactProps<ReactRowProps>(snapshot.row)?.onDoubleClick?.()
@@ -171,8 +170,6 @@ export function installInteractionGuardRuntime() {
   const onDoubleClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element)) return
     if (event.target.closest('select')) return
-
-    // Delay Required owns HOLD / NO HOLD double-click independently.
     if (event.target.closest('.aman-flight-row > b')) return
 
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
@@ -189,13 +186,8 @@ export function installInteractionGuardRuntime() {
 
     const oldSharedRevision = row.dataset.sharedRevision
     row.dataset.resetPending = 'true'
-
-    // Return to the React AUTO sequence immediately. This restores the position that
-    // existed before the manual drag instead of waiting for a network round trip.
     reactProps<ReactRowProps>(row)?.onDoubleClick?.()
 
-    // Preserve the old shared revision on the re-rendered row while the clear request is
-    // in flight, so the old MANUAL realtime snapshot cannot pull the label back for a frame.
     window.requestAnimationFrame(() => {
       const current = findRow(identity.airport, identity.callsign)
       if (!current) return
@@ -205,8 +197,6 @@ export function installInteractionGuardRuntime() {
 
     void clearSharedTarget(identity.airport, identity.callsign)
       .then(() => {
-        // Reassert AUTO after the server acknowledgement as a final race guard against
-        // any stale manual write that was already in flight before the double-click.
         const current = findRow(identity.airport, identity.callsign)
         if (current) reactProps<ReactRowProps>(current)?.onDoubleClick?.()
       })

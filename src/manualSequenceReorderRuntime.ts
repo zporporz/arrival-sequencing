@@ -2,6 +2,10 @@ import {
   amanSequenceOrderIdentity,
   setAmanManualSequenceOrderSnapshot,
 } from './core/arrivalSequencing'
+import {
+  TIMELINE_DISPLAY_PX_PER_MINUTE,
+  TIMELINE_LOGICAL_PX_PER_MINUTE,
+} from './timelineScale'
 
 type SharedFlightState = {
   airport: string
@@ -11,9 +15,7 @@ type SharedFlightState = {
   manual_runway?: string | null
 }
 
-type SharedStateDetail = {
-  flightStates?: SharedFlightState[]
-}
+type SharedStateDetail = { flightStates?: SharedFlightState[] }
 
 type DragOrderState = {
   pointerId: number
@@ -26,8 +28,7 @@ type DragOrderState = {
   moved: boolean
 }
 
-const PX_PER_MINUTE = 10
-const MOVE_TOLERANCE_PX = 2
+const MOVE_TOLERANCE_PX = 3
 const groupOrders = new Map<string, string[]>()
 let drag: DragOrderState | null = null
 
@@ -36,11 +37,7 @@ function rowIdentity(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
   const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
   if (!airport || !callsign) return null
-  return {
-    airport,
-    callsign,
-    identity: amanSequenceOrderIdentity(airport, callsign),
-  }
+  return { airport, callsign, identity: amanSequenceOrderIdentity(airport, callsign) }
 }
 
 function rowRunway(row: HTMLElement) {
@@ -51,8 +48,9 @@ function rowRunway(row: HTMLElement) {
 }
 
 function rowTargetMs(row: HTMLElement) {
+  // React continues to expose --offset-px in its historical 10 px/min coordinate.
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
-  if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / PX_PER_MINUTE * 60_000
+  if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / TIMELINE_LOGICAL_PX_PER_MINUTE * 60_000
 
   const hm = row.querySelector<HTMLElement>('.tldt')?.textContent?.trim().match(/^(\d{2}):(\d{2})$/)
   if (!hm) return null
@@ -65,9 +63,7 @@ function rowTargetMs(row: HTMLElement) {
   return candidate.getTime()
 }
 
-function groupKey(airport: string, runway: string) {
-  return `${airport}:${runway}`
-}
+function groupKey(airport: string, runway: string) { return `${airport}:${runway}` }
 
 function rowsForGroup(airport: string, runway: string) {
   return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).filter((row) => {
@@ -79,9 +75,7 @@ function rowsForGroup(airport: string, runway: string) {
 function publishOrderSnapshot() {
   const snapshot: Record<string, number> = {}
   for (const order of groupOrders.values()) {
-    order.forEach((identity, index) => {
-      snapshot[identity] = index + 1
-    })
+    order.forEach((identity, index) => { snapshot[identity] = index + 1 })
   }
   setAmanManualSequenceOrderSnapshot(snapshot)
 }
@@ -109,9 +103,7 @@ function sameOrder(a: readonly string[], b: readonly string[]) {
 }
 
 function currentGroupOrder(airport: string, runway: string) {
-  const explicit = groupOrders.get(groupKey(airport, runway))
-  if (explicit) return explicit
-  return orderFromTargets(airport, runway)
+  return groupOrders.get(groupKey(airport, runway)) ?? orderFromTargets(airport, runway)
 }
 
 function updateDragOrder(requestedTargetMs: number) {
@@ -119,10 +111,8 @@ function updateDragOrder(requestedTargetMs: number) {
   const overrides = new Map<string, number>([[drag.identity, requestedTargetMs]])
   const next = orderFromTargets(drag.airport, drag.runway, overrides)
   if (!next.length) return
-
   const current = currentGroupOrder(drag.airport, drag.runway)
   if (sameOrder(current, next)) return
-
   groupOrders.set(groupKey(drag.airport, drag.runway), next)
   publishOrderSnapshot()
   drag.row.dataset.sequenceReordered = 'true'
@@ -130,8 +120,7 @@ function updateDragOrder(requestedTargetMs: number) {
 
 function groupHasManualRows(airport: string, runway: string) {
   return rowsForGroup(airport, runway).some((row) =>
-    row.classList.contains('is-stable') || row.dataset.targetMode === 'MANUAL',
-  )
+    row.classList.contains('is-stable') || row.dataset.targetMode === 'MANUAL')
 }
 
 function reconcileGroupAfterRender(airport: string, runway: string) {
@@ -222,14 +211,13 @@ export function installManualSequenceReorderRuntime() {
     }
   }
 
-  // Registered after the 5-minute gain guard. If that guard rejects a move with
-  // stopImmediatePropagation, this handler never sees the invalid request.
   const onPointerMove = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
     const deltaY = event.clientY - drag.startY
     if (Math.abs(deltaY) <= MOVE_TOLERANCE_PX) return
     drag.moved = true
-    const requestedTargetMs = drag.startTargetMs + (-deltaY / PX_PER_MINUTE) * 60_000
+    // Reorder follows the physical 20 px/min time scale shown to the controller.
+    const requestedTargetMs = drag.startTargetMs + (-deltaY / TIMELINE_DISPLAY_PX_PER_MINUTE) * 60_000
     updateDragOrder(requestedTargetMs)
   }
 
@@ -240,8 +228,6 @@ export function installManualSequenceReorderRuntime() {
     if (finished.moved) reconcileGroupAfterRender(finished.airport, finished.runway)
   }
 
-  // Window capture runs before the existing document-capture RETURN-TO-AUTO guard.
-  // Schedule reconciliation after React has restored the automatic target.
   const onDoubleClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
@@ -257,7 +243,6 @@ export function installManualSequenceReorderRuntime() {
     const row = target.closest<HTMLElement>('.aman-flight-row')
     const identity = row ? rowIdentity(row) : null
     if (!row || !identity) return
-    // Rebuild all current runway groups for this airport after the runway move.
     window.setTimeout(() => {
       const runways = new Set(
         Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
