@@ -1,0 +1,253 @@
+/* MAESTRO v2.4 knowgood operational HMI.
+   Loaded last so source-backed ETA-FF / delay-splitting / operational-action cues
+   remain readable without reducing the timeline viewport. */
+
+.aman-panel-meta .aman-capacity-chip {
+  border-color: #35536f;
+  background: #0b1a2a;
+  color: #9fc2df;
+  white-space: nowrap;
+}
+
+.aman-panel-meta .aman-capacity-alert {
+  border-color: #9d3a32 !important;
+  background: #351513 !important;
+  color: #ff8d82 !important;
+  box-shadow: inset 0 -2px 0 rgba(220, 67, 54, .65);
+}
+
+/* Flight row remains one operational line, but the delay cell can carry
+   TDLY plus EDLY/ADLY and the quick-reference action without 7px text. */
+.aman-flight-row {
+  min-height: 48px;
+  grid-template-columns: 66px minmax(116px, 1.35fr) 58px 34px 66px 118px 68px;
+}
+
+.aman-flight-row[data-display-side="LEFT"] {
+  grid-template-columns: 68px 118px 66px 34px 58px minmax(116px, 1.35fr) 66px;
+}
+
+.aman-delay-stack {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  overflow: visible !important;
+  white-space: nowrap;
+}
+
+.aman-flight-row[data-display-side="LEFT"] .aman-delay-stack {
+  align-items: flex-start;
+}
+
+.aman-delay-stack > span {
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.aman-delay-split,
+.aman-matrix-label,
+.aman-gap-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 13px;
+  padding: 1px 4px;
+  border: 1px solid rgba(103, 130, 161, .46);
+  border-radius: 3px;
+  background: rgba(4, 10, 18, .82);
+  font: 900 9px/1.05 Consolas, monospace;
+  letter-spacing: .025em;
+}
+
+.aman-delay-split {
+  color: #a9bed4;
+}
+
+.aman-matrix-label.matrix-permit-entry {
+  border-color: #7f8a2d;
+  color: #e9e65c;
+  background: rgba(51, 51, 10, .86);
+}
+
+.aman-matrix-label.matrix-orbit-permit {
+  border-color: #9b6a2c;
+  color: #f2b45b;
+  background: rgba(58, 35, 11, .88);
+}
+
+.aman-matrix-label.matrix-consider-hold {
+  border-color: #b45d33;
+  color: #ffad72;
+  background: rgba(70, 31, 14, .9);
+}
+
+.aman-matrix-label.matrix-overload {
+  border-color: #ba4439;
+  color: #ff8b82;
+  background: rgba(76, 21, 19, .92);
+}
+
+.aman-gap-label {
+  border-color: #5e63a9;
+  color: #b8bcff;
+  background: rgba(27, 28, 71, .9);
+}
+
+.aman-flight-row.matrix-overload {
+  background: linear-gradient(90deg, rgba(94, 24, 22, .25), rgba(8, 17, 31, .94));
+}
+
+.aman-flight-row[data-display-side="LEFT"].matrix-overload {
+  background: linear-gradient(270deg, rgba(94, 24, 22, .25), rgba(8, 17, 31, .94));
+}
+
+.aman-flight-row.matrix-consider-hold .runway-assignment.is-runway-suggested select,
+.aman-flight-row.matrix-consider-hold .runway-assignment.is-runway-suggested {
+  border-color: #b56a32;
+  box-shadow: 0 0 0 1px rgba(232, 158, 68, .16);
+}
+
+/* Runtime LEAVE/GS advisory stays a second, readable operational cue. */
+.aman-flight-row > b[data-advisory]::after {
+  margin-top: 1px;
+  padding: 2px 5px;
+  font-size: 9px;
+}
+
+/* Inbound operational states. */
+.aman-inbound-row.planning-missed,
+.aman-inbound-row.planning-desequenced,
+.aman-inbound-row.planning-removed {
+  background: rgba(31, 30, 59, .34);
+}
+
+.aman-inbound-row.planning-missed .aman-inbound-acid > strong {
+  color: #ffaf82 !important;
+}
+
+.aman-inbound-row.planning-desequenced .aman-inbound-acid > strong,
+.aman-inbound-row.planning-removed .aman-inbound-acid > strong {
+  color: #9caec1 !important;
+}
+
+.aman-reinsert-button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid #4e6490;
+  border-radius: 3px;
+  background: #111d35;
+  color: #aebdff;
+  font: 900 9px/22px Consolas, monospace;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.aman-reinsert-button:hover {
+  border-color: #7388c4;
+  color: #dce4ff;
+}
+
+.aman-reinsert-button.is-missed {
+  border-color: #9a5a36;
+  background: #2b1710;
+  color: #ffb07f;
+}
+
+/* MON now carries the distance, so give it enough room. */
+.aman-planning-badge {
+  min-width: max-content;
+  font-size: 9px;
+  padding: 3px 5px;
+}
+
+/* Native-like MAESTRO operational context menu. */
+.aman-ops-menu {
+  position: fixed;
+  z-index: 2000;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid #486681;
+  border-radius: 4px;
+  background: #07111d;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .48), inset 0 0 0 1px rgba(96, 132, 168, .08);
+  font-family: Consolas, monospace;
+}
+
+.aman-ops-menu header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 7px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #243b52;
+}
+
+.aman-ops-menu header strong {
+  color: #dcecff;
+  font-size: 13px;
+}
+
+.aman-ops-menu header span,
+.aman-ops-menu small {
+  color: #7e9ab6;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.aman-ops-menu button {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: #bdd2e5;
+  text-align: left;
+  font: 800 10px/30px Consolas, monospace;
+  cursor: pointer;
+}
+
+.aman-ops-menu button:hover {
+  background: #10243a;
+  color: #eff7ff;
+}
+
+.aman-ops-menu button.is-danger {
+  color: #ff958c;
+}
+
+.aman-ops-menu small {
+  display: block;
+  padding: 7px 7px 4px;
+  border-top: 1px solid #1f3347;
+  margin-top: 4px;
+}
+
+@media (max-width: 1250px) {
+  .aman-flight-row {
+    grid-template-columns: 54px minmax(90px, 1.2fr) 48px 28px 55px 96px 56px;
+    min-height: 44px;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"] {
+    grid-template-columns: 56px 96px 55px 28px 48px minmax(90px, 1.2fr) 54px;
+  }
+
+  .aman-delay-stack > span { font-size: 12px; }
+  .aman-delay-split,
+  .aman-matrix-label,
+  .aman-gap-label { font-size: 8px; padding: 1px 3px; }
+}
+
+@media (max-width: 700px) {
+  .aman-panel-meta .aman-capacity-chip { display: none; }
+  .aman-flight-row { min-height: 40px; }
+  .aman-delay-split,
+  .aman-matrix-label,
+  .aman-gap-label { font-size: 7px; }
+  .aman-reinsert-button { font-size: 8px; padding: 0 5px; }
+}
