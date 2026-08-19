@@ -38,6 +38,7 @@ import { installMaestroV24CompatRuntime } from './maestroV24CompatRuntime'
 import { installManualSequenceReorderRuntime } from './manualSequenceReorderRuntime'
 import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
+import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
 
 installReconnectTrafficFetch()
 
@@ -58,6 +59,7 @@ function AppWithRuntime() {
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
+    const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -73,6 +75,7 @@ function AppWithRuntime() {
       removeSharedAmanRuntime()
       removeManualSequenceReorderRuntime()
       removeTimelineDisplayScaleRuntime()
+      removeManualTargetSyncCompatRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
