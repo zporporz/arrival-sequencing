@@ -15,6 +15,8 @@ import './operationalReadability.css'
 import './finalControlLayout.css'
 import './runtimeEnhancements.css'
 import './systemPanelRuntime.css'
+import './sharedAmanRuntime.css'
+import './operationalAdvisory.css'
 import AuthGate from './AuthGate'
 import App from './App'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
@@ -23,6 +25,8 @@ import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
 import { installReconnectTrafficFetch, installReconnectUiRuntime } from './reconnectRecovery'
 import { installSystemPanelRuntime } from './systemPanelRuntime'
+import { installSharedAmanRuntime } from './sharedAmanRuntime'
+import { installOperationalAdvisoryRuntime } from './operationalAdvisoryRuntime'
 
 installReconnectTrafficFetch()
 
@@ -34,6 +38,8 @@ function AppWithRuntime() {
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
+    const removeSharedAmanRuntime = installSharedAmanRuntime()
+    const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
@@ -41,6 +47,8 @@ function AppWithRuntime() {
       removeReconnectUiRuntime()
       removeOnlinePresenceRuntime()
       removeSystemPanelRuntime()
+      removeSharedAmanRuntime()
+      removeOperationalAdvisoryRuntime()
     }
   }, [])
 
