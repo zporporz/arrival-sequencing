@@ -11,7 +11,7 @@ export async function onRequestGet(context) {
     const type = String(url.searchParams.get('type') || '').trim().toUpperCase();
     if (!type) return json({ error: 'Aircraft type is required' }, 400, 'no-store');
 
-    const profile = await getSimbriefAircraftPerformance(type);
+    const profile = await getSimbriefAircraftPerformance(context.env, type);
     if (!profile) {
       return json({
         type,
