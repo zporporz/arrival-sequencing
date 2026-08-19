@@ -1,4 +1,4 @@
-import type { AircraftPerformanceProfile, IvaoArrivalTrafficFlight } from './api'
+import { readAircraftPerformance, type AircraftPerformanceProfile, type IvaoArrivalTrafficFlight } from './api'
 
 export type Coordinates = { lat: number; lon: number }
 
@@ -48,6 +48,8 @@ const DESCENT_PROFILE_START_ALTITUDE_FT = 30000
 const DESCENT_LOW_ALTITUDE_FT = 10000
 const FALLBACK_DESCENT_IAS_KT = 280
 const FALLBACK_LOW_DESCENT_IAS_KT = 250
+const performanceCache = new Map<string, AircraftPerformanceProfile | null>()
+const performanceRequests = new Map<string, Promise<void>>()
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
@@ -55,6 +57,32 @@ function safeTime(value: string | null | undefined) {
   if (!value) return null
   const millis = new Date(value).getTime()
   return Number.isFinite(millis) ? millis : null
+}
+
+function normalizeAircraftType(value: string | null | undefined) {
+  const type = String(value || '').trim().toUpperCase().split(/[\s/]/)[0]
+  return /^[A-Z0-9]{2,8}$/.test(type) ? type : null
+}
+
+function cachedPerformance(flight: IvaoArrivalTrafficFlight) {
+  const type = normalizeAircraftType(flight.aircraft)
+  if (!type) return null
+  if (performanceCache.has(type)) return performanceCache.get(type) ?? null
+
+  if (!performanceRequests.has(type)) {
+    const request = readAircraftPerformance(type)
+      .then((payload) => {
+        performanceCache.set(type, payload.found && payload.profile ? payload.profile : null)
+      })
+      .catch(() => {
+        performanceCache.set(type, null)
+      })
+      .finally(() => {
+        performanceRequests.delete(type)
+      })
+    performanceRequests.set(type, request)
+  }
+  return null
 }
 
 function utcDayStart(referenceMs: number) {
@@ -228,8 +256,10 @@ export function estimateIawpArrival(
   fetchedAt: string,
   performance: AircraftPerformanceProfile | null = null,
 ): ArrivalEtaEstimate {
+  const resolvedPerformance = performance ?? cachedPerformance(flight)
+
   if (geometry) {
-    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, performance)
+    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance)
     if (live) return live
   }
 
