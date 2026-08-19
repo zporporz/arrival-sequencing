@@ -1,4 +1,10 @@
 import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
+import {
+  AMAN_DELAY_THRESHOLDS_MINUTES,
+  AMAN_ETA_FF_REFRESH_MS,
+  getAmanOperationalMatrixAdvice,
+  splitAmanDelay,
+} from './core/amanConstants'
 
 type HoldingMode = 'AUTO' | 'HOLD' | 'NO_HOLD'
 
@@ -31,8 +37,8 @@ type LivePlanningData = {
 }
 
 const SHARED_STATE_EVENT = 'aman:shared-state'
-const LIVE_REFRESH_MS = 30_000
-const DEFAULT_HOLDING_THRESHOLD_MINUTES = 5
+const LIVE_REFRESH_MS = AMAN_ETA_FF_REFRESH_MS
+const DEFAULT_HOLDING_THRESHOLD_MINUTES = AMAN_DELAY_THRESHOLDS_MINUTES.HOLDING_MIN
 const DEFAULT_DEMO_GS_KT = 420
 const MIN_SPEED_PLAN_KT = 140
 const MAX_SPEED_PLAN_KT = 520
@@ -102,9 +108,14 @@ function formatHm(value: number | string | null) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
 }
 
+function formatOne(value: number) {
+  const rounded = Math.round(value * 10) / 10
+  return rounded.toFixed(rounded % 1 === 0 ? 0 : 1)
+}
+
 function rowPredictedIawpMs(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
-  const hm = title.match(/Predicted IAWP\s+(\d{2}:\d{2})Z/i)?.[1]
+  const hm = title.match(/(?:ETA-FF|Predicted IAWP)\s+(\d{2}:\d{2})Z/i)?.[1]
   return hm ? parseHmNearNow(hm, true) : null
 }
 
@@ -221,6 +232,7 @@ export function installOperationalAdvisoryRuntime() {
   const decorate = () => {
     let holdingCount = 0
     let speedCount = 0
+    let overloadCount = 0
 
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
       const identity = rowIdentity(row)
@@ -230,10 +242,12 @@ export function installOperationalAdvisoryRuntime() {
       const state = sharedFlights.get(identity.key)
       const settings = workspaceSettings.get(identity.airport) || {}
       const thresholdValue = Number(settings.holdingThresholdMinutes)
-      const holdingThreshold = Number.isFinite(thresholdValue) && thresholdValue >= 0
+      const holdingThreshold = Number.isFinite(thresholdValue) && thresholdValue >= DEFAULT_HOLDING_THRESHOLD_MINUTES
         ? thresholdValue
         : DEFAULT_HOLDING_THRESHOLD_MINUTES
       const delayMinutes = rowDelayMinutes(row)
+      const split = splitAmanDelay(delayMinutes)
+      const matrix = getAmanOperationalMatrixAdvice(delayMinutes)
       const autoHolding = row.classList.contains('action-holding') || delayMinutes >= holdingThreshold
       const holdingMode = state?.holding_mode || 'AUTO'
       const holdingActive = holdingMode === 'HOLD' || (holdingMode === 'AUTO' && autoHolding)
@@ -248,29 +262,50 @@ export function installOperationalAdvisoryRuntime() {
       delete delayCell.dataset.advisoryKind
       delete row.dataset.holdingActive
       row.dataset.holdingMode = holdingMode
+      row.dataset.tdly = formatOne(split.tdlyMinutes)
+      row.dataset.edly = formatOne(split.edlyMinutes)
+      row.dataset.adly = formatOne(split.adlyMinutes)
+      row.dataset.operationalBand = matrix.band
+      delayCell.dataset.delaySplit = `E${formatOne(split.edlyMinutes)} A${formatOne(split.adlyMinutes)}`
+      delayCell.dataset.matrixAction = matrix.shortLabel
+
+      if (matrix.band === 'OVERLOAD') overloadCount += 1
 
       if (holdingActive) {
         holdingCount += 1
         row.dataset.holdingActive = 'true'
         delayCell.dataset.advisory = `LEAVE ${formatHm(Number.isFinite(leaveAtMs) ? leaveAtMs : null)}`
         delayCell.dataset.advisoryKind = 'holding'
-        const title = row.getAttribute('title') || ''
-        const holdingText = `HOLD at ${fullFix || 'STAR ENTRY'} · leave ${formatHm(Number.isFinite(leaveAtMs) ? leaveAtMs : null)}Z`
-        row.setAttribute('title', `${title.replace(/ · HOLD at .*$/i, '')} · ${holdingText}`)
       } else if (speedAction && speed) {
         speedCount += 1
         delayCell.dataset.advisory = speed.speedOnlyFeasible ? `GS~${speed.advisedGs}` : 'SPD+PATH'
         delayCell.dataset.advisoryKind = row.classList.contains('action-expedite') ? 'expedite' : 'speed'
-        const title = row.getAttribute('title') || ''
-        const speedText = speed.speedOnlyFeasible
-          ? `planning GS advisory ~${speed.advisedGs} kt from current ${Math.round(speed.currentGs)} kt`
-          : 'speed alone is insufficient; path action required'
-        if (!title.includes('planning GS advisory') && !title.includes('speed alone is insufficient')) {
-          row.setAttribute('title', `${title} · ${speedText}`)
-        }
+      } else if (delayMinutes >= 6) {
+        delayCell.dataset.advisory = matrix.shortLabel
+        delayCell.dataset.advisoryKind = matrix.band === 'CONSIDER_HOLD' ? 'holding' : 'speed'
+      } else if (delayMinutes > 0) {
+        delayCell.dataset.advisory = `E${formatOne(split.edlyMinutes)} A${formatOne(split.adlyMinutes)}`
+        delayCell.dataset.advisoryKind = 'speed'
       }
 
-      delayCell.title = 'Delay Required. Double-click this number to toggle a holding override.'
+      const titleBase = (row.getAttribute('title') || '')
+        .replace(/ · MAESTRO SPLIT .*$/i, '')
+        .replace(/ · HOLD at .*$/i, '')
+        .replace(/ · planning GS advisory .*$/i, '')
+        .replace(/ · speed alone is insufficient.*$/i, '')
+      const splitText = `MAESTRO SPLIT TDLY ${formatOne(split.tdlyMinutes)} · EDLY ${formatOne(split.edlyMinutes)} · ADLY ${formatOne(split.adlyMinutes)} · ${matrix.primary}${matrix.secondary ? ` / ${matrix.secondary}` : ''}${matrix.vectorLimit !== '—' ? ` · vector ${matrix.vectorLimit}` : ''}`
+      let title = `${titleBase} · ${splitText}`
+
+      if (holdingActive) {
+        title += ` · HOLD at ${fullFix || 'STAR ENTRY'} · leave ${formatHm(Number.isFinite(leaveAtMs) ? leaveAtMs : null)}Z`
+      } else if (speedAction && speed) {
+        title += speed.speedOnlyFeasible
+          ? ` · planning GS advisory ~${speed.advisedGs} kt from current ${Math.round(speed.currentGs)} kt`
+          : ' · speed alone is insufficient; path action required'
+      }
+      row.setAttribute('title', title)
+
+      delayCell.title = `TDLY ${formatOne(split.tdlyMinutes)} · EDLY ${formatOne(split.edlyMinutes)} · ADLY ${formatOne(split.adlyMinutes)} · ${matrix.primary}${matrix.secondary ? ` / ${matrix.secondary}` : ''}. Double-click this number to toggle HOLD/AUTO override.`
       row.dataset.assignedRunway = currentRunway(row)
     })
 
@@ -280,10 +315,14 @@ export function installOperationalAdvisoryRuntime() {
     if (hldValue) hldValue.textContent = String(holdingCount).padStart(3, '0')
     hldCounter?.classList.toggle('has-holding', holdingCount > 0)
 
-    const holdingSystem = ensureSystemRow('aman-runtime-holding-status', 'Holding / TTLHF')
+    const holdingSystem = ensureSystemRow('aman-runtime-holding-status', 'Holding / STA-FF')
     const speedSystem = ensureSystemRow('aman-runtime-speed-status', 'Speed advisory')
+    const splitSystem = ensureSystemRow('aman-runtime-delay-split-status', 'Delay split')
+    const overloadSystem = ensureSystemRow('aman-runtime-overload-status', 'MAESTRO matrix')
     if (holdingSystem) holdingSystem.textContent = holdingCount ? `${holdingCount} ACTIVE` : 'NONE'
     if (speedSystem) speedSystem.textContent = speedCount ? `${speedCount} ACTIVE` : 'NONE'
+    if (splitSystem) splitSystem.textContent = 'TDLY / EDLY / ADLY'
+    if (overloadSystem) overloadSystem.textContent = overloadCount ? `${overloadCount} OVERLOAD` : 'NORMAL'
   }
 
   const onSharedState = (event: Event) => {
