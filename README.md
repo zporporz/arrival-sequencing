@@ -58,7 +58,7 @@ Primary project reference for current behavior: `research/aman/MAESTRO_V24_KNOWG
   - **TDLY** — total delay required.
 - Cascade constraints prevent target overlap.
 - Drag to set a manual target.
-- Manual gain remains limited to **5 minutes earlier** than natural prediction.
+- Manual gain has no fixed five-minute cap; controllers may set an earlier target for coordinated shortcut / expedite actions, while runway and sequence separation constraints still apply.
 - Double-click returns the aircraft to AUTO target.
 
 ## Part 5 — Flight lifecycle
