@@ -9,46 +9,95 @@ AMAN / MAESTRO-style arrival sequencing prototype for IVAO Thailand.
 
 ---
 
-## Current status — 18 Aug 2026
+## Current status — 19 Aug 2026
 
-**Overall: Approach-side prototype is roughly 60–70% complete.**
+**Approach-side core is now implemented for live operational testing.**
 
 ### ✅ Working now
 
+#### Live traffic and prediction
+
 - IVAO SSO login.
-- Live IVAO inbound traffic.
-- Pure VFR flights filtered out.
+- Live IVAO inbound traffic with pure VFR traffic filtered out.
 - Filed-route + AIRAC geometry processing.
 - Automatic IAWP / feeder-fix mapping.
 - Live ETA prediction to IAWP.
-- Fallback timing from tracked/actual departure + EET.
+- Fallback timing from tracked/actual departure + filed EET.
+- 30-second browser traffic refresh with 15-second Whazzup cache.
+
+#### Timeline and sequencing
+
 - MAESTRO-style vertical timeline.
-- 1-minute / 5-minute time ticks.
-- Adjustable minutes shown below ACTUAL line.
+- Fixed ACTUAL line with 1-minute and 5-minute ticks.
+- Adjustable history below the ACTUAL line.
 - Automatic arrival sequencing.
 - TLDT / TTO / Delay Required calculation.
-- Delay colours:
+- Delay action classes:
   - Expedite
   - Nothing
   - Speed reduction
   - Path stretching
   - Holding
-- Drag aircraft to change target landing time.
+- Drag aircraft to set a manual TLDT.
 - Manual TLDT remains fixed while live prediction continues updating.
-- Cascade sequencing: later aircraft are pushed instead of being allowed to overlap.
-- Flight status:
-  - Unstable
-  - Stable
-  - Superstable
-  - Frozen
+- Cascade constraints push later aircraft instead of allowing overlapping landing targets.
+- Double-click returns the flight target to AUTO.
+
+#### Flight lifecycle
+
+- Unstable.
+- Stable — approximately 15 minutes before predicted IAWP.
+- Superstable — approximately 5 minutes before predicted IAWP.
+- Frozen — approximately 4 minutes before predicted landing, with a live final-position fallback.
+- AUTO / MANUAL target ownership is separate from flight lifecycle colour.
+
+#### Multi-airport / multi-runway
+
 - Multiple active arrival runways.
 - Runway mode: ARR / DEP / MIX / CLOSED.
-- Configurable landing separation in NM per runway.
-- Per-flight runway assignment.
-- VTBS multi-runway stagger working rule: **1 minute between different arrival runways**.
-- VTBD + VTBS can be displayed together.
-- LEFT / RIGHT timeline side selection per airport.
-- TEST TRAFFIC mode for sequencing tests.
+- Configurable LAND SEP in NM per runway.
+- Per-flight landing-runway assignment.
+- VTBS working multi-runway stagger: **1 minute between different arrival runways**.
+- VTBD + VTBS on a common time axis.
+- LEFT / RIGHT timeline-side selection per airport.
+
+#### Holding / Time to Leave Holding Fix
+
+- Automatic Holding classification at the configured delay threshold.
+- HLD counter.
+- Holding point model at the STAR entry / IAWP.
+- `LEAVE HH:MM` advisory derived from TTO.
+- Shared HOLD / NO HOLD override by double-clicking the Delay Required value.
+
+#### Speed advisory
+
+- Planning groundspeed advisory for Speed Reduction and Expedite conditions.
+- Displayed as `GS~xxx` when a speed-only solution is feasible.
+- Displays `SPD+PATH` when speed alone cannot absorb the required time.
+- This is a prototype planning-groundspeed estimate, not a claim of the installed MAESTRO's internal IAS/Mach algorithm.
+
+#### Shared realtime and persistence
+
+- Shared Supabase state per UTC service date and airport.
+- Manual TLDT and landing runway persist across refreshes.
+- Return-to-AUTO is shared.
+- Runway profile, runway modes and LAND SEP are shared.
+- Supabase Realtime propagates changes to connected controllers.
+- System drawer reports Shared AMAN health.
+- Global website presence shows controllers currently online.
+
+#### Shared reconnect recovery
+
+- Server-side canonical flight identity independent of a new IVAO session ID.
+- A disconnected flight retains its slot as a GHOST for up to **30 minutes**.
+- Reconnect restores the same TLDT, runway and manual target state.
+- Position plausibility uses last/new position, elapsed time and groundspeed.
+- Shared `RECONNECTED` and `POSITION JUMP` warnings are visible to all controllers.
+
+#### Test support
+
+- TEST TRAFFIC mode for sequencing, drag, multi-runway and status tests.
+- Four-core verification checklist: `docs/AMAN_FOUR_CORE_VERIFICATION.md`.
 
 ---
 
@@ -95,64 +144,37 @@ Live position + route + groundspeed
      - nominal STAR time
               ↓
              TTO
+              ↓
+ Delay / speed / holding advisory
 ```
 
-### Manual sequencing rule
+When ATC sets a manual target:
 
-When ATC drags an aircraft:
-
-- **TLDT / TTO become the controller target and stay fixed.**
-- Live ETA prediction keeps updating.
-- Delay Required is recalculated against the fixed target.
+- **TLDT / TTO remain fixed.**
+- Live ETA prediction continues updating.
+- Delay Required and advisories are recalculated against the fixed target.
 
 ---
 
-## Flight status
+## 🚧 Remaining work
 
-| Status | Working trigger |
-|---|---|
-| Unstable | Early / system-managed phase |
-| Stable | ~15 min before predicted IAWP, or ATC manually sequences the flight |
-| Superstable | ~5 min before predicted IAWP |
-| Frozen | ~4 min before predicted landing / final phase |
+The four main AMAN blocks are implemented; remaining work is mainly validation and operational refinement:
 
-Flight-status colour and Delay Required colour are separate.
-
-AEROTHAI material identifies VTBD/VTBS MAESTRO operation and describes AMAN-to-AMAN coordination, VTBS 3-runway capability, Time to Lose/Gain at feeder fixes, Speed Advisory and Time to Leave Holding Fixes.
-
----
-
-## ETA source priority
-
-```text
-1. Live route ETA
-2. Tracked / actual departure + filed EET
-3. EOBT + filed EET fallback
-```
-
-Live ETA uses:
-
-- aircraft latitude / longitude;
-- groundspeed;
-- filed route;
-- route geometry;
-- mapped IAWP / feeder fix.
-
----
-
-## 🚧 Still in progress
-
-- Holding detection and HLD counter.
-- Time to Leave Holding Fixes.
-- Late-connect / late-spawn resequencing warnings.
-- Better automatic runway assignment / gate preference.
-- Aircraft-specific / wake-specific separation rules.
-- Go-around / emergency / priority handling.
-- Runway-closure handling.
-- Persistence / realtime sharing of new AMAN controller targets.
+- Two-controller conflict and simultaneous-edit testing.
+- Live disconnect/reconnect testing with real IVAO traffic.
+- Heavy-traffic testing with 20–40 arrivals.
+- Midnight UTC/service-date rollover testing.
+- Further HMI and responsive-layout cleanup.
+- Validation of working local values against Thailand operational sources:
+  - delay colour thresholds;
+  - VTBS cross-runway stagger;
+  - runway LAND SEP values;
+  - STAR nominal times;
+  - final-position Frozen detector.
+- Exact MAESTRO Speed Advisory algorithm remains unknown from the available public material.
 - More airports beyond VTBD / VTBS.
-- HMI cleanup / responsive layout.
-- More validation against Thai operational references.
+
+Features not yet claimed as confirmed Thailand MAESTRO behaviour include gate-based runway assignment, pairwise wake sequencing, and dedicated go-around/emergency/priority workflows.
 
 ---
 
@@ -162,12 +184,11 @@ Live ETA uses:
 - Cloudflare Pages Functions
 - IVAO Tracker / flight-plan data
 - AIRAC route geometry
-- Supabase/PostgreSQL retained for later persistence
+- Supabase/PostgreSQL
+- Supabase Realtime
 
 ---
 
-## Current development priority
+## Development scope
 
-**Approach-side AMAN first.**
-
-Centre-side supporting panels and legacy workflow screens are not the current priority.
+The current product remains focused on **Approach-side arrival sequencing**. Centre-side supporting panels and legacy spreadsheet-style workflow screens are outside the current priority.
