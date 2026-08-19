@@ -147,9 +147,19 @@ function normalizeTimelineMinuteLabels() {
 }
 
 export function installManualTargetSyncCompatRuntime() {
+  const latestFlights = new Map<string, SharedFlightState>()
+
+  const rememberAndApply = (state: SharedFlightState) => {
+    const airport = String(state.airport || '').trim().toUpperCase()
+    const callsign = String(state.callsign || '').trim().toUpperCase()
+    if (!airport || !callsign) return
+    latestFlights.set(flightKey(airport, callsign), state)
+    applySharedFlight(state)
+  }
+
   const onSharedState = (event: Event) => {
     const detail = (event as CustomEvent<SharedStateDetail>).detail
-    detail?.flightStates?.forEach(applySharedFlight)
+    detail?.flightStates?.forEach(rememberAndApply)
   }
 
   window.addEventListener(SHARED_STATE_EVENT, onSharedState)
@@ -158,11 +168,17 @@ export function installManualTargetSyncCompatRuntime() {
   minuteObserver.observe(document.body, { subtree: true, childList: true, characterData: true })
   normalizeTimelineMinuteLabels()
 
-  const retryTimer = window.setInterval(() => normalizeTimelineMinuteLabels(), 1_000)
+  // Shared state is often fetched before live traffic rows finish rendering after a refresh.
+  // Keep the latest persisted flight rows and re-apply them once the matching timeline row exists.
+  const retryTimer = window.setInterval(() => {
+    normalizeTimelineMinuteLabels()
+    latestFlights.forEach(applySharedFlight)
+  }, 1_000)
 
   return () => {
     window.removeEventListener(SHARED_STATE_EVENT, onSharedState)
     minuteObserver.disconnect()
     window.clearInterval(retryTimer)
+    latestFlights.clear()
   }
 }
