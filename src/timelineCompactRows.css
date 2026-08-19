@@ -1,21 +1,22 @@
-/* Compact true-time timeline rows.
-   Every row stays exactly on its real STA/TLDT anchor. No visual packing, no leader lines.
-   The row is deliberately close to one minute of the 10 px/min scale so busy streams
-   remain time-readable instead of turning into displaced callout cards. */
+/* Readable true-time timeline rows.
+   Every row stays exactly on its STA/TLDT anchor. We keep the label compact enough for
+   a busy stream, but primary operational text is never reduced to unreadable 7–9 px.
+   Detailed EDLY/ADLY/matrix/LEAVE information remains in the row tooltip/system state;
+   the timeline itself shows only the whole-minute delay plus runway. */
 
 .aman-flight-row,
 .aman-flight-row[data-display-side="RIGHT"],
 .aman-flight-row.display-right {
   transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
-  min-height: 18px !important;
-  height: 18px !important;
-  width: min(720px, calc(50% - 34px));
-  grid-template-columns: 45px minmax(78px, 1.2fr) 40px 22px 45px 166px 48px !important;
-  gap: 4px !important;
-  padding: 1px 5px !important;
+  min-height: 20px !important;
+  height: 20px !important;
+  width: min(585px, calc(50% - 34px));
+  grid-template-columns: 52px minmax(104px, 1.25fr) 50px 28px 54px 50px 58px !important;
+  gap: 6px !important;
+  padding: 1px 6px !important;
   border-left-width: 2px !important;
-  background: rgba(7, 15, 27, .78) !important;
-  font-size: 9px !important;
+  background: rgba(7, 15, 27, .84) !important;
+  font-size: 11px !important;
   line-height: 1 !important;
   transition: none !important;
   box-shadow: none !important;
@@ -24,16 +25,16 @@
 .aman-flight-row[data-display-side="LEFT"],
 .aman-flight-row.display-left {
   transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
-  min-height: 18px !important;
-  height: 18px !important;
-  width: min(720px, calc(50% - 34px));
-  grid-template-columns: 48px 166px 45px 22px 40px minmax(78px, 1.2fr) 45px !important;
-  gap: 4px !important;
-  padding: 1px 5px !important;
+  min-height: 20px !important;
+  height: 20px !important;
+  width: min(585px, calc(50% - 34px));
+  grid-template-columns: 58px 50px 54px 28px 50px minmax(104px, 1.25fr) 52px !important;
+  gap: 6px !important;
+  padding: 1px 6px !important;
   border-left: 0 !important;
   border-right-width: 2px !important;
-  background: rgba(7, 15, 27, .78) !important;
-  font-size: 9px !important;
+  background: rgba(7, 15, 27, .84) !important;
+  font-size: 11px !important;
   line-height: 1 !important;
   transition: none !important;
   box-shadow: none !important;
@@ -46,16 +47,16 @@
 .aman-flight-row > em,
 .aman-flight-row .runway-assignment,
 .aman-flight-row .runway-assignment select {
-  font-size: 9px !important;
+  font-size: 11px !important;
   line-height: 1 !important;
 }
 
 .aman-flight-row .tldt {
-  font-weight: 900;
+  font-weight: 950;
 }
 
 .aman-flight-row > strong {
-  font-size: 10px !important;
+  font-size: 13px !important;
   line-height: 1 !important;
   font-weight: 950;
 }
@@ -66,30 +67,30 @@
 
 .aman-flight-row .runway-assignment,
 .aman-flight-row .runway-assignment select {
-  height: 16px !important;
-  min-height: 16px !important;
+  height: 18px !important;
+  min-height: 18px !important;
 }
 
 .aman-flight-row .runway-assignment select {
-  width: 46px !important;
-  min-width: 46px !important;
-  padding: 0 2px !important;
+  width: 54px !important;
+  min-width: 54px !important;
+  padding: 0 4px !important;
   border-radius: 2px !important;
+  font-weight: 900 !important;
 }
 
-/* TDLY + EDLY/ADLY + matrix + LEAVE/GS are kept on one horizontal line. */
+/* Timeline delay is intentionally simple: one rounded whole-minute value only.
+   Raw TDLY / EDLY / ADLY values stay in the DOM/title for calculations and tooltips. */
 .aman-flight-row > b,
 .aman-delay-stack {
   min-width: 0 !important;
-  height: 16px !important;
+  height: 18px !important;
   display: flex !important;
-  flex-direction: row !important;
   align-items: center !important;
   justify-content: flex-end !important;
-  gap: 3px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   white-space: nowrap !important;
-  font-size: 9px !important;
+  font-size: 12px !important;
   line-height: 1 !important;
   text-align: right !important;
 }
@@ -100,50 +101,50 @@
   text-align: left !important;
 }
 
-.aman-delay-stack > span {
-  flex: 0 0 auto;
-  font-size: 10px !important;
-  line-height: 1 !important;
+.aman-delay-stack::before {
+  content: attr(data-rounded-delay);
+  display: inline-block;
+  min-width: 30px;
+  color: currentColor;
+  font: 950 12px/1 Consolas, monospace;
+  text-align: right;
 }
 
+.aman-flight-row[data-display-side="LEFT"] .aman-delay-stack::before,
+.aman-flight-row.display-left .aman-delay-stack::before {
+  text-align: left;
+}
+
+/* Hide verbose secondary labels on the timeline. They are still available in tooltip/system. */
+.aman-delay-stack > span,
 .aman-delay-split,
 .aman-matrix-label,
-.aman-gap-label {
-  flex: 0 0 auto;
-  min-height: 0 !important;
-  height: auto !important;
-  padding: 0 2px !important;
-  border-radius: 2px !important;
-  font-size: 7px !important;
-  line-height: 12px !important;
-}
-
-.aman-flight-row > b[data-advisory] {
-  overflow: visible !important;
-}
-
+.aman-gap-label,
 .aman-flight-row > b[data-advisory]::after {
-  content: attr(data-advisory);
-  flex: 0 0 auto;
-  display: inline-block !important;
-  margin: 0 !important;
-  padding: 0 2px !important;
-  border-width: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  font: 900 7px/12px Consolas, monospace !important;
-  letter-spacing: 0 !important;
-  white-space: nowrap !important;
+  display: none !important;
 }
 
-/* A compact row should not create extra vertical badges above/below itself. */
+/* Status/holding context can tint the row, but must not create a second text line. */
+.aman-flight-row[data-holding-active="true"] {
+  background: linear-gradient(90deg, rgba(95, 24, 24, .20), rgba(7, 15, 27, .90)) !important;
+}
+
+.aman-flight-row[data-display-side="LEFT"][data-holding-active="true"] {
+  background: linear-gradient(270deg, rgba(95, 24, 24, .20), rgba(7, 15, 27, .90)) !important;
+}
+
+.aman-flight-row[data-sequence-reordered="true"] {
+  box-shadow: inset 0 0 0 1px rgba(244, 174, 68, .22) !important;
+}
+
+/* Reconnect markers stay compact and outside the single operational row. */
 .aman-flight-row[data-connection-state="GHOST"]::after,
 .aman-flight-row[data-connection-state="RECONNECTED"]::after,
 .aman-flight-row[data-connection-state="POSITION_JUMP"]::after {
   top: 0 !important;
   right: 2px !important;
   transform: translateY(-100%);
-  font-size: 7px !important;
+  font-size: 8px !important;
   padding: 1px 3px !important;
 }
 
@@ -152,21 +153,14 @@
   left: 2px !important;
 }
 
-/* If two aircraft are exceptionally close, preserving the correct time is more important
-   than creating an opaque pile of boxes. The translucent rows let the time order remain visible. */
 .aman-flight-row:hover,
 .aman-flight-row.is-dragging {
   z-index: 20 !important;
-  background: rgba(10, 23, 39, .98) !important;
+  background: rgba(10, 23, 39, .99) !important;
 }
 
-/* Remove every remnant of the abandoned packing presentation if a stale browser DOM has it. */
 .aman-time-anchor-link {
   display: none !important;
-}
-
-.aman-flight-row[data-label-packed] {
-  box-shadow: none !important;
 }
 
 @media (max-width: 1250px) {
@@ -175,30 +169,28 @@
   .aman-flight-row[data-display-side="RIGHT"],
   .aman-flight-row.display-left,
   .aman-flight-row.display-right {
-    min-height: 17px !important;
-    height: 17px !important;
+    min-height: 19px !important;
+    height: 19px !important;
     width: calc(50% - 28px);
-    grid-template-columns: 40px minmax(66px, 1fr) 34px 19px 40px 142px 42px !important;
-    gap: 3px !important;
-    padding: 1px 4px !important;
-    font-size: 8px !important;
+    grid-template-columns: 46px minmax(88px, 1fr) 42px 24px 48px 46px 52px !important;
+    gap: 4px !important;
+    padding: 1px 5px !important;
+    font-size: 10px !important;
   }
 
   .aman-flight-row[data-display-side="LEFT"],
   .aman-flight-row.display-left {
-    grid-template-columns: 42px 142px 40px 19px 34px minmax(66px, 1fr) 40px !important;
+    grid-template-columns: 52px 46px 48px 24px 42px minmax(88px, 1fr) 46px !important;
   }
 
-  .aman-flight-row > strong { font-size: 9px !important; }
+  .aman-flight-row > strong { font-size: 12px !important; }
   .aman-flight-row .tldt,
   .aman-flight-row > span:nth-child(3),
   .aman-flight-row > span:nth-child(5),
-  .aman-flight-row .fix-code { font-size: 8px !important; }
-  .aman-delay-stack > span { font-size: 9px !important; }
-  .aman-delay-split,
-  .aman-matrix-label,
-  .aman-gap-label,
-  .aman-flight-row > b[data-advisory]::after { font-size: 6.5px !important; }
+  .aman-flight-row .fix-code,
+  .aman-flight-row .runway-assignment,
+  .aman-flight-row .runway-assignment select { font-size: 10px !important; }
+  .aman-delay-stack::before { font-size: 11px !important; }
 }
 
 @media (max-width: 700px) {
@@ -207,13 +199,9 @@
   .aman-flight-row[data-display-side="RIGHT"],
   .aman-flight-row.display-left,
   .aman-flight-row.display-right {
-    min-height: 15px !important;
-    height: 15px !important;
+    min-height: 18px !important;
+    height: 18px !important;
   }
 
-  .aman-delay-split,
-  .aman-matrix-label,
-  .aman-gap-label {
-    display: none !important;
-  }
+  .aman-flight-row > strong { font-size: 11px !important; }
 }
