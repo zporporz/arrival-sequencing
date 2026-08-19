@@ -3,7 +3,27 @@ import { supabaseAdminRequest } from './supabaseAdmin.js';
 export const AMAN_GHOST_RETENTION_MS = 30 * 60 * 1000;
 export const AMAN_RECONNECT_NOTICE_MS = 5 * 60 * 1000;
 
-const TERMINAL_STATES = new Set(['landed', 'on blocks']);
+const TERMINAL_STATES = new Set([
+  'landed',
+  'on blocks',
+  'on ground',
+  'taxi',
+  'taxiing',
+  'parking',
+]);
+
+const AIRPORT_REFERENCE = {
+  VTBD: { lat: 13.9126, lon: 100.6068 },
+  VTBS: { lat: 13.6811, lon: 100.7473 },
+};
+
+// If a pilot disconnects immediately after touchdown, IVAO can disappear before
+// the next Whazzup sample explicitly says LANDED/ON GROUND. In that case only
+// release the slot when the last position is very close to the airport and the
+// last groundspeed is already taxi/rollout-like. A short-final aircraft is still
+// fast enough that it will remain protected as a GHOST rather than being dropped.
+const LANDED_RELEASE_RADIUS_NM = 3.5;
+const LANDED_RELEASE_MAX_GS_KT = 90;
 
 function finite(value) {
   const number = Number(value);
@@ -101,6 +121,21 @@ function hardIdentityConflict(record, flight) {
 function isTerminalSnapshot(snapshot) {
   const state = String(snapshot?.state ?? '').trim().toLowerCase();
   return snapshot?.onGround === true || TERMINAL_STATES.has(state);
+}
+
+function looksLandedAtAirport(snapshot, airport) {
+  if (isTerminalSnapshot(snapshot)) return true;
+  const reference = AIRPORT_REFERENCE[airport];
+  if (!reference) return false;
+
+  const latitude = finite(snapshot?.latitude);
+  const longitude = finite(snapshot?.longitude);
+  const groundSpeed = finite(snapshot?.groundSpeed);
+  if (latitude == null || longitude == null || groundSpeed == null) return false;
+
+  const airportDistanceNm = distanceNm(reference.lat, reference.lon, latitude, longitude);
+  return airportDistanceNm <= LANDED_RELEASE_RADIUS_NM
+    && groundSpeed <= LANDED_RELEASE_MAX_GS_KT;
 }
 
 function sharedFields(record) {
@@ -254,7 +289,8 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
     const lastSeenMs = toMillis(record.last_seen_at, 0);
     const ageMs = fetchedMs - lastSeenMs;
     const snapshot = record.snapshot && typeof record.snapshot === 'object' ? record.snapshot : {};
-    const retain = ageMs <= AMAN_GHOST_RETENTION_MS && !isTerminalSnapshot(snapshot);
+    const landed = looksLandedAtAirport(snapshot, airport);
+    const retain = ageMs <= AMAN_GHOST_RETENTION_MS && !landed;
 
     if (!retain) {
       pendingRows.push({
