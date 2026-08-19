@@ -52,9 +52,9 @@ function AppWithRuntime() {
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
 
-    // Register the 5-minute gain guard and manual reorder before the display-scale
+    // Register the interaction/reset guard and manual reorder before the display-scale
     // pointer adapter. They inspect the real physical 20 px/min drag first; the adapter
-    // then translates that accepted movement back to React's historical 10 px/min math.
+    // then translates that movement back to React's historical 10 px/min math.
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
