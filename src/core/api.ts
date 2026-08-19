@@ -42,6 +42,7 @@ export type IvaoArrivalTrafficFlight = {
   onGround: boolean | null
   trackTimestamp: string | null
   altitude: number | null
+  verticalSpeedFpm: number | null
   groundSpeed: number | null
   latitude: number | null
   longitude: number | null
@@ -50,6 +51,7 @@ export type IvaoArrivalTrafficFlight = {
   airlineIcao: string | null
   flightPlanId: string | null
   flightPlanRevision: number | null
+  filedCruiseAltitudeFt: number | null
   filedDepartureTimeSeconds: number | null
   actualDepartureTimeSeconds: number | null
   filedEetSeconds: number | null
