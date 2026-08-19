@@ -35,13 +35,23 @@ function refreshSystemSummary() {
   const dataMode = statusValue(panel, 'Data mode')
   const eta = statusValue(panel, 'Live route ETA')
   const sep = statusValue(panel, 'SEP invariant')
+  const shared = statusValue(panel, 'Shared AMAN')
+  const holding = statusValue(panel, 'Holding / TTLHF')
+  const speed = statusValue(panel, 'Speed advisory')
   const ghost = statusValue(panel, 'Ghost reserve')
   const reconnect = statusValue(panel, 'Reconnect')
 
+  const sharedOk = shared === 'LIVE'
+  const holdingActive = holding !== 'NONE' && holding !== '0' && holding !== '--'
+  const speedActive = speed !== 'NONE' && speed !== '0' && speed !== '--'
+
   health.innerHTML = [
     `<b class="${dataMode === 'LIVE' ? 'ok' : ''}">${dataMode}</b>`,
+    `<span class="${sharedOk ? 'ok' : 'warn'}">SYNC ${shared}</span>`,
     `<span>ETA ${eta}</span>`,
     `<span class="${sep === 'OK' ? 'ok' : 'warn'}">SEP ${sep}</span>`,
+    holdingActive ? `<span class="warn">HLD ${holding}</span>` : '',
+    speedActive ? `<span>SPD ${speed}</span>` : '',
     `<span class="${ghost !== '0' && ghost !== '--' ? 'warn' : ''}">GHOST ${ghost}</span>`,
     reconnect && reconnect !== 'NONE' && reconnect !== '--' ? `<span class="warn">${reconnect}</span>` : '',
   ].filter(Boolean).join('<em>·</em>')
