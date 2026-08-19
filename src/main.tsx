@@ -27,6 +27,7 @@ import { installReconnectTrafficFetch, installReconnectUiRuntime } from './recon
 import { installSystemPanelRuntime } from './systemPanelRuntime'
 import { installSharedAmanRuntime } from './sharedAmanRuntime'
 import { installOperationalAdvisoryRuntime } from './operationalAdvisoryRuntime'
+import { installInteractionGuardRuntime } from './interactionGuardRuntime'
 
 installReconnectTrafficFetch()
 
@@ -40,6 +41,7 @@ function AppWithRuntime() {
     const removeSystemPanelRuntime = installSystemPanelRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
+    const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
@@ -49,6 +51,7 @@ function AppWithRuntime() {
       removeSystemPanelRuntime()
       removeSharedAmanRuntime()
       removeOperationalAdvisoryRuntime()
+      removeInteractionGuardRuntime()
     }
   }, [])
 
