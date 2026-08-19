@@ -20,10 +20,13 @@ type DragGuard = {
   startY: number
   startTldtMs: number
   earliestTargetMs: number
+  moved: boolean
+  wasManual: boolean
 }
 
 const PX_PER_MINUTE = 10
 const MAX_MANUAL_GAIN_MINUTES = 5
+const CLICK_MOVE_TOLERANCE_PX = 2
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -46,7 +49,14 @@ function rowIdentity(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
   const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
-  return airport && callsign ? { airport, callsign } : null
+  return airport && callsign ? { airport, callsign, key: `${airport}:${callsign}` } : null
+}
+
+function findRow(airport: string, callsign: string) {
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).find((row) => {
+    const identity = rowIdentity(row)
+    return identity?.airport === airport && identity.callsign === callsign
+  }) ?? null
 }
 
 function fakePointer(pointerId: number, clientY: number, row: HTMLElement): FakePointerEvent {
@@ -93,8 +103,8 @@ export function installInteractionGuardRuntime() {
     const startTldtMs = currentTargetMs(row)
     if (startTldtMs == null) return
 
-    // Delay Required = TLDT - natural landing prediction, so this reconstructs
-    // the current natural landing time without coupling the limit to a manual target.
+    // Delay Required = target landing - natural landing prediction. Reconstruct
+    // natural landing so a controller may gain at most five minutes ahead of it.
     const naturalLandingMs = startTldtMs - delayMinutes(row) * 60_000
     drag = {
       row,
@@ -102,13 +112,16 @@ export function installInteractionGuardRuntime() {
       startY: event.clientY,
       startTldtMs,
       earliestTargetMs: naturalLandingMs - MAX_MANUAL_GAIN_MINUTES * 60_000,
+      moved: false,
+      wasManual: row.classList.contains('is-stable') || row.dataset.targetMode === 'MANUAL',
     }
   }
 
   const onPointerMove = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
-    const requestedMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000
+    if (Math.abs(event.clientY - drag.startY) > CLICK_MOVE_TOLERANCE_PX) drag.moved = true
 
+    const requestedMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000
     if (requestedMs >= drag.earliestTargetMs) {
       delete drag.row.dataset.gainLimit
       return
@@ -128,6 +141,28 @@ export function installInteractionGuardRuntime() {
     props.onPointerMove(fakePointer(event.pointerId, limitedClientY, drag.row))
   }
 
+  // This listener is intentionally bubble-phase and this runtime is installed before
+  // sharedAmanRuntime. React has already processed pointerup at its root, but a plain
+  // click/double-click must not be mistaken by the shared runtime for a completed drag.
+  const onPointerUp = (event: PointerEvent) => {
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const snapshot = drag
+    delete snapshot.row.dataset.gainLimit
+    drag = null
+
+    if (snapshot.moved) return
+
+    event.stopImmediatePropagation()
+
+    // App currently marks pointer-up as a manual commitment. Undo that local-only mark
+    // for a plain click on an AUTO row; a real drag is left untouched.
+    if (!snapshot.wasManual) {
+      window.requestAnimationFrame(() => {
+        reactProps<ReactRowProps>(snapshot.row)?.onDoubleClick?.()
+      })
+    }
+  }
+
   const clearDrag = () => {
     if (drag) delete drag.row.dataset.gainLimit
     drag = null
@@ -137,7 +172,7 @@ export function installInteractionGuardRuntime() {
     if (!(event.target instanceof Element)) return
     if (event.target.closest('select')) return
 
-    // Delay Required has its own HOLD / NO HOLD double-click interaction.
+    // Delay Required owns HOLD / NO HOLD double-click independently.
     if (event.target.closest('.aman-flight-row > b')) return
 
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
@@ -149,36 +184,55 @@ export function installInteractionGuardRuntime() {
     event.stopPropagation()
     event.stopImmediatePropagation()
 
-    const key = `${identity.airport}:${identity.callsign}`
-    if (resetPending.has(key)) return
-    resetPending.add(key)
+    if (resetPending.has(identity.key)) return
+    resetPending.add(identity.key)
+
+    const oldSharedRevision = row.dataset.sharedRevision
     row.dataset.resetPending = 'true'
 
-    // Server first, local React second. This prevents the old shared MANUAL target
-    // from being re-applied for a frame between the local reset and the database ack.
+    // Return to the React AUTO sequence immediately. This restores the position that
+    // existed before the manual drag instead of waiting for a network round trip.
+    reactProps<ReactRowProps>(row)?.onDoubleClick?.()
+
+    // Preserve the old shared revision on the re-rendered row while the clear request is
+    // in flight, so the old MANUAL realtime snapshot cannot pull the label back for a frame.
+    window.requestAnimationFrame(() => {
+      const current = findRow(identity.airport, identity.callsign)
+      if (!current) return
+      current.dataset.resetPending = 'true'
+      if (oldSharedRevision) current.dataset.sharedRevision = oldSharedRevision
+    })
+
     void clearSharedTarget(identity.airport, identity.callsign)
       .then(() => {
-        reactProps<ReactRowProps>(row)?.onDoubleClick?.()
+        // Reassert AUTO after the server acknowledgement as a final race guard against
+        // any stale manual write that was already in flight before the double-click.
+        const current = findRow(identity.airport, identity.callsign)
+        if (current) reactProps<ReactRowProps>(current)?.onDoubleClick?.()
       })
       .catch((error) => {
-        row.title = `${row.title} · RETURN TO AUTO FAILED: ${error instanceof Error ? error.message : String(error)}`
+        const current = findRow(identity.airport, identity.callsign) || row
+        current.title = `${current.title} · RETURN TO AUTO FAILED: ${error instanceof Error ? error.message : String(error)}`
       })
       .finally(() => {
-        resetPending.delete(key)
-        delete row.dataset.resetPending
+        window.setTimeout(() => {
+          resetPending.delete(identity.key)
+          const current = findRow(identity.airport, identity.callsign)
+          if (current) delete current.dataset.resetPending
+        }, 250)
       })
   }
 
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
-  document.addEventListener('pointerup', clearDrag, true)
+  document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('pointercancel', clearDrag, true)
   document.addEventListener('dblclick', onDoubleClick, true)
 
   return () => {
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)
-    document.removeEventListener('pointerup', clearDrag, true)
+    document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('pointercancel', clearDrag, true)
     document.removeEventListener('dblclick', onDoubleClick, true)
   }
