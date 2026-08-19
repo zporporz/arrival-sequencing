@@ -4,8 +4,10 @@ import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
 import {
   AMAN_DEFAULT_RUNWAY_SPACING_NM,
+  AMAN_ETA_FF_REFRESH_MS,
   AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES,
   AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES,
+  AMAN_PROCESSING_RADIUS_NM,
   AMAN_SPECIAL_SEPARATION_MINUTES,
   BANGKOK_TMA_WORKING_RADIUS_NM,
   BKK_VOR_COORDINATES,
@@ -36,6 +38,7 @@ type InboundPreview = {
   flight: IvaoArrivalTrafficFlight
   refFix: string | null
   predictedIawpAt: string | null
+  processingDistanceNm: number | null
   source: string
   reason: string | null
 }
@@ -47,6 +50,7 @@ type DisplayInboundRow = {
   aircraft: string
   refFix: string
   eta: string | null
+  distanceNm: number | null
   title: string
   planningState: PlanningState
 }
@@ -79,6 +83,11 @@ const RUNWAYS: Record<AirportCode, readonly string[]> = {
 const ENTRY_FIXES: Record<AirportCode, readonly string[]> = {
   VTBD: ['WEHHA', 'NAKON', 'ENDUU', 'SEHNA', 'SABAI'],
   VTBS: ['WILLA', 'NORTA', 'EASTE', 'TUMGA', 'LEBIM'],
+}
+
+const AIRPORT_REFERENCE: Record<AirportCode, { lat: number; lon: number }> = {
+  VTBD: { lat: 13.9126, lon: 100.6068 },
+  VTBS: { lat: 13.6811, lon: 100.7473 },
 }
 
 const RUNWAY_PROFILES: Record<AirportCode, readonly RunwayProfile[]> = {
@@ -140,7 +149,6 @@ const PX_PER_MINUTE = 10
 const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
 const DRAG_SNAP_MS = 15_000
-const PLANNING_HORIZON_MINUTES = 40
 const LATE_INSERT_MARGIN_MS = 15_000
 // Project working rule for VTBS multi-runway sequencing: landing targets on different
 // active arrival runways are staggered by at least one minute. This is deliberately
@@ -232,12 +240,18 @@ function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
   return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+function processingDistanceNm(airport: AirportCode, flight: IvaoArrivalTrafficFlight) {
+  if (!Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return null
+  const reference = AIRPORT_REFERENCE[airport]
+  return distanceNm(reference.lat, reference.lon, Number(flight.latitude), Number(flight.longitude))
+}
+
 function buildDemoPredictions(airport: AirportCode, anchor: Date) {
   return DEMO_SPECS[airport].flatMap<AmanArrivalPrediction>((spec, index) => {
     const nominalSeconds = nominalStarSeconds(airport, spec.refFix)
     if (nominalSeconds == null) return []
     const naturalLandingMs = anchor.getTime() + spec.naturalLandingOffsetMinutes * 60_000
-    return [{ id: `demo:${airport}:${index}`, callsign: spec.callsign, aircraftType: spec.aircraftType, wakeTurbulence: spec.wakeTurbulence, runway: '', refFix: spec.refFix, predictedIawpAt: new Date(naturalLandingMs - nominalSeconds * 1000).toISOString(), nominalStarSeconds: nominalSeconds }]
+    return [{ id: `demo:${airport}:${index}`, callsign: spec.callsign, aircraftType: spec.aircraftType, wakeTurbulence: spec.wakeTurbulence, runway: '', refFix: spec.refFix, predictedIawpAt: new Date(naturalLandingMs - nominalSeconds * 1000).toISOString(), nominalStarSeconds: nominalSeconds, processingDistanceNm: 100 }]
   })
 }
 
@@ -253,9 +267,9 @@ function naturalLandingTimeMs(prediction: Pick<AmanArrivalPrediction, 'predicted
   return new Date(prediction.predictedIawpAt).getTime() + Math.max(0, prediction.nominalStarSeconds) * 1000
 }
 
-function isWithinPlanningHorizon(prediction: AmanArrivalPrediction, nowMs: number) {
-  const iAwpMs = new Date(prediction.predictedIawpAt).getTime()
-  return Number.isFinite(iAwpMs) && iAwpMs - nowMs <= PLANNING_HORIZON_MINUTES * 60_000
+function isWithinProcessingRadius(prediction: AmanArrivalPrediction) {
+  const value = prediction.processingDistanceNm
+  return value == null || !Number.isFinite(value) || value <= AMAN_PROCESSING_RADIUS_NM
 }
 
 function isAtrType(value: string | null) {
@@ -272,9 +286,6 @@ function pairwiseLandingSeparationSeconds(
   const leaderType = String(leader.aircraftType || '').trim().toUpperCase()
   const leaderWake = String(leader.wakeTurbulence || '').trim().toUpperCase()
 
-  // Current Thailand project working values supplied by the operational SME:
-  // A380: at least 3 minutes / about 7 NM. ATR operation: 4 minutes / about 10 NM.
-  // Keep the runway-configured base as the floor and only increase it when a pair rule applies.
   if (leaderWake === 'J' || leaderType === 'A388') {
     required = Math.max(required, AMAN_SPECIAL_SEPARATION_MINUTES.A380 * 60)
   }
@@ -445,7 +456,6 @@ export default function App() {
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
   const ticks = useMemo(() => timelineTicks(now), [now])
-  const planningNowMs = Math.floor(now.getTime() / 60_000) * 60_000
   const runwaySpacingSeconds = useMemo(() => {
     const result: Record<string, number> = {}
     for (const airport of ['VTBD', 'VTBS'] as const) {
@@ -461,8 +471,8 @@ export default function App() {
   ), [airports, runwayModes])
 
   const liveSequencedPredictions = useMemo(() => livePredictions.filter((prediction) =>
-    isWithinPlanningHorizon(prediction, planningNowMs) && !latePendingIds[prediction.id]
-  ), [latePendingIds, livePredictions, planningNowMs])
+    isWithinProcessingRadius(prediction) && !latePendingIds[prediction.id]
+  ), [latePendingIds, livePredictions])
 
   const liveBaseSequence = useMemo(() => {
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
@@ -556,14 +566,15 @@ export default function App() {
         aircraft: row.aircraftType || '----',
         refFix: row.refFix,
         eta: row.predictedIawpAt,
-        title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL / STABLE' : 'SIMULATED TEST TRAFFIC',
+        distanceNm: row.processingDistanceNm ?? null,
+        title: stableIds[row.id] ? 'SIMULATED · ATC MANUAL TARGET' : 'SIMULATED TEST TRAFFIC',
         planningState: 'SEQUENCED',
       }))
     : inbound.map((item) => {
         const prediction = livePredictionById.get(item.id)
         const planningState: PlanningState = latePendingIds[item.id]
           ? 'LATE'
-          : prediction && isWithinPlanningHorizon(prediction, planningNowMs)
+          : prediction && isWithinProcessingRadius(prediction)
             ? 'SEQUENCED'
             : 'MONITORED'
         return {
@@ -573,11 +584,12 @@ export default function App() {
           aircraft: item.flight.aircraft || '----',
           refFix: item.refFix || '----',
           eta: item.predictedIawpAt,
-          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${PLANNING_HORIZON_MINUTES} MIN HORIZON` : ''}${planningState === 'LATE' ? ' · LATE INSERT PENDING ATC ACCEPTANCE' : ''}${item.reason ? ` · ${item.reason}` : ''}`,
+          distanceNm: item.processingDistanceNm,
+          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL TARGET' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${AMAN_PROCESSING_RADIUS_NM} NM PROCESSING RADIUS` : ''}${planningState === 'LATE' ? ' · LATE INSERT PENDING ATC ACCEPTANCE' : ''}${item.processingDistanceNm != null ? ` · ${item.processingDistanceNm.toFixed(0)} NM from destination` : ''}${item.reason ? ` · ${item.reason}` : ''}`,
           planningState,
         }
       }),
-  [demoMode, demoSequence, inbound, latePendingIds, livePredictionById, planningNowMs, stableIds])
+  [demoMode, demoSequence, inbound, latePendingIds, livePredictionById, stableIds])
 
   const monitoredInboundCount = displayInboundRows.filter((item) => item.planningState === 'MONITORED').length
   const latePendingCount = displayInboundRows.filter((item) => item.planningState === 'LATE').length
@@ -641,13 +653,14 @@ export default function App() {
           const payload = await readIvaoTraffic(airport)
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
             const id = `${airport}:${flight.sessionId}`
+            const distanceToAirportNm = processingDistanceNm(airport, flight)
             const match = findAipIawp(airport, flight.route, [...ENTRY_FIXES[airport]])
-            if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route' } satisfies InboundPreview, prediction: null }
+            if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, processingDistanceNm: distanceToAirportNm, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route' } satisfies InboundPreview, prediction: null }
             const nominalSeconds = nominalStarSeconds(airport, match.entryFix)
-            if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured' } satisfies InboundPreview, prediction: null }
+            if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, processingDistanceNm: distanceToAirportNm, source: 'NO TIMING', reason: 'No nominal STAR timing configured' } satisfies InboundPreview, prediction: null }
             const geometry = await resolveRouteGeometry(flight, airport)
             const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt)
-            const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason } satisfies InboundPreview
+            const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, processingDistanceNm: distanceToAirportNm, source: eta.source, reason: eta.reason } satisfies InboundPreview
             const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {
               id,
               callsign: flight.callsign,
@@ -657,6 +670,7 @@ export default function App() {
               refFix: match.entryFix,
               predictedIawpAt: eta.predictedIawpAt,
               nominalStarSeconds: nominalSeconds,
+              processingDistanceNm: distanceToAirportNm,
             } : null
             return { preview, prediction }
           }))
@@ -678,7 +692,6 @@ export default function App() {
         if (!activeIds.has(id)) delete nextLatePending[id]
       }
 
-      const nowMs = Date.now()
       for (const result of results) {
         const wasInitialized = initializedAirportsRef.current.has(result.airport)
         if (wasInitialized) {
@@ -688,7 +701,7 @@ export default function App() {
 
           for (const item of result.resolved) {
             const prediction = item.prediction
-            if (!prediction || seenInboundIdsRef.current.has(prediction.id) || !isWithinPlanningHorizon(prediction, nowMs)) continue
+            if (!prediction || seenInboundIdsRef.current.has(prediction.id) || !isWithinProcessingRadius(prediction)) continue
             const naturalMs = naturalLandingTimeMs(prediction)
             if (Number.isFinite(latestExistingTarget) && naturalMs < latestExistingTarget - LATE_INSERT_MARGIN_MS) {
               nextLatePending[prediction.id] = true
@@ -709,7 +722,7 @@ export default function App() {
     }
 
     void loadTraffic()
-    const refresh = window.setInterval(() => void loadTraffic(), 30_000)
+    const refresh = window.setInterval(() => void loadTraffic(), AMAN_ETA_FF_REFRESH_MS)
     return () => {
       disposed = true
       window.clearInterval(refresh)
@@ -845,7 +858,7 @@ export default function App() {
         <div className="aman-panel-header">
           <div><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div>
           <div className="aman-panel-meta">
-            <span>5 MIN MAJOR</span><span>1 MIN MINOR</span><span>HORIZON {PLANNING_HORIZON_MINUTES} MIN</span>
+            <span>5 MIN MAJOR</span><span>1 MIN MINOR</span><span>PROCESS {AMAN_PROCESSING_RADIUS_NM} NM</span><span>ETA-FF 15 SEC</span>
             <label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label>
             {latePendingCount > 0 && <span className="aman-late-alert">LATE INSERT {latePendingCount}</span>}
             <span className="is-drag-enabled">CASCADE DRAG · DBL CLICK RESET</span>
@@ -873,7 +886,7 @@ export default function App() {
                 key={row.id}
                 className={`aman-flight-row action-${row.delayAction.toLowerCase()}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                title={`Cascade drag sets TLDT · double-click to reset · Predicted IAWP ${formatHm(row.predictedIawpAt)}Z · TLDT ${formatHm(row.tldt)}Z · Delay ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
+                title={`Cascade drag sets target landing time · double-click to return AUTO · ETA-FF ${formatHm(row.predictedIawpAt)}Z · STA ${formatHm(row.tldt)}Z · STA-FF ${formatHm(row.tto)}Z · TDLY ${formatDelay(row.delayMinutes)} min · ${airport} RWY ${row.runway}${row.processingDistanceNm != null ? ` · ${row.processingDistanceNm.toFixed(0)} NM` : ''}${isStable ? ' · ATC MANUAL TARGET' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
                 onPointerMove={(event) => moveDrag(event, row)}
                 onPointerUp={(event) => endDrag(event, row)}
@@ -903,8 +916,8 @@ export default function App() {
             })}
           </div>
           {!loading && !visibleSequence.length && !demoMode && <div className="aman-empty-sequence">
-            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : latePendingCount ? 'LATE INSERT AWAITING ATC' : monitoredInboundCount ? 'INBOUND OUTSIDE PLANNING HORIZON' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
-            <span>{trafficError || (latePendingCount ? `${latePendingCount} new inbound would enter an existing sequence. Accept it from the Inbound panel before resequencing.` : monitoredInboundCount ? `${monitoredInboundCount} inbound monitored. They enter the landing sequence at ${PLANNING_HORIZON_MINUTES} minutes to IAWP.` : activeArrivalRunways.length ? 'No live inbound inside the planning horizon right now. Use TEST TRAFFIC to verify sequencing.' : 'Set at least one runway to ARR or MIX.')}</span>
+            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : latePendingCount ? 'LATE INSERT AWAITING ATC' : monitoredInboundCount ? 'INBOUND OUTSIDE PROCESSING RADIUS' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
+            <span>{trafficError || (latePendingCount ? `${latePendingCount} new inbound would enter an existing sequence. Accept it from the Inbound panel before resequencing.` : monitoredInboundCount ? `${monitoredInboundCount} inbound monitored outside the ${AMAN_PROCESSING_RADIUS_NM} NM MAESTRO processing radius.` : activeArrivalRunways.length ? 'No live inbound inside the processing radius right now. Use TEST TRAFFIC to verify sequencing.' : 'Set at least one runway to ARR or MIX.')}</span>
           </div>}
         </div>
       </section>
@@ -913,12 +926,12 @@ export default function App() {
         <section className="aman-panel aman-inbound-panel">
           <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span></div>
           <div className="aman-inbound-list">
-            <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA</span></div>
+            <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA-FF</span></div>
             {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} key={item.id} title={item.title}>
               <span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span>
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
-                {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON</small>}
+                {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON {item.distanceNm != null ? `${Math.round(item.distanceNm)}NM` : ''}</small>}
                 {item.planningState === 'LATE' && <button type="button" className="aman-late-insert-button" onClick={() => acceptLateInsert(item.id)}>INSERT</button>}
               </div>
               <span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span>
@@ -935,17 +948,19 @@ export default function App() {
             <div><dt>Airport scope</dt><dd>{airportScope}</dd></div>
             <div><dt>Arrival runways</dt><dd>{activeArrivalRunways.length}</dd></div>
             <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
-            <div><dt>Planning horizon</dt><dd>{PLANNING_HORIZON_MINUTES} MIN</dd></div>
+            <div><dt>Processing radius</dt><dd>{AMAN_PROCESSING_RADIUS_NM} NM</dd></div>
+            <div><dt>ETA-FF refresh</dt><dd>15 SEC</dd></div>
             <div><dt>Monitored inbound</dt><dd>{monitoredInboundCount}</dd></div>
             <div><dt>Late insert</dt><dd className={latePendingCount ? 'is-warning' : ''}>{latePendingCount ? `${latePendingCount} PENDING` : 'NONE'}</dd></div>
             <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
             <div><dt>Fallback ETA</dt><dd>ACTUAL / EOBT</dd></div>
             <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
             <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
+            <div><dt>Runway allocation</dt><dd>AUTO / MANUAL</dd></div>
             <div><dt>Pairwise SEP</dt><dd>ACTIVE</dd></div>
             <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
             <div><dt>VTBS X-RWY</dt><dd>1.0 MIN</dd></div>
-            <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
+            <div><dt>Manual target</dt><dd>{Object.keys(stableIds).length}</dd></div>
             <div><dt>SEP invariant</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? 'FAILED' : 'OK'}</dd></div>
             <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
           </dl>
