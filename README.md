@@ -11,87 +11,76 @@ AMAN / MAESTRO-style arrival sequencing prototype for IVAO Thailand.
 
 ## Current status — 19 Aug 2026
 
-**Approach-side core is implemented and ready for live operational testing.**
+**Approach-side AMAN core is implemented and is being aligned to the latest Thai MAESTRO knowgood.**
+
+Primary project reference for current behavior: `research/aman/MAESTRO_V24_KNOWGOOD.md`.
 
 ---
 
 # Features
 
-## Part 1 — Live traffic & prediction
-
-What it does:
+## Part 1 — Live traffic, ETA-FF & prediction
 
 - IVAO SSO login.
-- Reads live inbound traffic for VTBD / VTBS.
-- Filters pure VFR traffic out.
-- Reads filed route and AIRAC geometry.
-- Maps aircraft to the applicable IAWP / feeder fix.
-- Calculates predicted time at IAWP.
-- Uses live route prediction when available.
-- Falls back to actual/tracked departure + filed EET, then EOBT + EET.
-- Browser traffic refresh: **30 sec**.
+- Live VTBD / VTBS inbound traffic; pure VFR filtered out.
+- Filed route + AIRAC geometry.
+- Automatic IAWP / Feeder Fix mapping.
+- Predicted **ETA-FF** from live route/position when available.
+- Fallback from actual/tracked departure + filed EET, then EOBT + EET.
+- Browser ETA-FF / traffic refresh: **15 sec**.
 - Whazzup backend cache: **15 sec**.
 
----
+## Part 2 — MAESTRO processing radius
 
-## Part 2 — Arrival timeline
+- Latest Thai MAESTRO material describes processing coverage of roughly **200–300 NM**.
+- Project active-sequence admission uses the outer **300 NM** boundary.
+- Destination traffic outside 300 NM remains visible as **MON** but does not enter the active landing sequence.
+- When traffic crosses into the processing boundary, it becomes eligible for active sequencing.
+- The older AEROTHAI status reference independently places Unstable traffic at roughly **300–200 NM**.
 
-What it does:
+## Part 3 — Arrival timeline
 
 - MAESTRO-style vertical time axis.
 - Fixed red **ACTUAL** line.
-- 1-minute minor ticks and 5-minute major ticks.
-- Select how many minutes are shown below ACTUAL.
-- Aircraft labels move with time while ACTUAL stays fixed.
-- VTBD / VTBS can be shown on LEFT or RIGHT side of the same timeline.
+- 1-minute minor / 5-minute major ticks.
+- Configurable minutes displayed below ACTUAL.
+- Traffic labels move with time while ACTUAL stays fixed.
+- VTBD / VTBS can be placed LEFT or RIGHT on one timeline.
 
----
+## Part 4 — Automatic sequencing
 
-## Part 3 — Automatic sequencing
+- Automatic landing sequence.
+- Calculates project-compatible target names:
+  - **STA / TLDT** — target landing time.
+  - **STA-FF / TTO** — target Feeder Fix crossing time.
+  - **TDLY** — total delay required.
+- Cascade constraints prevent target overlap.
+- Drag to set a manual target.
+- Manual gain remains limited to **5 minutes earlier** than natural prediction.
+- Double-click returns the aircraft to AUTO target.
 
-What it does:
+## Part 5 — Flight lifecycle
 
-- Automatically creates a landing sequence.
-- Calculates:
-  - **TLDT** — Target Landing Time.
-  - **TTO** — Target Time Over IAWP / feeder fix.
-  - **Delay Required**.
-- Prevents landing targets from overlapping configured spacing.
-- Cascade drag: moving one aircraft can push following aircraft while maintaining spacing.
-- Manual gain is limited to **5 minutes earlier than the natural prediction**.
-- Double-click returns an aircraft to its current AUTO target.
+Callsign colour:
 
----
+- **Unstable — cyan**.
+- **Stable — orange**: approximately 15 min before predicted IAWP/Feeder Fix.
+- **Superstable — white**: approximately 5 min before predicted IAWP/Feeder Fix.
+- **Frozen — violet**: approximately 4 min before predicted landing, with short-final position fallback.
 
-## Part 4 — Flight status
+AUTO / MANUAL target ownership remains separate from lifecycle.
 
-Callsign colour shows the MAESTRO lifecycle:
+## Part 6 — Multi-runway / multi-airport
 
-- **Unstable — cyan**: early planning phase.
-- **Stable — orange**: approximately 15 min before predicted IAWP.
-- **Superstable — white**: approximately 5 min before predicted IAWP.
-- **Frozen — violet**: approximately 4 min before predicted landing / short-final fallback.
+- Multiple active arrival runways.
+- Runway modes: ARR / DEP / MIX / CLOSED.
+- Configurable LAND SEP in NM.
+- Manual per-flight runway assignment.
+- Automatic runway allocation chooses the earliest feasible active arrival runway and uses runway load as a tie-break.
+- VTBD + VTBS can operate on the same shared timeline.
+- Current VTBS project cross-runway rule remains **1 minute** pending local validation.
 
-Manual target ownership and flight lifecycle are separate concepts.
-
----
-
-## Part 5 — Multi-runway / multi-airport
-
-What it does:
-
-- Multiple arrival runways can operate at the same time.
-- Runway modes:
-  - ARR
-  - DEP
-  - MIX
-  - CLOSED
-- LAND SEP can be configured in NM per runway.
-- Each aircraft can be manually assigned a landing runway.
-- VTBD + VTBS can be operated on the same AMAN timeline.
-- VTBS working cross-runway rule: **1 minute minimum between different arrival runways**.
-
-Current baseline:
+Current spacing baseline:
 
 | Airport | Runway | LAND SEP |
 |---|---|---:|
@@ -101,199 +90,182 @@ Current baseline:
 | VTBS | 20L | 8.0 NM |
 | VTBS | 20R | 6.0 NM |
 
----
+## Part 7 — Delay Splitting: TDLY / EDLY / ADLY
 
-## Part 6 — Time to Lose / Gain & delay action
+Thai MAESTRO material defines:
 
-What it does:
+- **EDLY** — En-route Delay absorbed before the Feeder Fix.
+- **ADLY** — Approach Delay absorbed after the Feeder Fix.
 
-- Continuously compares predicted IAWP time with TTO.
-- Delay Required updates while the aircraft moves.
-- Action categories:
-  - Expedite
-  - Nothing
-  - Speed reduction
-  - Path stretching
-  - Holding
+The operational matrix implies a working 4-minute Approach delay budget, therefore the project displays:
 
-Current numeric thresholds are project working values pending Thailand confirmation.
+`TDLY = EDLY + ADLY`
 
----
+For negative delay, the HMI displays **GAIN** instead.
 
-## Part 7 — Speed advisory
+## Part 8 — Thai operational quick-reference matrix
 
-What it does:
+The current HMI applies the source-backed matrix:
 
-- Calculates a planning groundspeed when a speed-only solution appears feasible.
-- Displays `GS~xxx` for a suggested planning groundspeed.
-- Displays `SPD+PATH` when speed alone is insufficient.
+| TDLY | EDLY | Primary action | Secondary action | Vector limit |
+|---:|---:|---|---|---|
+| 6 | 2 | Permit Entry | Reduce Speed | <25 NM |
+| 7 | 3 | Orbit / Permit | Assess inner traffic | ~30 NM |
+| 8 | 4 | Consider Hold | Runway change | Max Limit |
+| >=9 | >=5 | HOLD ALL | Issue EAT (STA-FF) | OVERLOAD |
 
-This is a project planning-groundspeed model, **not a claim of MAESTRO's internal IAS/Mach algorithm**.
+The runway selector is highlighted at the `TDLY 8` band because runway change is listed as the secondary action.
 
----
+## Part 9 — Speed / path / holding advisory
 
-## Part 8 — Holding / Time to Leave Holding Fix
+- Negative delay: expedite / shortcut / speed-up concept.
+- Zero delay: normal flight.
+- Positive delay: speed reduction / path stretching / holding progression.
+- Planning GS advisory shows `GS~xxx` when a speed-only solution appears feasible.
+- `SPD+PATH` when speed alone is insufficient.
+- HLD counter.
+- `LEAVE HH:MM` / EAT-style Feeder Fix release indication for holding traffic.
+- Shared HOLD / NO HOLD override.
 
-What it does:
+The planning-GS calculation is a project estimate, not a claim of MAESTRO's internal IAS/Mach algorithm.
 
-- Detects when delay reaches the Holding action threshold.
-- HLD counter shows current holding demand.
-- Uses STAR entry / IAWP as the working holding point model.
-- Displays `LEAVE HH:MM` from the target TTO.
-- Delay-cell double-click can toggle shared HOLD / NO HOLD override.
+## Part 10 — Capacity / demand
 
----
+- Next-60-minute arrival demand is calculated per selected airport.
+- Thai VTBS knowgood shows **ARR 37 MAX**; VTBS HMI capacity is capped at 37 arrivals/hour.
+- No equivalent authoritative VTBD maximum is in the current deck, so VTBD capacity remains an estimate from configured landing spacing.
+- OVERLOAD is highlighted when demand exceeds displayed capacity or the MAESTRO delay matrix enters the `>=9` HOLD ALL band.
 
-## Part 9 — Shared realtime & persistence
+## Part 11 — Late insert / resequence protection
 
-What it does:
+- Detects traffic entering the processing boundary late enough to disrupt an established sequence.
+- Does not silently insert it into an existing plan.
+- Shows `INSERT` in Inbound first.
+- ATC explicitly accepts insertion before resequencing.
 
-- Supabase shared AMAN state for all connected controllers.
-- Manual TLDT persists after refresh.
-- Manual landing runway persists after refresh.
+This also covers common IVAO late-connect / late-spawn behavior.
+
+## Part 12 — Pairwise separation
+
+- Same-runway spacing can depend on leader/follower pair.
+- LAND SEP remains the floor.
+- Current project working special values:
+  - A380-related: at least **3 min**.
+  - ATR-related: at least **4 min**.
+
+These values still require authoritative Thailand operational validation.
+
+## Part 13 — MAESTRO operational actions
+
+The uploaded Thai MAESTRO menu confirms functions including Change runway, Missed Approach, Insert arrival flight, Insert closure, Insert gap, Extra Flight, Dsequence and Remove.
+
+Current implemented baseline:
+
+- **Change runway** — per-flight runway selector.
+- **Insert closure** — runway `CLOSED` mode in the runway configuration.
+- **Missed Approach** — right-click flight → removes it from active sequence; it remains in Inbound for explicit REINSERT.
+- **Dsequence** — right-click flight → removes it from active sequence; explicit REINSERT available.
+- **Insert gap** — right-click flight → reserve +1 or +2 minutes after it; following traffic cascades and the gap is shared.
+- **Remove** — excludes the live flight from active sequence; REINSERT remains available while it is still connected.
+
+Confirmed menu items whose exact field/workflow is not yet documented enough to copy safely remain unimplemented instead of guessed: Change trajectory, Change Metering Fix, Change ETA-FF, Maximum Delay, MF constraint, Transfer Speed, FF Transfer constraints, Coordination and Extra Flight.
+
+## Part 14 — Shared realtime & persistence
+
+- Supabase shared state for connected controllers.
+- Manual target and landing runway persist after refresh.
 - Return-to-AUTO is shared.
-- Runway profile, runway mode and LAND SEP are shared.
-- Supabase Realtime propagates changes to other controllers.
-- Shows who is currently online on the website.
-- System panel reports shared-state health.
-
----
-
-## Part 10 — Disconnect / reconnect recovery
-
-What it does:
-
-- Flight identity is not tied only to one IVAO session ID.
-- If a pilot disconnects, the sequence slot becomes a **GHOST** instead of disappearing immediately.
-- Ghost slot is retained for up to **30 minutes**.
-- Reconnect restores the same target / runway / manual state where possible.
-- Uses VID, flight identity, position, elapsed time and groundspeed to assess reconnect plausibility.
-- Shows:
-  - `RECONNECTED`
-  - `POSITION JUMP`
-  - Ghost count
-- Recovery state is shared across controllers.
-
----
-
-## Part 11 — Planning Horizon / Not Yet in Sequence
-
-What it does:
-
-- Not every distant inbound is immediately inserted into the landing sequence.
-- Current working planning horizon: **40 minutes to predicted IAWP**.
-- Aircraft outside the horizon remain visible in Inbound as **MON** / monitored traffic.
-- They enter active sequencing when they move inside the planning horizon.
-
-The 40-minute value is currently a project working setting and can be made configurable later.
-
----
-
-## Part 12 — Late insert / resequence protection
-
-What it does:
-
-- Detects aircraft that appear late and would need to be inserted into an already-established sequence.
-- Does **not silently resequence established traffic**.
-- Shows a `LATE / INSERT` indication first.
-- ATC explicitly accepts insertion before the aircraft joins the active sequence.
-
-This is intended to protect an existing plan from unexpected IVAO late-connect / late-spawn traffic.
-
----
-
-## Part 13 — Pairwise separation engine
-
-What it does:
-
-- Same-runway spacing can depend on the leader/follower aircraft pair instead of runway LAND SEP alone.
-- LAND SEP remains the minimum baseline.
-- Current project working special values include:
-  - A380-related spacing: at least **3 min**.
-  - ATR-related spacing: at least **4 min**.
-
-These pairwise values are working project rules and still require Thailand operational confirmation before being treated as authoritative local minima.
-
----
-
-## Part 14 — Test / system tools
-
-What it does:
-
-- TEST TRAFFIC mode for sequencing tests without waiting for live arrivals.
-- System health drawer shows items such as:
-  - LIVE / SIMULATED data mode.
-  - Shared AMAN sync.
-  - Live route ETA coverage.
-  - Separation invariant.
-  - Holding / Speed Advisory state.
-  - Ghost / reconnect state.
+- Runway profile / modes / LAND SEP shared.
+- Holding override shared.
+- Missed / Dsequence / Remove / reserved-gap state shared.
+- Realtime propagation to other controllers.
 - Online controller presence.
 
-Verification checklist:
+## Part 15 — Disconnect / reconnect recovery
 
-`docs/AMAN_FOUR_CORE_VERIFICATION.md`
+- Canonical flight identity is not tied only to one IVAO session ID.
+- Disconnected airborne traffic can retain its slot as **GHOST** up to **30 minutes**.
+- Reconnect restores target/runway/manual state where possible.
+- Position plausibility checks elapsed time, position and groundspeed.
+- Shared `RECONNECTED` / `POSITION JUMP` warnings.
+- Landed/on-ground/low-speed-near-airport flights are released rather than incorrectly retained as Ghosts.
+
+## Part 16 — Test / system tools
+
+- TEST TRAFFIC mode.
+- Collapsed System health summary / detailed drawer.
+- Shows processing radius, ETA-FF refresh, route ETA coverage, delay splitting, AAR/demand, overload, separation health, Ghost/reconnect and shared-state health.
+- Verification checklists:
+  - `docs/AMAN_FOUR_CORE_VERIFICATION.md`
+  - `docs/MAESTRO_V24_VERIFICATION.md`
 
 ---
 
 # Timing model
 
 ```text
-Live position + route + groundspeed
-              ↓
-        Predicted IAWP
-              ↓
-     + nominal STAR time
-              ↓
-      Natural landing ETA
-              ↓
-        Sequencing rules
-              ↓
-             TLDT
-              ↓
-     - nominal STAR time
-              ↓
-             TTO
-              ↓
- Delay / speed / holding advisory
+Live Radar / IVAO position + Flight Plan + AIRAC route
+                         ↓
+                       ETA-FF
+                         ↓
+                  + nominal STAR time
+                         ↓
+               natural landing estimate
+                         ↓
+       runway allocation + sequence constraints
+                         ↓
+                    STA / TLDT
+                         ↓
+             STA-FF / TTO at Feeder Fix
+                         ↓
+                 TDLY required
+                         ↓
+              EDLY + ADLY splitting
+                         ↓
+ speed / path / runway / holding operational guidance
 ```
 
-When ATC sets a manual target:
-
-- TLDT / TTO become the controller target.
-- Live prediction continues updating.
-- Delay Required and advisories update against that target.
-- Double-click removes the manual target and returns the aircraft to AUTO sequencing.
+When ATC sets a manual target, the target remains fixed while live ETA-FF continues to update, so required delay/advisories can move around that target.
 
 ---
 
 # Still to do
 
-## Operational behaviour
+## Source-confirmed functions needing exact workflow detail
 
-- Runway-configuration transition / runway change handling.
-- Go-around / missed-approach behaviour — exact Thailand MAESTRO workflow not yet confirmed.
-- Conformance monitoring / target-at-risk indication.
+- Change trajectory.
+- Change Metering Fix.
+- Change ETA-FF manual entry/override rules.
+- Maximum Delay input semantics.
+- MF constraint.
+- Transfer Speed.
+- FF Transfer constraints.
+- Coordination workflow.
+- Extra Flight data entry.
+
+## Operational refinement
+
+- Conformance / Target-at-risk monitoring.
 - Data-confidence indication for ETA quality.
 - Multi-controller simultaneous-edit conflict handling.
 - Undo / audit history.
 - What-if sequence planning.
-- Capacity / slot management.
+- More complete demand/capacity planning windows.
 
 ## Validation
 
 - Two-controller simultaneous testing.
 - Real pilot disconnect / reconnect testing.
 - Heavy traffic test with 20–40 arrivals.
-- Midnight UTC service-date rollover test.
+- Midnight UTC service-date rollover.
 - Further responsive HMI cleanup.
-- Validate project working values against Thailand operational references:
-  - delay action thresholds;
+- Validate current local working values:
   - VTBS cross-runway stagger;
   - runway LAND SEP;
   - STAR nominal timings;
-  - pairwise ATR / A380 rules;
-  - final-position Frozen detector.
+  - ATR / A380 pairwise rules;
+  - final-position Frozen detector;
+  - authoritative VTBD AAR.
 
 ## Later phase
 
@@ -317,4 +289,4 @@ When ATC sets a manual target:
 
 ## Scope
 
-Current priority remains **Approach-side arrival sequencing**. Centre-side supporting panels and departure-management functions are later phases.
+Current priority remains **Approach-side arrival sequencing**. Centre-side supporting panels and full departure-management functions remain later phases.
