@@ -6,6 +6,16 @@ const json = (body, status = 200) => Response.json(body, {
   headers: { 'Cache-Control': 'private, no-store' },
 });
 
+const DEFAULT_WORKSPACE_SETTINGS = {
+  holdingThresholdMinutes: 9,
+  speedAdvisoryEnabled: true,
+  processingRadiusNm: 300,
+  processingRadiusBandMinNm: 200,
+  etaFfRefreshSeconds: 15,
+  approachDelayBudgetMinutes: 4,
+  vtbsArrivalCapacityMaxPerHour: 37,
+};
+
 function cleanText(value, max = 500) {
   const text = String(value ?? '').trim();
   return text ? text.slice(0, max) : null;
@@ -84,6 +94,17 @@ async function patchFlightState(env, serviceDate, airport, callsign, patch) {
   return result.data?.[0] || null;
 }
 
+function flightIdentityRow(existing, payload, serviceDate, airport, callsign) {
+  return {
+    service_date: serviceDate,
+    airport,
+    callsign,
+    canonical_session_id: existing?.canonical_session_id
+      || cleanText(payload.canonicalSessionId, 128)
+      || crypto.randomUUID(),
+  };
+}
+
 export async function onRequestGet(context) {
   try {
     const url = new URL(context.request.url);
@@ -129,9 +150,10 @@ export async function onRequestPost(context) {
       const profileId = cleanText(payload.profileId, 120) || 'CUSTOM';
       const runwayModes = cleanObject(payload.runwayModes, 'runwayModes');
       const spacingNm = cleanObject(payload.spacingNm, 'spacingNm');
-      const settings = payload.settings == null
-        ? { holdingThresholdMinutes: 5, speedAdvisoryEnabled: true }
+      const suppliedSettings = payload.settings == null
+        ? {}
         : cleanObject(payload.settings, 'settings');
+      const settings = { ...suppliedSettings, ...DEFAULT_WORKSPACE_SETTINGS };
 
       const result = await supabaseAdminRequest(
         context.env,
@@ -165,12 +187,7 @@ export async function onRequestPost(context) {
       if (!manualRunway) throw new Error('Landing runway is required');
 
       const row = await upsertFlightState(context.env, {
-        service_date: serviceDate,
-        airport,
-        callsign,
-        canonical_session_id: existing?.canonical_session_id
-          || cleanText(payload.canonicalSessionId, 128)
-          || crypto.randomUUID(),
+        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
         manual_runway: manualRunway,
@@ -201,18 +218,41 @@ export async function onRequestPost(context) {
       const holdingLeaveAt = cleanIso(payload.holdingLeaveAt, false);
 
       const row = await upsertFlightState(context.env, {
-        service_date: serviceDate,
-        airport,
-        callsign,
-        canonical_session_id: existing?.canonical_session_id
-          || cleanText(payload.canonicalSessionId, 128)
-          || crypto.randomUUID(),
+        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
         holding_mode: mode,
         holding_fix: mode === 'NO_HOLD' ? null : holdingFix,
         holding_leave_at: mode === 'NO_HOLD' ? null : holdingLeaveAt,
         manual_updated_by_vid: auth.vid,
         manual_updated_by_name: auth.name,
         manual_updated_at: new Date().toISOString(),
+      });
+      return json({ ok: true, flightState: row });
+    }
+
+    if (action === 'setOperationalState') {
+      const operationalState = String(payload.operationalState || 'NORMAL').trim().toUpperCase();
+      if (!['NORMAL', 'MISSED_APPROACH', 'DESEQUENCED', 'REMOVED'].includes(operationalState)) {
+        throw new Error('Invalid operational state');
+      }
+      const row = await upsertFlightState(context.env, {
+        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        operational_state: operationalState,
+        operational_updated_by_vid: auth.vid,
+        operational_updated_by_name: auth.name,
+        operational_updated_at: new Date().toISOString(),
+      });
+      return json({ ok: true, flightState: row });
+    }
+
+    if (action === 'setOperationalGap') {
+      const seconds = Math.round(Number(payload.reservedGapSeconds));
+      if (!Number.isFinite(seconds) || seconds < 0 || seconds > 600) throw new Error('Reserved gap must be between 0 and 600 seconds');
+      const row = await upsertFlightState(context.env, {
+        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        reserved_gap_seconds: seconds,
+        operational_updated_by_vid: auth.vid,
+        operational_updated_by_name: auth.name,
+        operational_updated_at: new Date().toISOString(),
       });
       return json({ ok: true, flightState: row });
     }
