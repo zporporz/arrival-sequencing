@@ -17,6 +17,7 @@ import './runtimeEnhancements.css'
 import './systemPanelRuntime.css'
 import './sharedAmanRuntime.css'
 import './operationalAdvisory.css'
+import './callsignState.css'
 import AuthGate from './AuthGate'
 import App from './App'
 import { installTimelineAxisRuntime } from './timelineAxisRuntime'
@@ -39,9 +40,12 @@ function AppWithRuntime() {
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
+    // Install the interaction guard before sharedAmanRuntime so a plain click/double-click
+    // can be filtered at document bubble phase after React handles it but before shared
+    // pointer-up persistence mistakes the click for a drag.
+    const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
-    const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     return () => {
       removeTimelineRuntime()
       removeFlightStatusRuntime()
@@ -49,9 +53,9 @@ function AppWithRuntime() {
       removeReconnectUiRuntime()
       removeOnlinePresenceRuntime()
       removeSystemPanelRuntime()
+      removeInteractionGuardRuntime()
       removeSharedAmanRuntime()
       removeOperationalAdvisoryRuntime()
-      removeInteractionGuardRuntime()
     }
   }, [])
 
