@@ -1,0 +1,41 @@
+/* Callsign is the primary MAESTRO flight-status indicator. Manual target ownership
+   must not replace the lifecycle colour with a row-box colour. */
+.aman-flight-row.status-unstable > strong,
+.aman-inbound-row strong.status-unstable {
+  color: #6fc7cb !important;
+}
+
+.aman-flight-row.status-stable > strong,
+.aman-inbound-row strong.status-stable {
+  color: #f2a64a !important;
+}
+
+.aman-flight-row.status-superstable > strong,
+.aman-inbound-row strong.status-superstable {
+  color: #f4f7fb !important;
+  text-shadow: 0 0 5px rgba(244,247,251,.18);
+}
+
+.aman-flight-row.status-frozen > strong,
+.aman-inbound-row strong.status-frozen {
+  color: #91a4ff !important;
+  text-shadow: 0 0 6px rgba(145,164,255,.22);
+}
+
+/* A controller-set target promotes an otherwise Unstable flight to the Stable
+   callsign colour, but never downgrades Superstable or Frozen. */
+.aman-flight-row.is-stable:not(.status-superstable):not(.status-frozen) > strong,
+.aman-inbound-row strong.is-stable:not(.status-superstable):not(.status-frozen) {
+  color: #f2a64a !important;
+}
+
+/* Do not use the whole row/inbound underline as the status cue. TLDT/runway may
+   still show a subtle manual-target marker, while the callsign carries status. */
+.aman-flight-row.is-stable:not(.is-dragging),
+.aman-flight-row[data-target-mode="MANUAL"]:not(.is-dragging) {
+  box-shadow: none;
+}
+
+.aman-inbound-row strong.is-stable {
+  text-decoration: none;
+}
