@@ -44,8 +44,9 @@ export type ArrivalEtaEstimate = {
 
 const MIN_LIVE_GS_KT = 80
 const MAX_ROUTE_DEVIATION_NM = 100
-const DESCENT_PROFILE_START_ALTITUDE_FT = 30000
+const POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT = 30000
 const DESCENT_LOW_ALTITUDE_FT = 10000
+const DESCENT_VS_THRESHOLD_FPM = -300
 const FALLBACK_DESCENT_IAS_KT = 280
 const FALLBACK_LOW_DESCENT_IAS_KT = 250
 const performanceCache = new Map<string, AircraftPerformanceProfile | null>()
@@ -146,24 +147,43 @@ function fixDistances(geometry: RouteGeometry, fix: string) {
   return distances.sort((a, b) => a - b)
 }
 
+function positionModelTriggerAltitudeFt(flight: IvaoArrivalTrafficFlight) {
+  const filedCruise = finite(flight.filedCruiseAltitudeFt) && flight.filedCruiseAltitudeFt > 0
+    ? flight.filedCruiseAltitudeFt
+    : null
+  return filedCruise == null
+    ? POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT
+    : Math.min(POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT, filedCruise)
+}
+
+function isDescending(flight: IvaoArrivalTrafficFlight) {
+  const state = String(flight.state || '').trim().toLowerCase()
+  if (state === 'approach') return true
+  return finite(flight.verticalSpeedFpm) && flight.verticalSpeedFpm <= DESCENT_VS_THRESHOLD_FPM
+}
+
+function positionModelActive(flight: IvaoArrivalTrafficFlight) {
+  if (flight.onGround === true || !finite(flight.altitude)) return false
+  if (isDescending(flight)) return true
+  return flight.altitude >= positionModelTriggerAltitudeFt(flight) - 500
+}
+
 function effectiveLiveSpeedKt(
   flight: IvaoArrivalTrafficFlight,
   performance: AircraftPerformanceProfile | null,
 ) {
-  const altitude = finite(flight.altitude) ? flight.altitude : null
   const liveGs = finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT
     ? flight.groundSpeed
     : null
 
+  if (!isDescending(flight)) return liveGs
+
+  const altitude = finite(flight.altitude) ? flight.altitude : null
   if (altitude != null && altitude <= DESCENT_LOW_ALTITUDE_FT) {
     return performance?.descentBelow10000IasKt ?? FALLBACK_LOW_DESCENT_IAS_KT
   }
 
-  if (altitude != null && altitude <= DESCENT_PROFILE_START_ALTITUDE_FT) {
-    return performance?.descentIasKt ?? FALLBACK_DESCENT_IAS_KT
-  }
-
-  return liveGs
+  return performance?.descentIasKt ?? FALLBACK_DESCENT_IAS_KT
 }
 
 function liveRouteEstimate(
@@ -173,6 +193,8 @@ function liveRouteEstimate(
   fetchedAt: string,
   performance: AircraftPerformanceProfile | null,
 ): ArrivalEtaEstimate | null {
+  if (!positionModelActive(flight)) return null
+
   const effectiveSpeed = effectiveLiveSpeedKt(flight, performance)
   if (!finite(effectiveSpeed) || effectiveSpeed < MIN_LIVE_GS_KT) return null
 
@@ -188,7 +210,8 @@ function liveRouteEstimate(
   if (ahead != null) {
     const remainingNm = Math.max(0, ahead - progress.progressNm) + progress.offRouteNm
     const etaMs = trackBaseMs + remainingNm / effectiveSpeed * 3600000
-    const usingProfile = finite(flight.altitude) && flight.altitude <= DESCENT_PROFILE_START_ALTITUDE_FT
+    const descending = isDescending(flight)
+    const triggerFt = positionModelTriggerAltitudeFt(flight)
     return {
       source: 'LIVE_ROUTE',
       predictedIawpAt: new Date(etaMs).toISOString(),
@@ -197,9 +220,11 @@ function liveRouteEstimate(
       offRouteNm: progress.offRouteNm,
       groundSpeedKt: effectiveSpeed,
       pastCrossing: false,
-      reason: usingProfile
-        ? `Descent profile ${performance?.descentProfile ?? `${FALLBACK_DESCENT_IAS_KT}/${FALLBACK_LOW_DESCENT_IAS_KT}`} applied from FL300`
-        : null,
+      reason: descending
+        ? `Descent profile ${performance?.descentProfile ?? `${FALLBACK_DESCENT_IAS_KT}/${FALLBACK_LOW_DESCENT_IAS_KT}`} applied while descending`
+        : triggerFt < POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT
+          ? `Position/route model active from filed cruise ${Math.round(triggerFt / 100)}00 ft; current GS used in cruise`
+          : null,
     }
   }
 
@@ -246,7 +271,8 @@ function flightSafeGroundSpeed(value: number | null) {
 
 /**
  * Progressive ETA source priority for the Approach AMAN:
- * live route/track -> actual departure + EET -> tracked takeoff + EET -> filed EOBT + EET.
+ * position/route after FL300 or filed cruise -> actual departure + EET -> tracked takeoff + EET -> filed EOBT + EET.
+ * Cruise uses live GS. SimBrief descent IAS is applied only after descent is detected.
  */
 export function estimateIawpArrival(
   flight: IvaoArrivalTrafficFlight,
