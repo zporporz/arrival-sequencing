@@ -40,6 +40,23 @@ export type ArrivalEtaEstimate = {
   groundSpeedKt: number | null
   pastCrossing: boolean
   reason: string | null
+  modelPhase?: 'CRUISE' | 'DESCENT' | 'FALLBACK'
+  trackSampleCount?: number
+  verticalTrendFpm?: number | null
+}
+
+type TrackSample = {
+  timestampMs: number
+  altitudeFt: number | null
+  groundSpeedKt: number | null
+}
+
+type TrackTrend = {
+  samples: TrackSample[]
+  sampleCount: number
+  windowSeconds: number
+  smoothedGroundSpeedKt: number | null
+  verticalTrendFpm: number | null
 }
 
 const MIN_LIVE_GS_KT = 80
@@ -47,12 +64,18 @@ const MAX_ROUTE_DEVIATION_NM = 100
 const POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT = 30000
 const DESCENT_LOW_ALTITUDE_FT = 10000
 const DESCENT_VS_THRESHOLD_FPM = -300
+const TRACK_HISTORY_WINDOW_MS = 2 * 60 * 1000
+const TRACK_HISTORY_MAX_KEYS = 500
+const DESCENT_INTEGRATION_STEP_NM = 3
+const FALLBACK_DESCENT_MACH = 0.78
 const FALLBACK_DESCENT_IAS_KT = 280
 const FALLBACK_LOW_DESCENT_IAS_KT = 250
 const performanceCache = new Map<string, AircraftPerformanceProfile | null>()
 const performanceRequests = new Map<string, Promise<void>>()
+const trackHistory = new Map<string, TrackSample[]>()
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 function safeTime(value: string | null | undefined) {
   if (!value) return null
@@ -84,6 +107,104 @@ function cachedPerformance(flight: IvaoArrivalTrafficFlight) {
     performanceRequests.set(type, request)
   }
   return null
+}
+
+function historyKey(flight: IvaoArrivalTrafficFlight) {
+  return String(flight.sessionId || flight.callsign || '').trim().toUpperCase()
+}
+
+function median(values: number[]) {
+  if (!values.length) return null
+  const ordered = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(ordered.length / 2)
+  return ordered.length % 2 === 0
+    ? (ordered[middle - 1] + ordered[middle]) / 2
+    : ordered[middle]
+}
+
+function weightedGroundSpeed(samples: TrackSample[]) {
+  const speedSamples = samples.filter((sample) => finite(sample.groundSpeedKt) && sample.groundSpeedKt >= MIN_LIVE_GS_KT && sample.groundSpeedKt <= 750)
+  if (!speedSamples.length) return null
+
+  const center = median(speedSamples.map((sample) => Number(sample.groundSpeedKt)))
+  if (center == null) return null
+  const tolerance = Math.max(30, center * 0.16)
+  const filtered = speedSamples.filter((sample) => Math.abs(Number(sample.groundSpeedKt) - center) <= tolerance)
+  const source = filtered.length ? filtered : speedSamples
+  const firstMs = source[0].timestampMs
+  const lastMs = source.at(-1)?.timestampMs ?? firstMs
+  const spanMs = Math.max(1, lastMs - firstMs)
+
+  let weightedTotal = 0
+  let totalWeight = 0
+  source.forEach((sample) => {
+    const recency = (sample.timestampMs - firstMs) / spanMs
+    const weight = 1 + recency * 2
+    weightedTotal += Number(sample.groundSpeedKt) * weight
+    totalWeight += weight
+  })
+  return totalWeight > 0 ? weightedTotal / totalWeight : center
+}
+
+function linearAltitudeTrendFpm(samples: TrackSample[]) {
+  const altitudeSamples = samples.filter((sample): sample is TrackSample & { altitudeFt: number } => finite(sample.altitudeFt))
+  if (altitudeSamples.length < 3) return null
+  const firstMs = altitudeSamples[0].timestampMs
+  const lastMs = altitudeSamples.at(-1)?.timestampMs ?? firstMs
+  if (lastMs - firstMs < 30_000) return null
+
+  const timesMinutes = altitudeSamples.map((sample) => (sample.timestampMs - firstMs) / 60_000)
+  const meanTime = timesMinutes.reduce((sum, value) => sum + value, 0) / timesMinutes.length
+  const meanAltitude = altitudeSamples.reduce((sum, sample) => sum + sample.altitudeFt, 0) / altitudeSamples.length
+  let numerator = 0
+  let denominator = 0
+
+  altitudeSamples.forEach((sample, index) => {
+    const timeDelta = timesMinutes[index] - meanTime
+    numerator += timeDelta * (sample.altitudeFt - meanAltitude)
+    denominator += timeDelta * timeDelta
+  })
+  return denominator > 0 ? numerator / denominator : null
+}
+
+function trimTrackHistory() {
+  while (trackHistory.size > TRACK_HISTORY_MAX_KEYS) {
+    const firstKey = trackHistory.keys().next().value
+    if (firstKey == null) return
+    trackHistory.delete(firstKey)
+  }
+}
+
+function recordTrackTrend(flight: IvaoArrivalTrafficFlight, fetchedAt: string): TrackTrend {
+  const key = historyKey(flight)
+  const timestampMs = safeTime(flight.trackTimestamp) ?? safeTime(fetchedAt) ?? Date.now()
+  const existing = key ? trackHistory.get(key) ?? [] : []
+  const nextSample: TrackSample = {
+    timestampMs,
+    altitudeFt: finite(flight.altitude) ? flight.altitude : null,
+    groundSpeedKt: finite(flight.groundSpeed) ? flight.groundSpeed : null,
+  }
+
+  const deduplicated = existing.filter((sample) => sample.timestampMs !== timestampMs)
+  deduplicated.push(nextSample)
+  deduplicated.sort((left, right) => left.timestampMs - right.timestampMs)
+  const cutoff = timestampMs - TRACK_HISTORY_WINDOW_MS
+  const samples = deduplicated.filter((sample) => sample.timestampMs >= cutoff && sample.timestampMs <= timestampMs + 1000)
+
+  if (key) {
+    trackHistory.set(key, samples)
+    trimTrackHistory()
+  }
+
+  const firstMs = samples[0]?.timestampMs ?? timestampMs
+  const lastMs = samples.at(-1)?.timestampMs ?? timestampMs
+  return {
+    samples,
+    sampleCount: samples.length,
+    windowSeconds: Math.max(0, Math.round((lastMs - firstMs) / 1000)),
+    smoothedGroundSpeedKt: weightedGroundSpeed(samples),
+    verticalTrendFpm: linearAltitudeTrendFpm(samples),
+  }
 }
 
 function utcDayStart(referenceMs: number) {
@@ -156,34 +277,135 @@ function positionModelTriggerAltitudeFt(flight: IvaoArrivalTrafficFlight) {
     : Math.min(POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT, filedCruise)
 }
 
-function isDescending(flight: IvaoArrivalTrafficFlight) {
-  const state = String(flight.state || '').trim().toLowerCase()
-  if (state === 'approach') return true
-  return finite(flight.verticalSpeedFpm) && flight.verticalSpeedFpm <= DESCENT_VS_THRESHOLD_FPM
+function resolvedVerticalTrendFpm(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
+  const direct = finite(flight.verticalSpeedFpm) && Math.abs(flight.verticalSpeedFpm) <= 8000
+    ? flight.verticalSpeedFpm
+    : null
+  const derived = finite(trend.verticalTrendFpm) && Math.abs(trend.verticalTrendFpm) <= 8000
+    ? trend.verticalTrendFpm
+    : null
+
+  if (derived != null && trend.sampleCount >= 3 && trend.windowSeconds >= 30) {
+    if (direct != null && Math.sign(direct) === Math.sign(derived)) return derived * 0.75 + direct * 0.25
+    return derived
+  }
+  return direct
 }
 
-function positionModelActive(flight: IvaoArrivalTrafficFlight) {
+function isDescending(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
+  const state = String(flight.state || '').trim().toLowerCase()
+  if (state === 'approach') return true
+  const verticalTrend = resolvedVerticalTrendFpm(flight, trend)
+  return verticalTrend != null && verticalTrend <= DESCENT_VS_THRESHOLD_FPM
+}
+
+function positionModelActive(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
   if (flight.onGround === true || !finite(flight.altitude)) return false
-  if (isDescending(flight)) return true
+  if (isDescending(flight, trend)) return true
+
+  const state = String(flight.state || '').trim().toLowerCase()
+  const filedCruise = finite(flight.filedCruiseAltitudeFt) && flight.filedCruiseAltitudeFt > 0
+  if (!filedCruise && state === 'en route') return true
+
+  const stableLevel = trend.sampleCount >= 3
+    && trend.windowSeconds >= 45
+    && finite(trend.verticalTrendFpm)
+    && Math.abs(trend.verticalTrendFpm) < 250
+  if (!filedCruise && stableLevel && flight.altitude >= 5000) return true
+
   return flight.altitude >= positionModelTriggerAltitudeFt(flight) - 500
 }
 
-function effectiveLiveSpeedKt(
-  flight: IvaoArrivalTrafficFlight,
-  performance: AircraftPerformanceProfile | null,
-) {
-  const liveGs = finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT
-    ? flight.groundSpeed
-    : null
+function observedGroundSpeedKt(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
+  if (finite(trend.smoothedGroundSpeedKt) && trend.smoothedGroundSpeedKt >= MIN_LIVE_GS_KT) {
+    const current = finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT ? flight.groundSpeed : trend.smoothedGroundSpeedKt
+    return trend.smoothedGroundSpeedKt * 0.8 + current * 0.2
+  }
+  return finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT ? flight.groundSpeed : null
+}
 
-  if (!isDescending(flight)) return liveGs
+function isaState(altitudeFt: number) {
+  const altitudeM = clamp(altitudeFt, 0, 45_000) * 0.3048
+  const seaLevelTemperatureK = 288.15
+  const lapseRateKPerM = 0.0065
+  const troposphereTopM = 11_000
+  const gasConstant = 287.05287
+  const gravity = 9.80665
 
-  const altitude = finite(flight.altitude) ? flight.altitude : null
-  if (altitude != null && altitude <= DESCENT_LOW_ALTITUDE_FT) {
-    return performance?.descentBelow10000IasKt ?? FALLBACK_LOW_DESCENT_IAS_KT
+  if (altitudeM <= troposphereTopM) {
+    const temperatureK = seaLevelTemperatureK - lapseRateKPerM * altitudeM
+    const pressureRatio = Math.pow(temperatureK / seaLevelTemperatureK, gravity / (gasConstant * lapseRateKPerM))
+    const densityRatio = pressureRatio / (temperatureK / seaLevelTemperatureK)
+    return { temperatureK, densityRatio }
   }
 
-  return performance?.descentIasKt ?? FALLBACK_DESCENT_IAS_KT
+  const tropopauseTemperatureK = seaLevelTemperatureK - lapseRateKPerM * troposphereTopM
+  const tropopausePressureRatio = Math.pow(tropopauseTemperatureK / seaLevelTemperatureK, gravity / (gasConstant * lapseRateKPerM))
+  const pressureRatio = tropopausePressureRatio * Math.exp(-gravity * (altitudeM - troposphereTopM) / (gasConstant * tropopauseTemperatureK))
+  const densityRatio = pressureRatio / (tropopauseTemperatureK / seaLevelTemperatureK)
+  return { temperatureK: tropopauseTemperatureK, densityRatio }
+}
+
+function iasToTasKt(iasKt: number, altitudeFt: number) {
+  const { densityRatio } = isaState(altitudeFt)
+  return iasKt / Math.sqrt(Math.max(0.05, densityRatio))
+}
+
+function machToTasKt(mach: number, altitudeFt: number) {
+  const { temperatureK } = isaState(altitudeFt)
+  const speedOfSoundKt = Math.sqrt(1.4 * 287.05287 * temperatureK) * 1.943844
+  return mach * speedOfSoundKt
+}
+
+function profileValues(performance: AircraftPerformanceProfile | null) {
+  return {
+    mach: performance?.descentMach ?? FALLBACK_DESCENT_MACH,
+    descentIasKt: performance?.descentIasKt ?? FALLBACK_DESCENT_IAS_KT,
+    lowIasKt: performance?.descentBelow10000IasKt ?? FALLBACK_LOW_DESCENT_IAS_KT,
+    label: performance?.descentProfile ?? `${Math.round(FALLBACK_DESCENT_MACH * 100)}/${FALLBACK_DESCENT_IAS_KT}/${FALLBACK_LOW_DESCENT_IAS_KT}`,
+  }
+}
+
+function scheduledDescentTasKt(altitudeFt: number, performance: AircraftPerformanceProfile | null) {
+  const profile = profileValues(performance)
+  if (altitudeFt <= DESCENT_LOW_ALTITUDE_FT) return iasToTasKt(profile.lowIasKt, altitudeFt)
+
+  const iasTas = iasToTasKt(profile.descentIasKt, altitudeFt)
+  const machTas = machToTasKt(profile.mach, altitudeFt)
+  return Math.min(iasTas, machTas)
+}
+
+function descentTravelSeconds(
+  remainingNm: number,
+  altitudeFt: number,
+  observedGsKt: number,
+  verticalTrendFpm: number | null,
+  performance: AircraftPerformanceProfile | null,
+) {
+  if (remainingNm <= 0) return { seconds: 0, averageGroundSpeedKt: observedGsKt }
+
+  const currentScheduleTas = scheduledDescentTasKt(altitudeFt, performance)
+  const liveCorrectionKt = clamp(observedGsKt - currentScheduleTas, -120, 120)
+  const descentRateFpm = clamp(Math.abs(verticalTrendFpm ?? -1500), 500, 4000)
+  let distanceLeftNm = remainingNm
+  let simulatedAltitudeFt = Math.max(0, altitudeFt)
+  let elapsedSeconds = 0
+
+  while (distanceLeftNm > 0.001 && elapsedSeconds < 4 * 60 * 60) {
+    const stepNm = Math.min(DESCENT_INTEGRATION_STEP_NM, distanceLeftNm)
+    const scheduledGsKt = clamp(scheduledDescentTasKt(simulatedAltitudeFt, performance) + liveCorrectionKt * 0.85, 90, 650)
+    const liveWeight = clamp(0.72 - elapsedSeconds / 1800, 0.25, 0.72)
+    const segmentGsKt = clamp(observedGsKt * liveWeight + scheduledGsKt * (1 - liveWeight), 90, 650)
+    const segmentSeconds = stepNm / segmentGsKt * 3600
+    elapsedSeconds += segmentSeconds
+    simulatedAltitudeFt = Math.max(0, simulatedAltitudeFt - descentRateFpm * segmentSeconds / 60)
+    distanceLeftNm -= stepNm
+  }
+
+  return {
+    seconds: elapsedSeconds,
+    averageGroundSpeedKt: elapsedSeconds > 0 ? remainingNm / (elapsedSeconds / 3600) : observedGsKt,
+  }
 }
 
 function liveRouteEstimate(
@@ -192,11 +414,12 @@ function liveRouteEstimate(
   refFix: string,
   fetchedAt: string,
   performance: AircraftPerformanceProfile | null,
+  trend: TrackTrend,
 ): ArrivalEtaEstimate | null {
-  if (!positionModelActive(flight)) return null
+  if (!positionModelActive(flight, trend)) return null
 
-  const effectiveSpeed = effectiveLiveSpeedKt(flight, performance)
-  if (!finite(effectiveSpeed) || effectiveSpeed < MIN_LIVE_GS_KT) return null
+  const observedGsKt = observedGroundSpeedKt(flight, trend)
+  if (!finite(observedGsKt) || observedGsKt < MIN_LIVE_GS_KT) return null
 
   const progress = routeProgress(flight, geometry)
   if (!progress || progress.offRouteNm > MAX_ROUTE_DEVIATION_NM) return null
@@ -206,41 +429,60 @@ function liveRouteEstimate(
 
   const trackBaseMs = safeTime(flight.trackTimestamp) ?? safeTime(fetchedAt) ?? Date.now()
   const ahead = targets.find((distance) => distance >= progress.progressNm - 1)
+  const verticalTrendFpm = resolvedVerticalTrendFpm(flight, trend)
+  const descending = isDescending(flight, trend)
 
   if (ahead != null) {
     const remainingNm = Math.max(0, ahead - progress.progressNm) + progress.offRouteNm
-    const etaMs = trackBaseMs + remainingNm / effectiveSpeed * 3600000
-    const descending = isDescending(flight)
+    const travel = descending && finite(flight.altitude)
+      ? descentTravelSeconds(remainingNm, flight.altitude, observedGsKt, verticalTrendFpm, performance)
+      : {
+          seconds: remainingNm / observedGsKt * 3600,
+          averageGroundSpeedKt: observedGsKt,
+        }
+    const etaMs = trackBaseMs + travel.seconds * 1000
     const triggerFt = positionModelTriggerAltitudeFt(flight)
+    const confidence = trend.sampleCount >= 3 && trend.windowSeconds >= 30 && progress.offRouteNm <= 25
+      ? 'HIGH'
+      : 'MEDIUM'
+
     return {
       source: 'LIVE_ROUTE',
       predictedIawpAt: new Date(etaMs).toISOString(),
-      confidence: 'HIGH',
+      confidence,
       remainingNm,
       offRouteNm: progress.offRouteNm,
-      groundSpeedKt: effectiveSpeed,
+      groundSpeedKt: travel.averageGroundSpeedKt,
       pastCrossing: false,
       reason: descending
-        ? `Descent profile ${performance?.descentProfile ?? `${FALLBACK_DESCENT_IAS_KT}/${FALLBACK_LOW_DESCENT_IAS_KT}`} applied while descending`
+        ? `Segmented descent ETA uses ${profileValues(performance).label}, ${Math.round(observedGsKt)} kt live GS trend and ${Math.round(verticalTrendFpm ?? -1500)} fpm`
         : triggerFt < POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT
-          ? `Position/route model active from filed cruise ${Math.round(triggerFt / 100)}00 ft; current GS used in cruise`
-          : null,
+          ? `Position/route ETA active from filed cruise ${Math.round(triggerFt / 100)}00 ft; ${Math.round(observedGsKt)} kt live GS trend used`
+          : trend.sampleCount >= 2
+            ? `Position/route ETA uses ${Math.round(observedGsKt)} kt live GS trend`
+            : null,
+      modelPhase: descending ? 'DESCENT' : 'CRUISE',
+      trackSampleCount: trend.sampleCount,
+      verticalTrendFpm,
     }
   }
 
   const passed = targets.filter((distance) => distance < progress.progressNm - 1).at(-1)
   if (passed == null) return null
   const distanceSinceFix = Math.max(0, progress.progressNm - passed) + progress.offRouteNm
-  const crossingMs = trackBaseMs - distanceSinceFix / effectiveSpeed * 3600000
+  const crossingMs = trackBaseMs - distanceSinceFix / observedGsKt * 3600_000
   return {
     source: 'LIVE_ROUTE',
     predictedIawpAt: new Date(crossingMs).toISOString(),
-    confidence: 'MEDIUM',
+    confidence: trend.sampleCount >= 3 ? 'HIGH' : 'MEDIUM',
     remainingNm: 0,
     offRouteNm: progress.offRouteNm,
-    groundSpeedKt: effectiveSpeed,
+    groundSpeedKt: observedGsKt,
     pastCrossing: true,
-    reason: 'IAWP already passed; crossing time back-estimated from current track',
+    reason: 'IAWP already passed; crossing time back-estimated from the live GS trend',
+    modelPhase: descending ? 'DESCENT' : 'CRUISE',
+    trackSampleCount: trend.sampleCount,
+    verticalTrendFpm,
   }
 }
 
@@ -259,20 +501,18 @@ function eetEstimate(
     confidence: source === 'FILED_EOBT_EET' ? 'LOW' : 'MEDIUM',
     remainingNm: null,
     offRouteNm: null,
-    groundSpeedKt: flightSafeGroundSpeed(null),
+    groundSpeedKt: null,
     pastCrossing: false,
     reason: source === 'FILED_EOBT_EET' ? 'Provisional filed-time estimate' : null,
+    modelPhase: 'FALLBACK',
   }
-}
-
-function flightSafeGroundSpeed(value: number | null) {
-  return finite(value) ? value : null
 }
 
 /**
  * Progressive ETA source priority for the Approach AMAN:
  * position/route after FL300 or filed cruise -> actual departure + EET -> tracked takeoff + EET -> filed EOBT + EET.
- * Cruise uses live GS. SimBrief descent IAS is applied only after descent is detected.
+ * Cruise uses a two-minute live GS trend. Once descent is confirmed, the remaining route is integrated in short
+ * segments using the SimBrief descent schedule, current vertical trend and a live GS correction that carries wind.
  */
 export function estimateIawpArrival(
   flight: IvaoArrivalTrafficFlight,
@@ -282,10 +522,11 @@ export function estimateIawpArrival(
   fetchedAt: string,
   performance: AircraftPerformanceProfile | null = null,
 ): ArrivalEtaEstimate {
+  const trend = recordTrackTrend(flight, fetchedAt)
   const resolvedPerformance = performance ?? cachedPerformance(flight)
 
   if (geometry) {
-    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance)
+    const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance, trend)
     if (live) return live
   }
 
@@ -311,8 +552,11 @@ export function estimateIawpArrival(
     confidence: 'NONE',
     remainingNm: null,
     offRouteNm: null,
-    groundSpeedKt: flightSafeGroundSpeed(flight.groundSpeed),
+    groundSpeedKt: observedGroundSpeedKt(flight, trend),
     pastCrossing: false,
     reason: 'No usable live route or flight-plan timing source',
+    modelPhase: 'FALLBACK',
+    trackSampleCount: trend.sampleCount,
+    verticalTrendFpm: resolvedVerticalTrendFpm(flight, trend),
   }
 }
