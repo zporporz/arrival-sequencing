@@ -11,6 +11,7 @@ export type AmanArrivalPrediction = {
   refFix: string
   predictedIawpAt: string
   nominalStarSeconds: number
+  processingDistanceNm?: number | null
 }
 
 export type AmanSequenceRow = AmanArrivalPrediction & {
