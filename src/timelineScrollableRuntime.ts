@@ -1,7 +1,9 @@
-const PX_PER_MINUTE = 10
+import { TIMELINE_DISPLAY_PX_PER_MINUTE } from './timelineScale'
+
+const PX_PER_MINUTE = TIMELINE_DISPLAY_PX_PER_MINUTE
 const FUTURE_HORIZON_MINUTES = 240
-const TOP_PADDING_PX = 30
-const BOTTOM_PADDING_PX = 24
+const TOP_PADDING_PX = 36
+const BOTTOM_PADDING_PX = 30
 
 function formatHm(date: Date) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
@@ -23,6 +25,7 @@ export function installTimelineScrollableRuntime() {
   if (!stage) return () => {}
 
   stage.dataset.scrollTimeline = 'true'
+  stage.dataset.timelineScale = String(PX_PER_MINUTE)
 
   let spacer = stage.querySelector<HTMLElement>(':scope > .aman-timeline-scroll-spacer')
   if (!spacer) {
@@ -70,7 +73,7 @@ export function installTimelineScrollableRuntime() {
 
   const updateAwayState = () => {
     if (!nowButton) return
-    const away = Math.abs(stage.scrollTop - actualScrollTop()) > 4
+    const away = Math.abs(stage.scrollTop - actualScrollTop()) > 6
     nowButton.classList.toggle('is-away', away)
     nowButton.title = away ? 'Return timeline to ACTUAL time' : 'Timeline is following ACTUAL'
   }
@@ -102,7 +105,7 @@ export function installTimelineScrollableRuntime() {
     for (let offset = -pastMinutes; offset <= FUTURE_HORIZON_MINUTES + 2; offset += 1) {
       const tickTime = new Date(minuteAnchorMs + offset * 60_000)
       const y = actualWorldY - offset * PX_PER_MINUTE
-      if (y < -16 || y > contentHeight + 16) continue
+      if (y < -20 || y > contentHeight + 20) continue
 
       const tick = document.createElement('div')
       const isMajor = tickTime.getUTCMinutes() % 5 === 0
@@ -139,6 +142,7 @@ export function installTimelineScrollableRuntime() {
     stage.style.setProperty('--now-line', `${actualWorldY}px`)
     stage.style.setProperty('--timeline-content-height', `${contentHeight}px`)
     stage.style.setProperty('--timeline-future-minutes', String(FUTURE_HORIZON_MINUTES))
+    stage.style.setProperty('--timeline-px-per-minute', `${PX_PER_MINUTE}px`)
     spacer!.style.height = `${contentHeight}px`
     overlay!.style.height = `${contentHeight}px`
 
@@ -146,7 +150,7 @@ export function installTimelineScrollableRuntime() {
       flightLayer.style.height = `${contentHeight}px`
       flightLayer.style.bottom = 'auto'
     }
-    if (emptySequence) emptySequence.style.top = `${Math.max(TOP_PADDING_PX + 40, actualWorldY - 130)}px`
+    if (emptySequence) emptySequence.style.top = `${Math.max(TOP_PADDING_PX + 50, actualWorldY - 180)}px`
 
     const now = new Date()
     rebuildTicks(now, true)
@@ -158,7 +162,7 @@ export function installTimelineScrollableRuntime() {
 
   const onScroll = () => {
     if (suppressScroll) return
-    const nearActual = Math.abs(stage.scrollTop - actualScrollTop()) <= 4
+    const nearActual = Math.abs(stage.scrollTop - actualScrollTop()) <= 6
     followingActual = nearActual
     updateAwayState()
   }
@@ -199,8 +203,10 @@ export function installTimelineScrollableRuntime() {
     overlay?.remove()
     spacer?.remove()
     stage.removeAttribute('data-scroll-timeline')
+    stage.removeAttribute('data-timeline-scale')
     stage.style.removeProperty('--timeline-content-height')
     stage.style.removeProperty('--timeline-future-minutes')
+    stage.style.removeProperty('--timeline-px-per-minute')
     flightLayer?.style.removeProperty('height')
     flightLayer?.style.removeProperty('bottom')
   }
