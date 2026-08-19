@@ -7,24 +7,25 @@
   font-size: 10px;
 }
 
-/* The selector is the number of minutes physically visible below the fixed ACTUAL line.
-   Timeline scale is 10 px/min, so changing 5/10/15/20 moves the red line itself. */
+/* The selector is the number of minutes physically visible below ACTUAL.
+   Scrollable MAESTRO display scale is now 20 px/min. The runtime writes an exact
+   world-space ACTUAL position; these values are the matching pre-runtime fallback. */
 .aman-timeline-stage {
-  --now-line: calc(100% - 100px);
+  --now-line: calc(100% - 200px);
 }
 
 .aman-app:has(.aman-history-control select option[value='5']:checked) .aman-timeline-stage {
-  --now-line: calc(100% - 50px);
-}
-
-.aman-app:has(.aman-history-control select option[value='10']:checked) .aman-timeline-stage {
   --now-line: calc(100% - 100px);
 }
 
+.aman-app:has(.aman-history-control select option[value='10']:checked) .aman-timeline-stage {
+  --now-line: calc(100% - 200px);
+}
+
 .aman-app:has(.aman-history-control select option[value='15']:checked) .aman-timeline-stage {
-  --now-line: calc(100% - 150px);
+  --now-line: calc(100% - 300px);
 }
 
 .aman-app:has(.aman-history-control select option[value='20']:checked) .aman-timeline-stage {
-  --now-line: calc(100% - 200px);
+  --now-line: calc(100% - 400px);
 }
