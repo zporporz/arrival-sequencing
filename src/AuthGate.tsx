@@ -24,6 +24,7 @@ type AuthResponse = {
 }
 
 const AuthUserContext = createContext<AuthUser | null>(null)
+const AUTH_SESSION_TIMEOUT_MS = 10_000
 
 export function useAuthUser() {
   const user = useContext(AuthUserContext)
@@ -94,10 +95,16 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let disposed = false
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort('IVAO session check timed out'), AUTH_SESSION_TIMEOUT_MS)
 
     const loadSession = async () => {
       try {
-        const response = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' })
+        const response = await fetch('/api/auth/me', {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          signal: controller.signal,
+        })
         if (response.status === 401) {
           setAuthenticatedIdentity(null)
           if (!disposed) setUser(null)
@@ -127,16 +134,22 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       } catch (sessionError) {
         setAuthenticatedIdentity(null)
         if (!disposed) {
-          setError(sessionError instanceof Error ? sessionError.message : String(sessionError))
+          const timedOut = controller.signal.aborted
+          setError(timedOut ? 'IVAO session check timed out. Reload the page or sign in again.' : sessionError instanceof Error ? sessionError.message : String(sessionError))
           setUser(null)
         }
       } finally {
+        window.clearTimeout(timeout)
         if (!disposed) setLoading(false)
       }
     }
 
     void loadSession()
-    return () => { disposed = true }
+    return () => {
+      disposed = true
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
   }, [])
 
   if (loading) {
@@ -159,6 +172,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           <p className="auth-copy">Sign in with IVAO to continue to the new frontend baseline.</p>
           {error && <div className="auth-error">{error}</div>}
           <a className="auth-login-button" href="/api/auth/login">Sign in with IVAO</a>
+          <button type="button" className="auth-login-button auth-retry-button" onClick={() => window.location.reload()}>Retry session</button>
           <small>The existing authentication and staff-role API integration is preserved.</small>
         </section>
       </main>
