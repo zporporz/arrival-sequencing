@@ -22,12 +22,13 @@ import {
   nmToMinutesAtReferenceSpeed,
   splitAmanDelay,
 } from './core/amanConstants'
-import { readIvaoTraffic, readRouteGeometry, type IvaoArrivalTrafficFlight } from './core/api'
+import { readAircraftPerformance, readIvaoTraffic, readRouteGeometry, type IvaoArrivalTrafficFlight } from './core/api'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
   autoSequenceUnstableArrivals,
   averageDelayMinutes,
   calculateArrivalMetrics,
+  resolveAmanPairwiseSeparationSeconds,
   type AmanArrivalPrediction,
   type AmanSequenceRow,
 } from './core/arrivalSequencing'
@@ -350,11 +351,12 @@ function followerLandingSeparationSeconds(
 }
 
 function pairwiseLandingSeparationSeconds(
-  _leader: AmanArrivalPrediction,
+  leader: AmanArrivalPrediction,
   follower: AmanArrivalPrediction,
   runwayBaseSeconds: number,
 ) {
-  return followerLandingSeparationSeconds(follower, runwayBaseSeconds)
+  const landingSeparation = followerLandingSeparationSeconds(follower, runwayBaseSeconds)
+  return resolveAmanPairwiseSeparationSeconds(leader, follower, landingSeparation)
 }
 
 function crossRunwayLandingSeparationSeconds(
@@ -392,7 +394,10 @@ function candidateLandingTime(
   if (airport === 'VTBS') {
     for (const [otherRunway, previousOtherRunway] of lastTargetByRunway.entries()) {
       if (otherRunway === runway) continue
-      const requiredSeconds = followerLandingSeparationSeconds(prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
+      const otherPrediction = lastPredictionByRunway.get(otherRunway)
+      const requiredSeconds = otherPrediction
+        ? pairwiseLandingSeparationSeconds(otherPrediction, prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
+        : followerLandingSeparationSeconds(prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
       candidate = Math.max(candidate, previousOtherRunway + requiredSeconds * 1000)
     }
   }
@@ -888,14 +893,18 @@ export default function App() {
             if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const nominalSeconds = nominalStarSeconds(airport, match.entryFix)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
-            const geometry = await resolveRouteGeometry(flight, airport)
-            const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt)
+            const [geometry, performancePayload] = await Promise.all([
+              resolveRouteGeometry(flight, airport),
+              flight.aircraft ? readAircraftPerformance(flight.aircraft).catch(() => null) : Promise.resolve(null),
+            ])
+            const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)
             const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason, processingDistanceNm: distanceToBkk } satisfies InboundPreview
             const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {
               id,
               callsign: flight.callsign,
               aircraftType: flight.aircraft,
               wakeTurbulence: flight.wakeTurbulence,
+              performanceCategory: performancePayload?.profile?.performanceCategory ?? null,
               runway: '',
               refFix: match.entryFix,
               predictedIawpAt: eta.predictedIawpAt,
@@ -1147,7 +1156,7 @@ export default function App() {
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
+                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · assumed landed' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
                 onPointerMove={(event) => moveDrag(event, row)}
                 onPointerUp={(event) => endDrag(event, row)}
@@ -1236,10 +1245,10 @@ export default function App() {
             <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
             <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
             <div><dt>Runway allocation</dt><dd>VTBD CALLSIGN RULE · VTBS EARLIEST</dd></div>
-            <div><dt>Pairwise SEP</dt><dd>FOLLOWER SPECIAL</dd></div>
+            <div><dt>Pairwise SEP</dt><dd>FINAL SPECIAL → LAND SEP FALLBACK</dd></div>
             <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
-            <div><dt>VTBD X-RWY</dt><dd>FOLLOWER RWY SEP</dd></div>
-            <div><dt>VTBS X-RWY</dt><dd>1.0 MIN</dd></div>
+            <div><dt>VTBD X-RWY</dt><dd>FINAL SPECIAL / FOLLOWER RWY SEP</dd></div>
+            <div><dt>VTBS X-RWY</dt><dd>FINAL SPECIAL / 1.0 MIN</dd></div>
             <div><dt>Manual stable</dt><dd>{Object.keys(stableIds).length}</dd></div>
             <div><dt>SEP invariant</dt><dd className={separationConflictIds.size ? 'is-warning' : ''}>{separationConflictIds.size ? 'FAILED' : 'OK'}</dd></div>
             <div><dt>Last update</dt><dd>{formatHm(fetchedAt)}Z</dd></div>
