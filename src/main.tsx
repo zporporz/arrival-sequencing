@@ -24,6 +24,7 @@ import './maestroV24.css'
 import './timelineCompactRows.css'
 import './timelineScrollable.css'
 import './maestroOpsMenuRuntime.css'
+import './landedHistoryRuntime.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
@@ -43,6 +44,7 @@ import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRu
 import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRuntime'
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
+import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 
 installReconnectTrafficFetch()
 
@@ -56,9 +58,6 @@ function AppWithRuntime() {
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
 
-    // Register the interaction/reset guard and manual reorder before the display-scale
-    // pointer adapter. They inspect the real physical 20 px/min drag first; the adapter
-    // then translates that movement back to React's historical 10 px/min math.
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
@@ -67,6 +66,7 @@ function AppWithRuntime() {
     const removeKnownInboundAdmissionRuntime = installKnownInboundAdmissionRuntime()
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
+    const removeLandedHistoryRuntime = installLandedHistoryRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -86,6 +86,7 @@ function AppWithRuntime() {
       removeKnownInboundAdmissionRuntime()
       removeMonitoredTimelineRuntime()
       removeMaestroOpsMenuRuntime()
+      removeLandedHistoryRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
