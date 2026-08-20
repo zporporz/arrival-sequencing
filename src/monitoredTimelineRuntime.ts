@@ -19,7 +19,7 @@ type MonitoredFlight = {
 
 const FUTURE_HORIZON_MS = 4 * 60 * 60 * 1000
 const STORAGE_KEY = 'aman-airport-display-sides-v1'
-const REFRESH_MS = 500
+const REFRESH_MS = 1000
 
 function readDisplaySides() {
   const fallback: Record<AirportCode, DisplaySide> = { VTBD: 'LEFT', VTBS: 'RIGHT' }
@@ -37,7 +37,6 @@ function readDisplaySides() {
 function parseHmNearNow(value: string, nowMs: number) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::\d{2})?$/)
   if (!match) return null
-  const now = new Date(nowMs)
   const candidate = new Date(nowMs)
   candidate.setUTCHours(Number(match[1]), Number(match[2]), 0, 0)
   if (candidate.getTime() < nowMs - 30 * 60_000) candidate.setUTCDate(candidate.getUTCDate() + 1)
@@ -106,6 +105,14 @@ function monitoredFlights(nowMs: number) {
   return flights
 }
 
+function setTextIfChanged(element: HTMLElement | null, value: string) {
+  if (element && element.textContent !== value) element.textContent = value
+}
+
+function setStylePropertyIfChanged(element: HTMLElement, property: string, value: string) {
+  if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value)
+}
+
 function buildRow(flight: MonitoredFlight, side: DisplaySide, nowMs: number) {
   const row = document.createElement('div')
   row.className = 'aman-monitored-flight-row'
@@ -168,26 +175,29 @@ export function installMonitoredTimelineRuntime() {
         layer.appendChild(row)
       }
 
-      row.dataset.displaySide = sides[flight.airport]
+      if (row.dataset.displaySide !== sides[flight.airport]) row.dataset.displaySide = sides[flight.airport]
       const offsetMinutes = (flight.projectedLandingMs - nowMs) / 60_000
-      row.style.setProperty('--monitor-offset-px', `${Math.round(-offsetMinutes * TIMELINE_DISPLAY_PX_PER_MINUTE * 100) / 100}px`)
-      row.title = `MONITORED / PROVISIONAL · ${flight.airport} · ${flight.callsign} · ETA-FF ${formatHm(flight.etaFfMs)}Z · projected landing ${formatHm(flight.projectedLandingMs)}Z · activates for sequencing at 300 NM`
-      const projected = row.querySelector<HTMLElement>('.tldt')
-      const eta = row.children.item(4) as HTMLElement | null
-      if (projected) projected.textContent = formatHm(flight.projectedLandingMs)
-      if (eta) eta.textContent = formatHm(flight.etaFfMs)
+      const offset = `${Math.round(-offsetMinutes * TIMELINE_DISPLAY_PX_PER_MINUTE * 100) / 100}px`
+      setStylePropertyIfChanged(row, '--monitor-offset-px', offset)
+
+      const title = `MONITORED / PROVISIONAL · ${flight.airport} · ${flight.callsign} · ETA-FF ${formatHm(flight.etaFfMs)}Z · projected landing ${formatHm(flight.projectedLandingMs)}Z · activates for sequencing at 300 NM`
+      if (row.title !== title) row.title = title
+
+      setTextIfChanged(row.querySelector<HTMLElement>('.tldt'), formatHm(flight.projectedLandingMs))
+      setTextIfChanged(row.children.item(4) as HTMLElement | null, formatHm(flight.etaFfMs))
     }
   }
 
+  // Do not observe document.body. The previous implementation watched every child-list
+  // mutation and then rewrote monitored-row text, which could recursively retrigger the
+  // observer and peg the browser main thread. A lightweight 1 Hz refresh is sufficient
+  // because the source traffic itself only refreshes every 15 seconds.
   decorate()
   const timer = window.setInterval(decorate, REFRESH_MS)
-  const observer = new MutationObserver(decorate)
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-planning-state'] })
 
   return () => {
     disposed = true
     window.clearInterval(timer)
-    observer.disconnect()
     document.querySelectorAll('.aman-monitored-flight-row').forEach((row) => row.remove())
   }
 }
