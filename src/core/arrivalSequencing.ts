@@ -45,10 +45,6 @@ const FINAL_APPROACH_SPACING = {
   CD_BEHIND_A_NM: 12,
 } as const
 
-// The React application keeps automatic planning and manual target timing separate.
-// A controller may nevertheless drag one aircraft through another and thereby change
-// the landing order. This tiny shared-in-module order table lets the interaction runtime
-// express that order without changing the automatic ETA/STA calculations themselves.
 const manualSequenceOrder = new Map<string, number>()
 
 export function amanSequenceOrderIdentity(airport: string, callsign: string) {
@@ -116,9 +112,9 @@ function isA380(value: string | null | undefined) {
 }
 
 /**
- * Additional final-approach spacing, expressed as an equivalent time gap on the AMAN
- * timeline. NM rules use the project's final/reference speed conversion (140 kt).
- * Returning zero means there is no special final rule and normal LAND SEP applies.
+ * Returns the special final-approach spacing for the pair. A positive value replaces
+ * normal LAND SEP for that listed pair. Zero means no special rule, so LAND SEP applies.
+ * NM rules are converted to timeline seconds at the AMAN 140 kt final reference speed.
  */
 export function finalApproachSpecialSeparationSeconds(
   leader: Pick<AmanArrivalPrediction, 'aircraftType'>,
@@ -167,20 +163,9 @@ function requiredSeparationSeconds(
     : runwayBaseSeconds
   const finalApproachSpecial = finalApproachSpecialSeparationSeconds(leader, follower)
 
-  // Special final-approach spacing never reduces the existing LAND SEP.
-  return Math.max(runwayBaseSeconds, landingSeparation, finalApproachSpecial)
+  return finalApproachSpecial > 0 ? finalApproachSpecial : landingSeparation
 }
 
-/**
- * Initial MAESTRO-style automatic planning for Unstable traffic.
- *
- * Flights are ordered by their natural predicted landing time with full timestamp precision.
- * The first flight keeps its natural TLDT. Each following flight is moved later only when
- * needed to satisfy the configured separation from the preceding flight on that runway.
- *
- * This function intentionally does not move Stable/Superstable/Frozen traffic. Those states
- * are handled by the later controller-confirm/resequence layer.
- */
 export function autoSequenceUnstableArrivals(
   arrivals: AmanArrivalPrediction[],
   config: AmanSequenceConfig,
@@ -232,9 +217,6 @@ export function autoSequenceUnstableArrivals(
     .sort((a, b) => toMillis(a.tldt) - toMillis(b.tldt) || a.callsign.localeCompare(b.callsign))
     .map((row, index) => {
       const result = { ...row } as AmanSequenceRow
-      // Keep sequenceIndex live. applyManualTargetsWithCascade reads this property on
-      // every manual-target render; changing the controller order snapshot therefore
-      // lets a dragged aircraft cross another aircraft while separation is still applied.
       Object.defineProperty(result, 'sequenceIndex', {
         enumerable: true,
         configurable: true,
