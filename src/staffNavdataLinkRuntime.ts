@@ -1,4 +1,4 @@
-const ADMIN_HREF = '/?admin=navdata'
+const ADMIN_HREF = '/?admin=tools'
 
 function ensureStaffNavdataLink() {
   if (document.documentElement.dataset.authRole !== 'STAFF') return
@@ -7,7 +7,7 @@ function ensureStaffNavdataLink() {
 
   const link = document.createElement('a')
   link.href = ADMIN_HREF
-  link.textContent = 'AIRAC ADMIN'
+  link.textContent = 'ADMIN TOOLS'
   link.className = 'aman-staff-admin-link'
   link.dataset.staffNavdataLink = 'true'
 
