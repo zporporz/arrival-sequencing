@@ -65,12 +65,15 @@ export type IvaoArrivalTrafficFlight = {
   flightPlanDetailError: string | null
 }
 
+export type AircraftPerformanceCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'H'
+
 export type AircraftPerformanceProfile = {
   source: 'SIMBRIEF'
   aircraftType: string
   aircraftName: string | null
   aircraftDefaultCruise: string | null
   aircraftSpeed: string | null
+  performanceCategory: AircraftPerformanceCategory | null
   descentProfile: string
   descentMach: number
   descentIasKt: number
