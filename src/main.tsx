@@ -23,6 +23,7 @@ import './operationalHmiReadable.css'
 import './maestroV24.css'
 import './timelineCompactRows.css'
 import './timelineScrollable.css'
+import './maestroOpsMenuRuntime.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
@@ -41,6 +42,7 @@ import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntim
 import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
 import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRuntime'
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
+import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 
 installReconnectTrafficFetch()
 
@@ -64,6 +66,7 @@ function AppWithRuntime() {
     const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
     const removeKnownInboundAdmissionRuntime = installKnownInboundAdmissionRuntime()
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
+    const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -82,6 +85,7 @@ function AppWithRuntime() {
       removeManualTargetSyncCompatRuntime()
       removeKnownInboundAdmissionRuntime()
       removeMonitoredTimelineRuntime()
+      removeMaestroOpsMenuRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
