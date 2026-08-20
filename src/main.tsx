@@ -26,9 +26,11 @@ import './timelineScrollable.css'
 import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
 import './staffNavdataAdmin.css'
+import './staffAdminTools.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
 import StaffNavdataAdmin from './StaffNavdataAdmin'
+import StaffAdminTools from './StaffAdminTools'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
@@ -52,8 +54,8 @@ import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 
 installReconnectTrafficFetch()
 
-function isNavdataAdminRoute() {
-  return new URLSearchParams(window.location.search).get('admin') === 'navdata'
+function adminRoute() {
+  return new URLSearchParams(window.location.search).get('admin')
 }
 
 function AppWithRuntime() {
@@ -107,7 +109,10 @@ function AppWithRuntime() {
 }
 
 function RootApp() {
-  return isNavdataAdminRoute() ? <StaffNavdataAdmin /> : <AppWithRuntime />
+  const route = adminRoute()
+  if (route === 'navdata') return <StaffNavdataAdmin />
+  if (route === 'tools') return <StaffAdminTools />
+  return <AppWithRuntime />
 }
 
 createRoot(document.getElementById('root')!).render(
