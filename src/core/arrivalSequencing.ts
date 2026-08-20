@@ -1,4 +1,5 @@
-import { classifyAmanDelay, type AmanDelayAction } from './amanConstants'
+import { classifyAmanDelay, nmToMinutesAtReferenceSpeed, type AmanDelayAction } from './amanConstants'
+import { cachedAircraftPerformanceCategory } from './aircraftPerformanceCategory'
 
 export type AmanStabilityState = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
@@ -33,6 +34,16 @@ export type AmanSequenceConfig = {
     runwayBaseSeconds: number,
   ) => number
 }
+
+// Final approach spacing working rules supplied for the Thailand AMAN model.
+// X following Y means X is the follower and Y is the leader.
+const FINAL_APPROACH_SPACING = {
+  B_BEHIND_B_SECONDS: 2 * 60,
+  OTHER_BEHIND_B_SECONDS: 4 * 60,
+  BEHIND_A380_NM: 7,
+  B_BEHIND_A_NM: 7,
+  CD_BEHIND_A_NM: 12,
+} as const
 
 // The React application keeps automatic planning and manual target timing separate.
 // A controller may nevertheless drag one aircraft through another and thereby change
@@ -95,6 +106,49 @@ export function calculateArrivalMetrics(
   }
 }
 
+function normalizedAircraftType(value: string | null | undefined) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function isA380(value: string | null | undefined) {
+  const type = normalizedAircraftType(value)
+  return type === 'A380' || type === 'A388'
+}
+
+/**
+ * Additional final-approach spacing, expressed as an equivalent time gap on the AMAN
+ * timeline. NM rules use the project's final/reference speed conversion (140 kt).
+ * Returning zero means there is no special final rule and normal LAND SEP applies.
+ */
+export function finalApproachSpecialSeparationSeconds(
+  leader: Pick<AmanArrivalPrediction, 'aircraftType'>,
+  follower: Pick<AmanArrivalPrediction, 'aircraftType'>,
+) {
+  if (isA380(leader.aircraftType)) {
+    return nmToMinutesAtReferenceSpeed(FINAL_APPROACH_SPACING.BEHIND_A380_NM) * 60
+  }
+
+  const leaderCategory = cachedAircraftPerformanceCategory(leader.aircraftType)
+  const followerCategory = cachedAircraftPerformanceCategory(follower.aircraftType)
+
+  if (leaderCategory === 'B') {
+    return followerCategory === 'B'
+      ? FINAL_APPROACH_SPACING.B_BEHIND_B_SECONDS
+      : FINAL_APPROACH_SPACING.OTHER_BEHIND_B_SECONDS
+  }
+
+  if (leaderCategory === 'A') {
+    if (followerCategory === 'B') {
+      return nmToMinutesAtReferenceSpeed(FINAL_APPROACH_SPACING.B_BEHIND_A_NM) * 60
+    }
+    if (followerCategory === 'C' || followerCategory === 'D') {
+      return nmToMinutesAtReferenceSpeed(FINAL_APPROACH_SPACING.CD_BEHIND_A_NM) * 60
+    }
+  }
+
+  return 0
+}
+
 function requiredSeparationSeconds(
   leader: AmanArrivalPrediction,
   follower: AmanArrivalPrediction,
@@ -105,9 +159,16 @@ function requiredSeparationSeconds(
     throw new Error(`Missing runway spacing for ${follower.runway}`)
   }
 
-  if (!config.pairwiseSeparationSeconds) return runwayBaseSeconds
-  const pairwise = config.pairwiseSeparationSeconds(leader, follower, runwayBaseSeconds)
-  return Number.isFinite(pairwise) && pairwise >= 0 ? pairwise : runwayBaseSeconds
+  const configuredPairwise = config.pairwiseSeparationSeconds
+    ? config.pairwiseSeparationSeconds(leader, follower, runwayBaseSeconds)
+    : runwayBaseSeconds
+  const landingSeparation = Number.isFinite(configuredPairwise) && configuredPairwise >= 0
+    ? configuredPairwise
+    : runwayBaseSeconds
+  const finalApproachSpecial = finalApproachSpecialSeparationSeconds(leader, follower)
+
+  // Special final-approach spacing never reduces the existing LAND SEP.
+  return Math.max(runwayBaseSeconds, landingSeparation, finalApproachSpecial)
 }
 
 /**
