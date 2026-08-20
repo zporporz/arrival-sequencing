@@ -1,0 +1,54 @@
+.aman-landed-history-row {
+  position: absolute;
+  left: calc(50% + 28px);
+  top: var(--now-line);
+  display: grid;
+  align-items: center;
+  min-height: 20px;
+  height: 20px;
+  width: min(660px, calc(50% - 38px));
+  grid-template-columns: 58px minmax(116px,1.35fr) 52px 30px 58px 42px 60px;
+  gap: 7px;
+  padding: 0 7px;
+  transform: translateY(calc(var(--landed-offset-px, 0px) - 50%));
+  border-left: 2px solid #66788c;
+  background: transparent;
+  color: #8091a3;
+  font: 12px/20px Consolas, monospace;
+  opacity: .58;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.aman-landed-history-row[data-display-side="LEFT"] {
+  left: auto;
+  right: calc(50% + 28px);
+  border-left: 0;
+  border-right: 2px solid #66788c;
+  grid-template-columns: 60px 42px 58px 30px 52px minmax(116px,1.35fr) 58px;
+}
+
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(1) { order: 7; text-align: right; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(2) { order: 6; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(3) { order: 5; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(4) { order: 4; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(5) { order: 3; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(6) { order: 2; text-align: left; }
+.aman-landed-history-row[data-display-side="LEFT"] > :nth-child(7) { order: 1; text-align: left; }
+
+.aman-landed-history-row strong { color: #aab6c2; font-size: 14px; font-weight: 900; }
+.aman-landed-history-row span { color: #7f90a2; }
+.aman-landed-history-row .fix-code { text-align: center; font-weight: 900; }
+.aman-landed-history-row b { color: #a0adba; text-align: right; }
+.aman-landed-history-row em { color: #7f90a2; font-style: normal; font-weight: 900; text-align: right; }
+
+@media (max-width: 1250px) {
+  .aman-landed-history-row,
+  .aman-landed-history-row[data-display-side="LEFT"] {
+    width: calc(50% - 30px);
+    grid-template-columns: 52px minmax(96px,1.25fr) 46px 26px 52px 38px 54px;
+    gap: 5px;
+    padding: 0 5px;
+    font-size: 11px;
+  }
+}
