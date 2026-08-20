@@ -45,6 +45,7 @@ import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRunt
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
+import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 
 installReconnectTrafficFetch()
 
@@ -67,6 +68,7 @@ function AppWithRuntime() {
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
+    const removeVtbdCapacityRuntime = installVtbdCapacityRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -87,6 +89,7 @@ function AppWithRuntime() {
       removeMonitoredTimelineRuntime()
       removeMaestroOpsMenuRuntime()
       removeLandedHistoryRuntime()
+      removeVtbdCapacityRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
