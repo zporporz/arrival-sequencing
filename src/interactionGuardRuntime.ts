@@ -61,6 +61,7 @@ export function installInteractionGuardRuntime() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach(clearLegacyGainLimit)
 
   const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
