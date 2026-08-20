@@ -29,11 +29,19 @@ type DragState = {
 type PackedItem = {
   row: HTMLElement
   idealOffsetPx: number
+  heightPx: number
 }
 
-const PACK_CLUSTER_WINDOW_MINUTES = 5
-const PACK_ROW_STEP_PX = 20
-const PACK_GROUP_GAP_PX = 8
+// With only a few strips, keep them on their true time positions. As traffic
+// builds, progressively compress only the spare visual gap between neighbouring
+// strips. This is intentionally load-driven rather than a fixed "5 minute cluster".
+const DENSITY_FREE_ROWS = 4
+const DENSITY_FULL_PACK_ROWS = 12
+const PACK_MIN_VISUAL_GAP_PX = 2
+const PACK_PROXIMITY_MULTIPLIER = 3
+const FALLBACK_ROW_HEIGHT_PX = 18
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -51,6 +59,11 @@ function rowDisplaySide(row: HTMLElement) {
   return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
 }
 
+function rowHeightPx(row: HTMLElement) {
+  const measured = row.getBoundingClientRect().height
+  return Number.isFinite(measured) && measured > 0 ? measured : FALLBACK_ROW_HEIGHT_PX
+}
+
 function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffsetPx: number) {
   const display = `${Math.round(displayOffsetPx * 100) / 100}px`
   const ideal = `${Math.round(idealOffsetPx * 100) / 100}px`
@@ -59,60 +72,72 @@ function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffset
   row.dataset.timelinePacked = Math.abs(displayOffsetPx - idealOffsetPx) >= 0.5 ? 'true' : 'false'
 }
 
-function splitIntoClusters(items: PackedItem[]) {
-  const clusters: PackedItem[][] = []
-  const clusterWindowPx = PACK_CLUSTER_WINDOW_MINUTES * TIMELINE_DISPLAY_PX_PER_MINUTE
+function requiredVisualSpacing(left: PackedItem, right: PackedItem) {
+  return (left.heightPx + right.heightPx) / 2 + PACK_MIN_VISUAL_GAP_PX
+}
 
-  for (const item of items) {
-    const current = clusters.at(-1)
-    const previous = current?.at(-1)
-    if (!current || !previous || item.idealOffsetPx - previous.idealOffsetPx > clusterWindowPx) {
-      clusters.push([item])
-    } else {
-      current.push(item)
-    }
-  }
-  return clusters
+function densityPressure(rowCount: number) {
+  return clamp(
+    (rowCount - DENSITY_FREE_ROWS) / Math.max(1, DENSITY_FULL_PACK_ROWS - DENSITY_FREE_ROWS),
+    0,
+    1,
+  )
+}
+
+function elasticGap(left: PackedItem, right: PackedItem, pressure: number) {
+  const idealGap = Math.max(0, right.idealOffsetPx - left.idealOffsetPx)
+  const minimumGap = requiredVisualSpacing(left, right)
+
+  // Rows that would overlap are always separated enough to remain readable.
+  if (idealGap <= minimumGap) return minimumGap
+  if (pressure <= 0) return idealGap
+
+  // Dense traffic should look like a compact MAESTRO strip list, while genuinely
+  // large time gaps should still remain visually obvious. Nearby gaps therefore
+  // compress much harder than large gaps as the number of displayed flights grows.
+  const proximity = clamp((minimumGap * PACK_PROXIMITY_MULTIPLIER) / idealGap, 0, 1)
+  const compression = pressure * proximity
+  return minimumGap + (idealGap - minimumGap) * (1 - compression)
 }
 
 function packSide(rows: HTMLElement[]) {
   const items = rows
     .map((row) => {
       const idealOffsetPx = rowIdealDisplayOffset(row)
-      return idealOffsetPx == null ? null : { row, idealOffsetPx }
+      return idealOffsetPx == null ? null : {
+        row,
+        idealOffsetPx,
+        heightPx: rowHeightPx(row),
+      }
     })
     .filter((item): item is PackedItem => item !== null)
     .sort((left, right) => left.idealOffsetPx - right.idealOffsetPx)
 
-  const clusters = splitIntoClusters(items)
-  let previousGroupEnd = Number.NEGATIVE_INFINITY
+  if (!items.length) return
 
-  for (const cluster of clusters) {
-    if (cluster.length === 1) {
-      const item = cluster[0]
-      const displayOffsetPx = Math.max(item.idealOffsetPx, previousGroupEnd + PACK_GROUP_GAP_PX)
-      setDisplayOffset(item.row, displayOffsetPx, item.idealOffsetPx)
-      previousGroupEnd = displayOffsetPx
-      continue
-    }
-
-    // Real MAESTRO keeps dense traffic strips readable instead of forcing every
-    // callsign to sit exactly on its minute tick. Keep the cluster centred around
-    // its true time band, but pack labels one strip-height apart. Exact TLDT remains
-    // in the row text/title and in --ideal-display-offset-px.
-    const meanIdeal = cluster.reduce((sum, item) => sum + item.idealOffsetPx, 0) / cluster.length
-    const packedHeight = (cluster.length - 1) * PACK_ROW_STEP_PX
-    let groupStart = meanIdeal - packedHeight / 2
-    if (groupStart < previousGroupEnd + PACK_GROUP_GAP_PX) {
-      groupStart = previousGroupEnd + PACK_GROUP_GAP_PX
-    }
-
-    cluster.forEach((item, index) => {
-      const displayOffsetPx = groupStart + index * PACK_ROW_STEP_PX
-      setDisplayOffset(item.row, displayOffsetPx, item.idealOffsetPx)
-    })
-    previousGroupEnd = groupStart + packedHeight
+  const pressure = densityPressure(items.length)
+  if (pressure <= 0 && items.every((item, index) => {
+    if (index === 0) return true
+    return item.idealOffsetPx - items[index - 1].idealOffsetPx >= requiredVisualSpacing(items[index - 1], item)
+  })) {
+    items.forEach((item) => setDisplayOffset(item.row, item.idealOffsetPx, item.idealOffsetPx))
+    return
   }
+
+  const packedOffsets = [items[0].idealOffsetPx]
+  for (let index = 1; index < items.length; index += 1) {
+    packedOffsets.push(packedOffsets[index - 1] + elasticGap(items[index - 1], items[index], pressure))
+  }
+
+  // Keep the packed strip stack centred on its true time positions instead of
+  // allowing all compression to accumulate toward only one end of the timeline.
+  const meanIdeal = items.reduce((sum, item) => sum + item.idealOffsetPx, 0) / items.length
+  const meanPacked = packedOffsets.reduce((sum, value) => sum + value, 0) / packedOffsets.length
+  const centreCorrection = meanIdeal - meanPacked
+
+  items.forEach((item, index) => {
+    setDisplayOffset(item.row, packedOffsets[index] + centreCorrection, item.idealOffsetPx)
+  })
 }
 
 function decorateRows() {
