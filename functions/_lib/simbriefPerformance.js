@@ -12,6 +12,11 @@ function cleanType(value) {
   return /^[A-Z0-9]{2,8}$/.test(type) ? type : null;
 }
 
+function normalizePerformanceCategory(value) {
+  const category = String(value || '').trim().toUpperCase();
+  return ['A', 'B', 'C', 'D', 'E', 'H'].includes(category) ? category : null;
+}
+
 function parseDescentProfile(value) {
   const raw = String(value || '').trim().toUpperCase();
   const match = raw.match(/^(\d{2,3})\/(\d{2,3})\/(\d{2,3})$/);
@@ -44,20 +49,47 @@ async function fetchDataset() {
   return datasetCache.promise;
 }
 
+function preferredAirframes(entry) {
+  const airframes = Array.isArray(entry?.airframes) ? entry.airframes : [];
+  return [
+    ...airframes.filter((airframe) => String(airframe?.airframe_comments || '').trim().toLowerCase() === 'default'),
+    ...airframes,
+  ];
+}
+
 function descentProfileFromEntry(entry) {
   const profiles = Array.isArray(entry?.aircraft_profiles_descent) ? entry.aircraft_profiles_descent : [];
   for (const profile of profiles) {
     const parsed = parseDescentProfile(profile);
     if (parsed) return parsed;
   }
-  const airframes = Array.isArray(entry?.airframes) ? entry.airframes : [];
-  const preferred = [
-    ...airframes.filter((airframe) => String(airframe?.airframe_comments || '').trim().toLowerCase() === 'default'),
-    ...airframes,
-  ];
-  for (const airframe of preferred) {
+  for (const airframe of preferredAirframes(entry)) {
     const parsed = parseDescentProfile(airframe?.airframe_options?.defaultdescent);
     if (parsed) return parsed;
+  }
+  return null;
+}
+
+function performanceCategoryFromEntry(entry) {
+  const direct = [
+    entry?.performance_category,
+    entry?.aircraft_performance_category,
+    entry?.per,
+  ];
+  for (const value of direct) {
+    const category = normalizePerformanceCategory(value);
+    if (category) return category;
+  }
+  for (const airframe of preferredAirframes(entry)) {
+    const candidates = [
+      airframe?.airframe_options?.per,
+      airframe?.performance_category,
+      airframe?.per,
+    ];
+    for (const value of candidates) {
+      const category = normalizePerformanceCategory(value);
+      if (category) return category;
+    }
   }
   return null;
 }
@@ -70,6 +102,7 @@ function dbRowToProfile(row) {
     aircraftName: row.aircraft_name || null,
     aircraftDefaultCruise: row.aircraft_default_cruise || null,
     aircraftSpeed: row.aircraft_speed || null,
+    performanceCategory: normalizePerformanceCategory(row.performance_category),
     descentProfile: row.descent_profile,
     descentMach: row.descent_mach == null ? null : Number(row.descent_mach),
     descentIasKt: Number(row.descent_ias_kt),
@@ -91,6 +124,7 @@ async function upsertStoredProfile(env, type, profile, sourceUpdatedAt) {
     aircraft_type: type,
     aircraft_name: profile.aircraftName,
     source: 'SIMBRIEF',
+    performance_category: profile.performanceCategory,
     descent_profile: profile.descentProfile,
     descent_mach: profile.descentMach,
     descent_ias_kt: profile.descentIasKt,
@@ -128,6 +162,7 @@ function upstreamProfile(type, entry) {
     aircraftName: String(entry?.aircraft_name || '').trim() || null,
     aircraftDefaultCruise: String(entry?.aircraft_default_cruise || '').trim() || null,
     aircraftSpeed: String(entry?.aircraft_speed || '').trim() || null,
+    performanceCategory: performanceCategoryFromEntry(entry),
     ...parsed,
   };
 }
