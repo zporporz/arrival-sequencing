@@ -52,6 +52,7 @@ import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 import { installStaffNavdataDiffSummaryRuntime } from './staffNavdataDiffSummaryRuntime'
+import { installStaffThailandNavdataImporterRuntime } from './staffThailandNavdataImporterRuntime'
 
 installReconnectTrafficFetch()
 
@@ -110,7 +111,14 @@ function AppWithRuntime() {
 }
 
 function NavdataAdminWithRuntime() {
-  useEffect(() => installStaffNavdataDiffSummaryRuntime(), [])
+  useEffect(() => {
+    const removeDiffSummary = installStaffNavdataDiffSummaryRuntime()
+    const removeThailandImporter = installStaffThailandNavdataImporterRuntime()
+    return () => {
+      removeDiffSummary()
+      removeThailandImporter()
+    }
+  }, [])
   return <StaffNavdataAdmin />
 }
 
