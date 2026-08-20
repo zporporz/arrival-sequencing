@@ -40,6 +40,7 @@ import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
 import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
 import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRuntime'
+import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 
 installReconnectTrafficFetch()
 
@@ -62,6 +63,7 @@ function AppWithRuntime() {
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
     const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
     const removeKnownInboundAdmissionRuntime = installKnownInboundAdmissionRuntime()
+    const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
 
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
@@ -79,6 +81,7 @@ function AppWithRuntime() {
       removeTimelineDisplayScaleRuntime()
       removeManualTargetSyncCompatRuntime()
       removeKnownInboundAdmissionRuntime()
+      removeMonitoredTimelineRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
