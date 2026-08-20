@@ -51,6 +51,7 @@ import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
+import { installStaffNavdataDiffSummaryRuntime } from './staffNavdataDiffSummaryRuntime'
 
 installReconnectTrafficFetch()
 
@@ -108,9 +109,14 @@ function AppWithRuntime() {
   return <App />
 }
 
+function NavdataAdminWithRuntime() {
+  useEffect(() => installStaffNavdataDiffSummaryRuntime(), [])
+  return <StaffNavdataAdmin />
+}
+
 function RootApp() {
   const route = adminRoute()
-  if (route === 'navdata') return <StaffNavdataAdmin />
+  if (route === 'navdata') return <NavdataAdminWithRuntime />
   if (route === 'tools') return <StaffAdminTools />
   return <AppWithRuntime />
 }
