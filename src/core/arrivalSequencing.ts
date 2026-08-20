@@ -1,5 +1,6 @@
 import { classifyAmanDelay, nmToMinutesAtReferenceSpeed, type AmanDelayAction } from './amanConstants'
 import { cachedAircraftPerformanceCategory } from './aircraftPerformanceCategory'
+import type { AircraftPerformanceCategory } from './api'
 
 export type AmanStabilityState = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
@@ -8,6 +9,7 @@ export type AmanArrivalPrediction = {
   callsign: string
   aircraftType: string | null
   wakeTurbulence: string | null
+  performanceCategory?: AircraftPerformanceCategory | null
   runway: string
   refFix: string
   predictedIawpAt: string
@@ -111,21 +113,25 @@ function isA380(value: string | null | undefined) {
   return type === 'A380' || type === 'A388'
 }
 
+function performanceCategory(arrival: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>) {
+  return arrival.performanceCategory ?? cachedAircraftPerformanceCategory(arrival.aircraftType)
+}
+
 /**
  * Returns the special final-approach spacing for the pair. A positive value replaces
  * normal LAND SEP for that listed pair. Zero means no special rule, so LAND SEP applies.
  * NM rules are converted to timeline seconds at the AMAN 140 kt final reference speed.
  */
 export function finalApproachSpecialSeparationSeconds(
-  leader: Pick<AmanArrivalPrediction, 'aircraftType'>,
-  follower: Pick<AmanArrivalPrediction, 'aircraftType'>,
+  leader: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
+  follower: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
 ) {
   if (isA380(leader.aircraftType)) {
     return nmToMinutesAtReferenceSpeed(FINAL_APPROACH_SPACING.BEHIND_A380_NM) * 60
   }
 
-  const leaderCategory = cachedAircraftPerformanceCategory(leader.aircraftType)
-  const followerCategory = cachedAircraftPerformanceCategory(follower.aircraftType)
+  const leaderCategory = performanceCategory(leader)
+  const followerCategory = performanceCategory(follower)
 
   if (leaderCategory === 'B') {
     return followerCategory === 'B'
@@ -150,8 +156,8 @@ export function finalApproachSpecialSeparationSeconds(
  * rules replace LAND SEP; otherwise the supplied landing separation is preserved.
  */
 export function resolveAmanPairwiseSeparationSeconds(
-  leader: Pick<AmanArrivalPrediction, 'aircraftType'>,
-  follower: Pick<AmanArrivalPrediction, 'aircraftType'>,
+  leader: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
+  follower: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
   landingSeparationSeconds: number,
 ) {
   const landing = Number.isFinite(landingSeparationSeconds) && landingSeparationSeconds >= 0
