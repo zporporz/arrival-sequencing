@@ -25,8 +25,10 @@ import './timelineCompactRows.css'
 import './timelineScrollable.css'
 import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
+import './staffNavdataAdmin.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
+import StaffNavdataAdmin from './StaffNavdataAdmin'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
@@ -46,8 +48,13 @@ import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
+import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 
 installReconnectTrafficFetch()
+
+function isNavdataAdminRoute() {
+  return new URLSearchParams(window.location.search).get('admin') === 'navdata'
+}
 
 function AppWithRuntime() {
   useEffect(() => {
@@ -58,7 +65,6 @@ function AppWithRuntime() {
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
     const removeSystemPanelRuntime = installSystemPanelRuntime()
-
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
@@ -69,9 +75,10 @@ function AppWithRuntime() {
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
     const removeVtbdCapacityRuntime = installVtbdCapacityRuntime()
-
+    const removeStaffNavdataLinkRuntime = installStaffNavdataLinkRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
+
     return () => {
       removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
@@ -90,6 +97,7 @@ function AppWithRuntime() {
       removeMaestroOpsMenuRuntime()
       removeLandedHistoryRuntime()
       removeVtbdCapacityRuntime()
+      removeStaffNavdataLinkRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
     }
@@ -98,10 +106,14 @@ function AppWithRuntime() {
   return <App />
 }
 
+function RootApp() {
+  return isNavdataAdminRoute() ? <StaffNavdataAdmin /> : <AppWithRuntime />
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthGate>
-      <AppWithRuntime />
+      <RootApp />
     </AuthGate>
   </StrictMode>,
 )
