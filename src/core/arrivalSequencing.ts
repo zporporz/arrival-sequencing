@@ -145,6 +145,22 @@ export function finalApproachSpecialSeparationSeconds(
   return 0
 }
 
+/**
+ * One source of truth for pair spacing everywhere in the HMI. Listed final-approach
+ * rules replace LAND SEP; otherwise the supplied landing separation is preserved.
+ */
+export function resolveAmanPairwiseSeparationSeconds(
+  leader: Pick<AmanArrivalPrediction, 'aircraftType'>,
+  follower: Pick<AmanArrivalPrediction, 'aircraftType'>,
+  landingSeparationSeconds: number,
+) {
+  const landing = Number.isFinite(landingSeparationSeconds) && landingSeparationSeconds >= 0
+    ? landingSeparationSeconds
+    : 0
+  const special = finalApproachSpecialSeparationSeconds(leader, follower)
+  return special > 0 ? special : landing
+}
+
 function requiredSeparationSeconds(
   leader: AmanArrivalPrediction,
   follower: AmanArrivalPrediction,
@@ -161,9 +177,8 @@ function requiredSeparationSeconds(
   const landingSeparation = Number.isFinite(configuredPairwise) && configuredPairwise >= 0
     ? configuredPairwise
     : runwayBaseSeconds
-  const finalApproachSpecial = finalApproachSpecialSeparationSeconds(leader, follower)
 
-  return finalApproachSpecial > 0 ? finalApproachSpecial : landingSeparation
+  return resolveAmanPairwiseSeparationSeconds(leader, follower, landingSeparation)
 }
 
 export function autoSequenceUnstableArrivals(
