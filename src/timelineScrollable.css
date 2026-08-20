@@ -71,8 +71,9 @@
    reference MAESTRO philosophy: clear text rows aligned directly to the time scale. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
-  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
   min-height: 20px !important;
   height: 20px !important;
   width: min(660px, calc(50% - 38px));
@@ -88,10 +89,15 @@
   text-shadow: 0 1px 1px rgba(0,0,0,.68);
   overflow: visible !important;
 }
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
+  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+}
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
-  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
   min-height: 20px !important;
   height: 20px !important;
   width: min(660px, calc(50% - 38px));
@@ -108,6 +114,54 @@
   text-shadow: 0 1px 1px rgba(0,0,0,.68);
   overflow: visible !important;
 }
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
+  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+}
+
+.aman-monitored-flight-row {
+  position: absolute;
+  left: calc(50% + 28px);
+  top: var(--now-line);
+  display: grid;
+  align-items: center;
+  transform: translateY(calc(var(--monitor-offset-px, 0px) - 50%)) !important;
+  border-left: 2px dashed #526b86;
+  font-family: Consolas, monospace;
+  pointer-events: none;
+  z-index: 2;
+  opacity: .5;
+  filter: saturate(.58);
+}
+.aman-monitored-flight-row[data-display-side="LEFT"] {
+  left: auto;
+  right: calc(50% + 28px);
+  border-left: 0;
+  border-right: 2px dashed #526b86;
+}
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(1) { order: 7; text-align: right; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(2) { order: 6; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(3) { order: 5; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(4) { order: 4; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(5) { order: 3; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(6) { order: 2; text-align: left; }
+.aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(7) { order: 1; text-align: left; }
+.aman-monitored-flight-row strong { color: #91a9c0; font-size: 15px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aman-monitored-flight-row span { color: #718aa4; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aman-monitored-flight-row .fix-code { color: #91a9c0; font-weight: 900; text-align: center; overflow: visible; }
+.aman-monitored-flight-row .fix-code.is-underlined { text-decoration: underline; text-underline-offset: 2px; }
+.aman-monitored-flight-row b { color: #7994af; font-weight: 950; text-align: right; }
+.aman-monitored-flight-row em { color: #607991; font-style: normal; font-weight: 900; text-align: right; }
+.aman-monitored-flight-row::after {
+  content: 'PROV';
+  position: absolute;
+  right: 2px;
+  top: -11px;
+  color: #607991;
+  font: 800 8px/1 Consolas, monospace;
+  letter-spacing: .06em;
+}
+.aman-monitored-flight-row[data-display-side="LEFT"]::after { right: auto; left: 2px; }
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong {
   font-size: 15px !important;
@@ -205,7 +259,10 @@
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right {
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
     width: calc(50% - 30px);
     grid-template-columns: 52px minmax(96px,1.25fr) 46px 26px 52px 38px 54px !important;
     gap: 5px !important;
@@ -213,10 +270,12 @@
     font-size: 12px !important;
   }
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left {
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
     grid-template-columns: 54px 38px 52px 26px 46px minmax(96px,1.25fr) 52px !important;
   }
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong { font-size: 14px !important; }
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
+  .aman-monitored-flight-row strong { font-size: 14px !important; }
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
