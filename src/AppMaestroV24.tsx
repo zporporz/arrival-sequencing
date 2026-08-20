@@ -171,6 +171,7 @@ const DRAG_SNAP_MS = 15_000
 const UNKNOWN_DISTANCE_FALLBACK_MINUTES = 45
 const LATE_INSERT_MARGIN_MS = 15_000
 const VTBS_CROSS_RUNWAY_STAGGER_SECONDS = 60
+const VTBD_21L_CALLSIGN_PREFIXES = ['LKY', 'RTN', 'WHK', 'RTAF', 'VMS'] as const
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function scopeAirports(scope: AirportScope): AirportCode[] {
@@ -192,6 +193,11 @@ function rowAirport(id: string): AirportCode {
 
 function predictionFlightKey(prediction: Pick<AmanArrivalPrediction, 'id' | 'callsign'>) {
   return flightKey(rowAirport(prediction.id), prediction.callsign)
+}
+
+function vtbdDefaultRunway(callsign: string) {
+  const normalized = callsign.trim().toUpperCase()
+  return VTBD_21L_CALLSIGN_PREFIXES.some((prefix) => normalized.startsWith(prefix)) ? '21L' : '21R'
 }
 
 function formatUtc(date: Date) {
@@ -413,12 +419,14 @@ function assignPredictionsToRunways(
     const naturalMs = naturalLandingTimeMs(prediction)
     const requestedRunway = manualRunways[prediction.id]
     const forcedRunway = requestedRunway && activeRunways.includes(requestedRunway) ? requestedRunway : null
+    const vtbdPreferredRunway = airport === 'VTBD' ? vtbdDefaultRunway(prediction.callsign) : null
+    const preferredActiveRunway = vtbdPreferredRunway && activeRunways.includes(vtbdPreferredRunway) ? vtbdPreferredRunway : null
 
-    let bestRunway = forcedRunway ?? activeRunways[0]
+    let bestRunway = forcedRunway ?? preferredActiveRunway ?? activeRunways[0]
     let bestTarget = candidateLandingTime(airport, bestRunway, prediction, naturalMs, lastTargetByRunway, lastPredictionByRunway, spacingNm)
     let bestLoad = loadByRunway.get(bestRunway) ?? 0
 
-    if (!forcedRunway) {
+    if (!forcedRunway && airport !== 'VTBD') {
       for (const runway of activeRunways.slice(1)) {
         const candidate = candidateLandingTime(airport, runway, prediction, naturalMs, lastTargetByRunway, lastPredictionByRunway, spacingNm)
         const load = loadByRunway.get(runway) ?? 0
@@ -908,7 +916,7 @@ export default function App() {
       const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
 
-      const activeIds = new Set(previews.map((item) => item.id))
+      const activeIds = new Set(previews.map((item) => item.id)
       const nextLatePending: Record<string, true> = { ...latePendingIdsRef.current }
       for (const id of Object.keys(nextLatePending)) {
         if (!activeIds.has(id)) delete nextLatePending[id]
@@ -1227,7 +1235,7 @@ export default function App() {
             <div><dt>Operational queue</dt><dd className={operationalQueueCount ? 'is-warning' : ''}>{operationalQueueCount || 'NONE'}</dd></div>
             <div><dt>TMA model</dt><dd>50 NM BKK</dd></div>
             <div><dt>Sequence</dt><dd>CASCADE CONSTRAINED</dd></div>
-            <div><dt>Runway allocation</dt><dd>AUTO EARLIEST FEASIBLE</dd></div>
+            <div><dt>Runway allocation</dt><dd>VTBD CALLSIGN RULE · VTBS EARLIEST</dd></div>
             <div><dt>Pairwise SEP</dt><dd>FOLLOWER SPECIAL</dd></div>
             <div><dt>Manual runway</dt><dd>{Object.keys(manualRunways).length}</dd></div>
             <div><dt>VTBD X-RWY</dt><dd>FOLLOWER RWY SEP</dd></div>
