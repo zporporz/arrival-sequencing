@@ -5,7 +5,6 @@ type SqlResult = { columns: string[]; values: unknown[][] }
 type SqlDb = { exec: (sql: string) => SqlResult[]; close: () => void }
 type SqlStatic = { Database: new (data: Uint8Array) => SqlDb }
 type SqlWindow = Window & { initSqlJs?: (config: { locateFile: (file: string) => string }) => Promise<SqlStatic> }
-
 type Row = Record<string, unknown>
 
 type ExtractedLeg = {
@@ -78,7 +77,7 @@ async function loadSqlJs() {
     await new Promise<void>((resolve, reject) => {
       const existing = document.querySelector<HTMLScriptElement>('script[data-sqljs-loader="true"]')
       if (existing) {
-        if ((win as SqlWindow).initSqlJs) return resolve()
+        if (win.initSqlJs) return resolve()
         existing.addEventListener('load', () => resolve(), { once: true })
         existing.addEventListener('error', () => reject(new Error('Could not load SQLite parser')), { once: true })
         return
@@ -144,11 +143,13 @@ function legFromRow(row: Row, approachId: number, transitionId: number | null, o
   }
 }
 
-async function extractThailand(file: File, setStatus: (text: string) => void): Promise<Package> {
+async function extractThailand(file: File, setStatus: (message: string) => void): Promise<Package> {
   if (!/\.sqlite$/i.test(file.name)) throw new Error('Select little_navmap_navigraph.sqlite')
   setStatus(`Reading ${(file.size / 1024 / 1024).toFixed(1)} MB SQLite…`)
   const bytes = new Uint8Array(await file.arrayBuffer())
+  setStatus('Checking SQLite file…')
   const sourceSha256 = await sha256Hex(bytes)
+  setStatus('Opening SQLite database…')
   const SQL = await loadSqlJs()
   const db = new SQL.Database(bytes)
 
@@ -228,8 +229,15 @@ async function extractThailand(file: File, setStatus: (text: string) => void): P
       const procedureTransitions = transitionsByApproach.get(approachId) || []
       const transitionLegs = procedureTransitions.flatMap((transition) => transitionLegsById.get(transition.sourceTransitionId) || [])
       const canonical = new TextEncoder().encode(JSON.stringify({
-        airport: text(row.airport_code), designator, runway: text(row.runway_name), arinc: text(row.arinc_name),
-        type: text(row.type), suffix: text(row.suffix), common, transitions: procedureTransitions, transitionLegs,
+        airport: text(row.airport_code),
+        designator,
+        runway: text(row.runway_name),
+        arinc: text(row.arinc_name),
+        type: text(row.type),
+        suffix: text(row.suffix),
+        common,
+        transitions: procedureTransitions,
+        transitionLegs,
       }))
       procedures.push({
         airport: text(row.airport_code)?.toUpperCase(),
@@ -282,72 +290,94 @@ async function postPackage(pkg: Package) {
   if (!response.ok) throw new Error(payload.error || `Admin API returned ${response.status}`)
 }
 
+function showRuntimeError(message: string, container: HTMLElement | null) {
+  let box = document.querySelector<HTMLElement>('.navadmin-runtime-error')
+  if (!box) {
+    box = document.createElement('div')
+    box.className = 'navadmin-error navadmin-runtime-error'
+    container?.appendChild(box)
+  }
+  box.textContent = message
+}
+
 export function installStaffThailandNavdataImporterRuntime() {
   if (new URLSearchParams(window.location.search).get('admin') !== 'navdata') return () => {}
 
   let disposed = false
   let busy = false
   let candidate: Package | null = null
+  let retryTimer = 0
+  let selectButton: HTMLButtonElement | null = null
+  let stageButton: HTMLButtonElement | null = null
+  let actions: HTMLElement | null = null
+  const originalButtons: Array<{ element: HTMLButtonElement; display: string }> = []
+
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.sqlite,application/vnd.sqlite3'
   input.hidden = true
   document.body.appendChild(input)
 
-  const ensure = () => {
-    if (disposed) return
-    const actions = document.querySelector<HTMLElement>('.navadmin-import-actions')
-    if (!actions) return
+  const statusText = () => actions?.querySelector<HTMLSpanElement>('span') || null
+  const setStatus = (message: string) => {
+    const status = statusText()
+    if (status) status.textContent = message
+  }
 
-    const originalButtons = Array.from(actions.querySelectorAll<HTMLButtonElement>('button'))
-    originalButtons.forEach((button) => {
-      if (!button.dataset.thailandImporter) button.style.display = 'none'
-    })
+  const installUi = () => {
+    if (disposed) return true
+    actions = document.querySelector<HTMLElement>('.navadmin-import-actions')
+    if (!actions) return false
 
-    let select = actions.querySelector<HTMLButtonElement>('[data-thailand-importer="select"]')
-    if (!select) {
-      select = document.createElement('button')
-      select.type = 'button'
-      select.dataset.thailandImporter = 'select'
-      select.textContent = 'SELECT SQLITE · ALL THAILAND'
-      select.onclick = () => { if (!busy) input.click() }
-      actions.prepend(select)
+    actions.querySelectorAll<HTMLButtonElement>('[data-thailand-importer]').forEach((element) => element.remove())
+    for (const button of Array.from(actions.querySelectorAll<HTMLButtonElement>('button'))) {
+      originalButtons.push({ element: button, display: button.style.display })
+      button.style.display = 'none'
     }
 
-    let stage = actions.querySelector<HTMLButtonElement>('[data-thailand-importer="stage"]')
-    if (!stage) {
-      stage = document.createElement('button')
-      stage.type = 'button'
-      stage.className = 'primary'
-      stage.dataset.thailandImporter = 'stage'
-      stage.style.display = 'none'
-      stage.onclick = async () => {
-        if (!candidate || busy) return
-        busy = true
-        const status = actions?.querySelector<HTMLSpanElement>('span')
-        if (status) status.textContent = `Uploading AIRAC ${candidate.meta.cycle} · all Thailand STAR data…`
-        try {
-          await postPackage(candidate)
-          candidate = null
-          if (status) status.textContent = 'AIRAC staged. Reloading…'
-          window.location.reload()
-        } catch (error) {
-          const errorBox = document.querySelector<HTMLElement>('.navadmin-error') || document.createElement('div')
-          errorBox.className = 'navadmin-error'
-          errorBox.textContent = error instanceof Error ? error.message : String(error)
-          if (!errorBox.parentElement) actions?.parentElement?.appendChild(errorBox)
-        } finally {
-          busy = false
-        }
+    selectButton = document.createElement('button')
+    selectButton.type = 'button'
+    selectButton.dataset.thailandImporter = 'select'
+    selectButton.textContent = 'SELECT SQLITE · ALL THAILAND'
+    selectButton.onclick = () => { if (!busy) input.click() }
+    actions.prepend(selectButton)
+
+    stageButton = document.createElement('button')
+    stageButton.type = 'button'
+    stageButton.className = 'primary'
+    stageButton.dataset.thailandImporter = 'stage'
+    stageButton.style.display = 'none'
+    stageButton.onclick = async () => {
+      if (!candidate || busy) return
+      busy = true
+      selectButton!.disabled = true
+      stageButton!.disabled = true
+      setStatus(`Uploading AIRAC ${candidate.meta.cycle} · all Thailand STAR data…`)
+      try {
+        await postPackage(candidate)
+        candidate = null
+        setStatus('AIRAC staged. Reloading…')
+        window.location.reload()
+      } catch (error) {
+        showRuntimeError(error instanceof Error ? error.message : String(error), actions?.parentElement || null)
+        selectButton!.disabled = false
+        stageButton!.disabled = false
+        busy = false
       }
-      actions.appendChild(stage)
     }
+    actions.appendChild(stageButton)
 
     const copy = document.querySelector<HTMLElement>('.navadmin-import p')
     if (copy) copy.innerHTML = 'Use <code>little_navmap_navigraph.sqlite</code>. The raw SQLite stays in this browser; structured <strong>STAR data for all Thailand airports (VT**)</strong> is staged for staff review.'
-
     const sourceSmall = document.querySelector<HTMLElement>('.navadmin-summary-grid > article:nth-child(4) small')
     if (sourceSmall) sourceSmall.textContent = 'All Thailand VT** STAR procedures are stored'
+    return true
+  }
+
+  const tryInstall = (attempt = 0) => {
+    if (disposed || installUi()) return
+    if (attempt >= 40) return
+    retryTimer = window.setTimeout(() => tryInstall(attempt + 1), 50)
   }
 
   input.onchange = async () => {
@@ -355,36 +385,35 @@ export function installStaffThailandNavdataImporterRuntime() {
     if (!file || busy) return
     busy = true
     candidate = null
-    ensure()
-    const actions = document.querySelector<HTMLElement>('.navadmin-import-actions')
-    const status = actions?.querySelector<HTMLSpanElement>('span')
-    const stage = actions?.querySelector<HTMLButtonElement>('[data-thailand-importer="stage"]')
+    document.querySelector('.navadmin-runtime-error')?.remove()
+    if (selectButton) selectButton.disabled = true
+    if (stageButton) stageButton.style.display = 'none'
+
     try {
-      candidate = await extractThailand(file, (message) => { if (status) status.textContent = message })
-      if (stage) {
-        stage.textContent = `STAGE AIRAC ${candidate.meta.cycle} · THAILAND`
-        stage.style.display = ''
+      candidate = await extractThailand(file, setStatus)
+      if (stageButton) {
+        stageButton.textContent = `STAGE AIRAC ${candidate.meta.cycle} · THAILAND`
+        stageButton.style.display = ''
+        stageButton.disabled = false
       }
-      const oldCandidate = document.querySelector<HTMLElement>('.navadmin-candidate')
-      if (oldCandidate) oldCandidate.style.display = 'none'
     } catch (error) {
-      if (status) status.textContent = 'Import preparation failed.'
-      const errorBox = document.querySelector<HTMLElement>('.navadmin-error') || document.createElement('div')
-      errorBox.className = 'navadmin-error'
-      errorBox.textContent = error instanceof Error ? error.message : String(error)
-      if (!errorBox.parentElement) actions?.parentElement?.appendChild(errorBox)
+      setStatus('Import preparation failed.')
+      showRuntimeError(error instanceof Error ? error.message : String(error), actions?.parentElement || null)
     } finally {
       busy = false
+      if (selectButton) selectButton.disabled = false
+      input.value = ''
     }
   }
 
-  ensure()
-  const observer = new MutationObserver(ensure)
-  observer.observe(document.body, { childList: true, subtree: true })
+  tryInstall()
 
   return () => {
     disposed = true
-    observer.disconnect()
+    if (retryTimer) window.clearTimeout(retryTimer)
+    selectButton?.remove()
+    stageButton?.remove()
+    for (const { element, display } of originalButtons) element.style.display = display
     input.remove()
   }
 }
