@@ -916,7 +916,7 @@ export default function App() {
       const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
 
-      const activeIds = new Set(previews.map((item) => item.id)
+      const activeIds = new Set(previews.map((item) => item.id))
       const nextLatePending: Record<string, true> = { ...latePendingIdsRef.current }
       for (const id of Object.keys(nextLatePending)) {
         if (!activeIds.has(id)) delete nextLatePending[id]
