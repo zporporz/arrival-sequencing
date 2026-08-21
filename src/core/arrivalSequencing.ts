@@ -120,16 +120,27 @@ function lifecycleTestPrediction(arrival: AmanArrivalPrediction): AmanArrivalPre
   return { ...arrival, predictedIawpAt: toIso(predictedIawpMs) }
 }
 
+/**
+ * Calculate timeline metrics for one planned landing target.
+ *
+ * Delay is a controller-planning value, not a live-performance error. The caller may
+ * supply the TLDT that existed when ATC took control of the flight. If no planning
+ * baseline is supplied (AUTO sequencing), the current target is its own baseline and
+ * TDLY is therefore zero even when live ETA-FF/trajectory changes or automatic
+ * separation moves the AUTO target.
+ */
 export function calculateArrivalMetrics(
   arrival: AmanArrivalPrediction,
   targetLandingAt: string,
+  planningBaselineLandingAt: string = targetLandingAt,
 ): Omit<AmanSequenceRow, 'sequenceIndex' | 'autoShiftSeconds'> {
   const predictedIawpMs = toMillis(arrival.predictedIawpAt)
   const targetLandingMs = toMillis(targetLandingAt)
+  const planningBaselineLandingMs = toMillis(planningBaselineLandingAt)
   const nominalMs = Math.max(0, arrival.nominalStarSeconds) * 1000
   const naturalLandingMs = predictedIawpMs + nominalMs
   const ttoMs = targetLandingMs - nominalMs
-  const delaySeconds = Math.round((ttoMs - predictedIawpMs) / 1000)
+  const delaySeconds = Math.round((targetLandingMs - planningBaselineLandingMs) / 1000)
   const delayMinutes = delaySeconds / 60
 
   return {
@@ -270,7 +281,10 @@ export function autoSequenceUnstableArrivals(
         targetLandingMs = Math.max(targetLandingMs, earliestAllowedMs)
       }
 
-      const metrics = calculateArrivalMetrics(arrival, toIso(targetLandingMs))
+      // AUTO sequencing establishes the planning baseline. It may move TLDT for
+      // separation, but it must not manufacture controller delay on its own.
+      const targetLandingAt = toIso(targetLandingMs)
+      const metrics = calculateArrivalMetrics(arrival, targetLandingAt, targetLandingAt)
       const row: AmanSequenceRow = {
         ...metrics,
         sequenceIndex: 0,
