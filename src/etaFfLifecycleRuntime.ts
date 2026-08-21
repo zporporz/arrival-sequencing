@@ -26,11 +26,13 @@ const STABLE_BEFORE_IAWP_MINUTES = 15
 const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
 const FROZEN_BEFORE_TLDT_MINUTES = 4
 const TARGET_TOLERANCE_MS = 2_000
+const LOCAL_DRAG_GRACE_MS = 1_200
 
 const lockedEtaFfByKey = new Map<string, number>()
 const superstableTldtByKey = new Map<string, number>()
 const frozenTldtByKey = new Map<string, number>()
 const sharedRevisionByKey = new Map<string, string>()
+const localDragUntilByKey = new Map<string, number>()
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -133,14 +135,12 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
-  // FROZEN is sticky until the active row leaves and the landing-history row takes over.
+  // FROZEN remains a lifecycle state, but ATC may still move its protected target.
   if (frozenTldtByKey.has(key)) return 'FROZEN'
 
   const targetLanding = targetTldtMs(row, now)
   const finalTenNm = row.dataset.finalTenNm === 'true'
   if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
-    // Use the latest rendered TLDT first so an intentional SUPERSTABLE drag into
-    // the four-minute gate freezes the new target, not the previous protected one.
     const frozen = targetLanding ?? superstableTldtByKey.get(key)
     if (frozen != null) frozenTldtByKey.set(key, frozen)
     superstableTldtByKey.delete(key)
@@ -188,6 +188,10 @@ function sharedTargetChanged(row: HTMLElement, key: string) {
   return previous != null && previous !== revision
 }
 
+function localDragActive(key: string) {
+  return (localDragUntilByKey.get(key) ?? 0) >= Date.now()
+}
+
 function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
   const current = targetTldtMs(row, now)
   if (current == null) return
@@ -199,16 +203,13 @@ function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
   }
 
   // A local drag or a newer shared revision is an intentional ATC target change.
-  // Accept every such move; the next lifecycle pass can then return the flight to
-  // STABLE if its new target is outside the five-minute SUPERSTABLE condition.
-  if (row.classList.contains('is-dragging') || sharedTargetChanged(row, key)) {
+  if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
     superstableTldtByKey.set(key, current)
     row.dataset.superstableTldt = new Date(current).toISOString()
     return
   }
 
-  // Automatic calculation/cascade must not walk a SUPERSTABLE target. Convert the
-  // current target into React's manual-target state once, then re-apply it if needed.
+  // Automatic calculation/cascade must not walk a SUPERSTABLE target.
   if (!isManualTarget(row) || Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
     applyTargetThroughReact(row, protectedTarget, now)
   }
@@ -217,15 +218,23 @@ function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
 }
 
 function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
-  const frozen = frozenTldtByKey.get(key)
-  if (frozen == null) return
+  const protectedTarget = frozenTldtByKey.get(key)
   const current = targetTldtMs(row, now)
+  if (protectedTarget == null || current == null) return
 
-  if (!isManualTarget(row) || current == null || Math.abs(current - frozen) > TARGET_TOLERANCE_MS) {
-    applyTargetThroughReact(row, frozen, now)
+  // FROZEN blocks automatic movement, not the controller. A local drag or a manual
+  // target received from another controller replaces the protected TLDT immediately.
+  if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
+    frozenTldtByKey.set(key, current)
+    row.dataset.frozenTldt = new Date(current).toISOString()
+    return
   }
 
-  row.dataset.frozenTldt = new Date(frozen).toISOString()
+  if (!isManualTarget(row) || Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
+    applyTargetThroughReact(row, protectedTarget, now)
+  }
+
+  row.dataset.frozenTldt = new Date(protectedTarget).toISOString()
 }
 
 function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStatus, key: string) {
@@ -323,18 +332,28 @@ function refreshRows() {
   for (const key of sharedRevisionByKey.keys()) {
     if (!activeKeys.has(key)) sharedRevisionByKey.delete(key)
   }
+  for (const key of localDragUntilByKey.keys()) {
+    if (!activeKeys.has(key) || !localDragActive(key)) localDragUntilByKey.delete(key)
+  }
 }
 
-function blockFrozenPointer(event: Event) {
+function markLocalDrag(event: PointerEvent) {
+  if (event.button !== 0 || !(event.target instanceof Element) || event.target.closest('select')) return
+  const row = event.target.closest<HTMLElement>('.aman-flight-row')
+  if (!row) return
+  const key = rowKey(row)
+  if (key) localDragUntilByKey.set(key, Date.now() + LOCAL_DRAG_GRACE_MS)
+}
+
+function finishLocalDrag(event: PointerEvent) {
   if (!(event.target instanceof Element)) return
   const row = event.target.closest<HTMLElement>('.aman-flight-row')
-  if (!row || row.dataset.flightStatus !== 'FROZEN') return
-  event.preventDefault()
-  event.stopPropagation()
-  event.stopImmediatePropagation()
+  if (!row) return
+  const key = rowKey(row)
+  if (key) localDragUntilByKey.set(key, Date.now() + LOCAL_DRAG_GRACE_MS)
 }
 
-function blockFrozenChange(event: Event) {
+function blockFrozenNonDragEdit(event: Event) {
   if (!(event.target instanceof Element)) return
   const row = event.target.closest<HTMLElement>('.aman-flight-row')
   if (!row || row.dataset.flightStatus !== 'FROZEN') return
@@ -346,18 +365,28 @@ function blockFrozenChange(event: Event) {
 export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
-  document.addEventListener('pointerdown', blockFrozenPointer, true)
-  document.addEventListener('dblclick', blockFrozenPointer, true)
-  document.addEventListener('change', blockFrozenChange, true)
+
+  // Every lifecycle stage, including FROZEN, may be dragged by ATC in both LIVE and
+  // TEST modes. Only automatic calculation/cascade remains locked out of FROZEN.
+  document.addEventListener('pointerdown', markLocalDrag, true)
+  document.addEventListener('pointerup', finishLocalDrag, true)
+  document.addEventListener('pointercancel', finishLocalDrag, true)
+
+  // Keep the existing FROZEN protection for reset/runway edits; this does not block drag.
+  document.addEventListener('dblclick', blockFrozenNonDragEdit, true)
+  document.addEventListener('change', blockFrozenNonDragEdit, true)
 
   return () => {
     window.clearInterval(timer)
-    document.removeEventListener('pointerdown', blockFrozenPointer, true)
-    document.removeEventListener('dblclick', blockFrozenPointer, true)
-    document.removeEventListener('change', blockFrozenChange, true)
+    document.removeEventListener('pointerdown', markLocalDrag, true)
+    document.removeEventListener('pointerup', finishLocalDrag, true)
+    document.removeEventListener('pointercancel', finishLocalDrag, true)
+    document.removeEventListener('dblclick', blockFrozenNonDragEdit, true)
+    document.removeEventListener('change', blockFrozenNonDragEdit, true)
     lockedEtaFfByKey.clear()
     superstableTldtByKey.clear()
     frozenTldtByKey.clear()
     sharedRevisionByKey.clear()
+    localDragUntilByKey.clear()
   }
 }
