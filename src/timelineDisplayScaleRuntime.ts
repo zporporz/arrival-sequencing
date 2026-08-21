@@ -29,6 +29,10 @@ type DragState = {
   lastPhysicalDeltaPx: number
 }
 
+type ReorderDetail = {
+  identities?: string[]
+}
+
 const FALLBACK_ROW_HEIGHT_PX = 18
 const RESIDUAL_TOLERANCE_PX = 3
 const MIN_VISUAL_GAP_PX = 0
@@ -48,6 +52,12 @@ function rowKey(row: HTMLElement) {
   const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   return airport && callsign ? `${airport}:${callsign}` : ''
+}
+
+function rowIsManual(row: HTMLElement) {
+  return row.classList.contains('is-stable')
+    || row.dataset.targetMode === 'MANUAL'
+    || row.querySelector('.runway-assignment.is-manual') != null
 }
 
 function rowDisplaySide(row: HTMLElement) {
@@ -85,6 +95,13 @@ function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffset
   row.dataset.visualCompact = row.dataset.timelinePacked
 }
 
+function resetRowVisual(row: HTMLElement) {
+  const key = rowKey(row)
+  if (key) visualResidualByKey.delete(key)
+  const ideal = rowIdealDisplayOffset(row)
+  if (ideal != null) setDisplayOffset(row, ideal, ideal)
+}
+
 function findRow(key: string) {
   return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).find((row) => rowKey(row) === key) ?? null
 }
@@ -112,6 +129,13 @@ function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
     const ideal = rowIdealDisplayOffset(row)
     if (!key || ideal == null) return
     activeKeys.add(key)
+
+    // Returning a flight to AUTO must also return its strip to the true timeline
+    // position. A presentation-only close-gap offset must never survive AUTO reset.
+    if (!rowIsManual(row) && visualResidualByKey.has(key)) {
+      visualResidualByKey.delete(key)
+    }
+
     if (row === exceptRow) return
     setDisplayOffset(row, ideal + (visualResidualByKey.get(key) ?? 0), ideal)
   })
@@ -138,12 +162,7 @@ function clampToAdjacentBlock(row: HTMLElement, requested: number, physicalDelta
     if (offset != null) maximum = offset - minimumSpacing(row, after)
   }
 
-  // Normal compacting never crosses the adjacent flight. Repeating the same drag
-  // therefore cannot accumulate more offset once block edge touches block edge.
   const clamped = Math.min(maximum, Math.max(minimum, requested))
-
-  // If the surrounding visual stack has no room, keep the strip on the nearest legal
-  // edge in the direction the controller is pulling instead of flipping through it.
   if (minimum > maximum) return physicalDelta < 0 ? maximum : minimum
   return clamped
 }
@@ -177,10 +196,10 @@ export function installTimelineDisplayScaleRuntime() {
     })
   }
 
-  // Normal drag always drives the original TLDT logic. Presentation compaction is
-  // resolved only after React/cascade has produced the legal target time.
   const onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0) return
+    // Shift+Drag belongs exclusively to the reorder runtime. Do not start the normal
+    // target/compact drag here as well.
+    if (event.shiftKey || event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
@@ -238,9 +257,6 @@ export function installTimelineDisplayScaleRuntime() {
         const ideal = rowIdealDisplayOffset(row)
         if (ideal == null) return
 
-        // Crucially, clamp against the row's current adjacent sequence neighbours.
-        // This makes touching the hard visual limit: no overlap, no repeated-drag
-        // accumulation, and no accidental visual crossing/swap.
         const desired = clampToAdjacentBlock(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
         const residual = desired - ideal
         if (Math.abs(residual) <= RESIDUAL_TOLERANCE_PX) visualResidualByKey.delete(finished.key)
@@ -252,10 +268,40 @@ export function installTimelineDisplayScaleRuntime() {
     }, 0)
   }
 
+  const onDoubleClick = (event: MouseEvent) => {
+    if (!(event.target instanceof Element) || event.target.closest('select')) return
+    const row = event.target.closest<HTMLElement>('.aman-flight-row')
+    if (!row) return
+
+    // Let the normal reset handler clear the manual target. Independently clear the
+    // presentation offset now and again after React renders the AUTO target.
+    resetRowVisual(row)
+    window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        const current = findRow(rowKey(row))
+        if (current) resetRowVisual(current)
+        applyStoredVisualPositions()
+      })
+    }, 0)
+  }
+
+  const onSequenceReordered = (event: Event) => {
+    const identities = (event as CustomEvent<ReorderDetail>).detail?.identities ?? []
+    for (const key of identities) visualResidualByKey.delete(key)
+
+    // Old close-gap offsets belong to the old sequence neighbours. Throw them away
+    // before rendering the new order so a reordered strip cannot jump to an obsolete Y.
+    window.setTimeout(() => {
+      window.requestAnimationFrame(() => applyStoredVisualPositions())
+    }, 0)
+  }
+
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
   document.addEventListener('pointerup', finishDrag, true)
   document.addEventListener('pointercancel', finishDrag, true)
+  document.addEventListener('dblclick', onDoubleClick, true)
+  window.addEventListener('aman:sequence-reordered', onSequenceReordered)
 
   applyStoredVisualPositions()
   const observer = new MutationObserver(scheduleApply)
@@ -263,7 +309,7 @@ export function installTimelineDisplayScaleRuntime() {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['style', 'data-display-side'],
+    attributeFilter: ['style', 'class', 'data-display-side', 'data-target-mode'],
   })
   const timer = window.setInterval(scheduleApply, 500)
 
@@ -276,6 +322,8 @@ export function installTimelineDisplayScaleRuntime() {
     document.removeEventListener('pointermove', onPointerMove, true)
     document.removeEventListener('pointerup', finishDrag, true)
     document.removeEventListener('pointercancel', finishDrag, true)
+    document.removeEventListener('dblclick', onDoubleClick, true)
+    window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     visualResidualByKey.clear()
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
       row.style.removeProperty('--display-offset-px')
