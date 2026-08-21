@@ -165,7 +165,7 @@ It uses the same code paths as live traffic for:
 - FROZEN edit blocking;
 - landed-history row construction and fixed first-observed ALDT behavior.
 
-Synthetic aircraft categories are primed before the first TEST TRAFFIC render so the test sequence does not fall back to LAND SEP while waiting for an asynchronous performance-category request.
+Synthetic aircraft categories are assigned deterministically only to `demo:` predictions before pairwise separation is resolved. They neither wait for an asynchronous SimBrief request nor populate the live aircraft-performance cache.
 
 For the final landed step, TEST TRAFFIC creates one synthetic terminal observation when the test row reaches TLDT. This drives the same fixed landed-history display without calling or modifying production landing data.
 
