@@ -4,8 +4,14 @@ type SharedFlightState = {
   revision?: number
 }
 
+type SharedWorkspaceState = {
+  airport?: string
+  revision?: number
+}
+
 type SharedStateDetail = {
   flightStates?: SharedFlightState[]
+  workspaceStates?: SharedWorkspaceState[]
 }
 
 const SHARED_STATE_EVENT = 'aman:shared-state'
@@ -37,20 +43,23 @@ function demoIdentitySet() {
   return new Set(demoFlightRows().map(demoIdentity).filter(Boolean))
 }
 
-function protectDemoRowsFromSharedApply(detail: SharedStateDetail | undefined) {
-  if (!testTrafficEnabled()) return
-  const states = detail?.flightStates || []
-  if (!states.length) return
+function configAirport(block: HTMLElement) {
+  const label = block.querySelector<HTMLElement>('.aman-profile-select > span')?.textContent?.trim().toUpperCase() || ''
+  return label.match(/^(VTBD|VTBS)\s+CONFIG$/)?.[1] || ''
+}
 
-  const byIdentity = new Map<string, SharedFlightState>()
-  for (const state of states) {
+function protectDemoStateFromSharedApply(detail: SharedStateDetail | undefined) {
+  if (!testTrafficEnabled()) return
+
+  const flightByIdentity = new Map<string, SharedFlightState>()
+  for (const state of detail?.flightStates || []) {
     const airport = String(state.airport || '').trim().toUpperCase()
     const callsign = String(state.callsign || '').trim().toUpperCase()
-    if (airport && callsign) byIdentity.set(`${airport}:${callsign}`, state)
+    if (airport && callsign) flightByIdentity.set(`${airport}:${callsign}`, state)
   }
 
   for (const row of demoFlightRows()) {
-    const state = byIdentity.get(demoIdentity(row))
+    const state = flightByIdentity.get(demoIdentity(row))
     const revision = Number(state?.revision)
     if (!Number.isFinite(revision)) continue
     const value = String(revision)
@@ -58,6 +67,18 @@ function protectDemoRowsFromSharedApply(detail: SharedStateDetail | undefined) {
     row.dataset.sharedRevision = value
     row.dataset.manualSyncCompatRevision = value
   }
+
+  const workspaceByAirport = new Map<string, SharedWorkspaceState>()
+  for (const state of detail?.workspaceStates || []) {
+    const airport = String(state.airport || '').trim().toUpperCase()
+    if (airport) workspaceByAirport.set(airport, state)
+  }
+
+  document.querySelectorAll<HTMLElement>('.aman-runway-config-block').forEach((block) => {
+    const state = workspaceByAirport.get(configAirport(block))
+    const revision = Number(state?.revision)
+    if (Number.isFinite(revision)) block.dataset.sharedRevision = String(revision)
+  })
 }
 
 function requestUrl(input: RequestInfo | URL) {
@@ -83,10 +104,13 @@ async function requestBody(input: RequestInfo | URL, init?: RequestInit) {
   return ''
 }
 
-function fakeSuccess() {
-  return Response.json({ ok: true, flightState: null }, {
+function fakeSuccess(body: Record<string, unknown>) {
+  return new Response(JSON.stringify({ ok: true, ...body }), {
     status: 200,
-    headers: { 'Cache-Control': 'no-store' },
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'application/json',
+    },
   })
 }
 
@@ -107,10 +131,17 @@ export function installTestTrafficIsolationRuntime() {
       const action = String(payload.action || '')
       const airport = String(payload.airport || '').trim().toUpperCase()
       const callsign = String(payload.callsign || '').trim().toUpperCase()
+
+      if (action === 'syncWorkspace') {
+        // Runway modes and spacing may be changed locally for a test scenario, but
+        // TEST TRAFFIC must not overwrite the production shared workspace.
+        return fakeSuccess({ workspaceState: null })
+      }
+
       if (TEST_FLIGHT_ACTIONS.has(action) && demoIdentitySet().has(`${airport}:${callsign}`)) {
         // TEST TRAFFIC runs the same local sequencing/lifecycle handlers, but its
         // synthetic callsigns must never create or overwrite production flight rows.
-        return fakeSuccess()
+        return fakeSuccess({ flightState: null })
       }
     } catch {
       // Invalid/non-JSON requests continue to the original fetch implementation.
@@ -122,7 +153,7 @@ export function installTestTrafficIsolationRuntime() {
   window.fetch = isolatedFetch
 
   const onSharedState = (event: Event) => {
-    protectDemoRowsFromSharedApply((event as CustomEvent<SharedStateDetail>).detail)
+    protectDemoStateFromSharedApply((event as CustomEvent<SharedStateDetail>).detail)
   }
   window.addEventListener(SHARED_STATE_EVENT, onSharedState)
 
