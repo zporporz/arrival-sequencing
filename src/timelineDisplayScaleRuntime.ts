@@ -21,30 +21,38 @@ type FakePointerEvent = {
 
 type DragState = {
   row: HTMLElement
+  key: string
   pointerId: number
   startClientY: number
   startDisplayOffsetPx: number
+  lastDisplayOffsetPx: number
+  lastPhysicalDeltaPx: number
 }
 
-type TimelineItem = {
-  row: HTMLElement
-  idealOffsetPx: number
-  heightPx: number
-}
-
-const LOCAL_DENSITY_WINDOW_MINUTES = 15
-const LOCAL_DENSITY_WINDOW_PX = LOCAL_DENSITY_WINDOW_MINUTES * TIMELINE_DISPLAY_PX_PER_MINUTE
-const DENSITY_START_ROWS = 5
-const DENSITY_FULL_ROWS = 8
-const MIN_VISUAL_GAP_PX = 2
 const FALLBACK_ROW_HEIGHT_PX = 18
+const VISUAL_SNAP_PX = 12
+const MIN_VISUAL_GAP_PX = 0
+const RESIDUAL_TOLERANCE_PX = 3
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+// Visual-only residual created when the controller keeps pulling after the real TLDT
+// has already been constrained by separation/cascade. It never changes sequencing math.
+const visualResidualByKey = new Map<string, number>()
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
   if (!key) return null
   return (element as unknown as Record<string, unknown>)[key] as T
+}
+
+function rowKey(row: HTMLElement) {
+  const title = row.getAttribute('title') || ''
+  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
+  return airport && callsign ? `${airport}:${callsign}` : ''
+}
+
+function rowDisplaySide(row: HTMLElement) {
+  return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
 }
 
 function rowIdealDisplayOffset(row: HTMLElement) {
@@ -53,13 +61,22 @@ function rowIdealDisplayOffset(row: HTMLElement) {
   return Math.round(logicalOffset * TIMELINE_DISPLAY_SCALE * 100) / 100
 }
 
-function rowDisplaySide(row: HTMLElement) {
-  return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
+function rowCurrentDisplayOffset(row: HTMLElement) {
+  const value = Number.parseFloat(row.style.getPropertyValue('--display-offset-px'))
+  if (Number.isFinite(value)) return value
+  const ideal = rowIdealDisplayOffset(row)
+  if (ideal == null) return null
+  const key = rowKey(row)
+  return ideal + (key ? visualResidualByKey.get(key) ?? 0 : 0)
 }
 
 function rowHeightPx(row: HTMLElement) {
   const measured = row.getBoundingClientRect().height
   return Number.isFinite(measured) && measured > 0 ? measured : FALLBACK_ROW_HEIGHT_PX
+}
+
+function minimumSpacing(left: HTMLElement, right: HTMLElement) {
+  return (rowHeightPx(left) + rowHeightPx(right)) / 2 + MIN_VISUAL_GAP_PX
 }
 
 function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffsetPx: number) {
@@ -68,110 +85,82 @@ function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffset
   if (row.style.getPropertyValue('--display-offset-px') !== display) row.style.setProperty('--display-offset-px', display)
   if (row.style.getPropertyValue('--ideal-display-offset-px') !== ideal) row.style.setProperty('--ideal-display-offset-px', ideal)
   row.dataset.timelinePacked = Math.abs(displayOffsetPx - idealOffsetPx) >= 0.5 ? 'true' : 'false'
-  delete row.dataset.visualStripMoved
-  delete row.dataset.visualDragging
+  row.dataset.visualCompact = row.dataset.timelinePacked
 }
 
-function minimumSpacing(left: TimelineItem, right: TimelineItem) {
-  return (left.heightPx + right.heightPx) / 2 + MIN_VISUAL_GAP_PX
+function findRow(key: string) {
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).find((row) => rowKey(row) === key) ?? null
 }
 
-function localCount(items: TimelineItem[], centrePx: number) {
-  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
-  return items.reduce((count, item) => count + (Math.abs(item.idealOffsetPx - centrePx) <= halfWindow ? 1 : 0), 0)
+function sameSideRows(row: HTMLElement) {
+  const side = rowDisplaySide(row)
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).filter((candidate) =>
+    candidate !== row && rowDisplaySide(candidate) === side,
+  )
 }
 
-function compressionPressure(count: number) {
-  if (count < DENSITY_START_ROWS) return 0
-  return clamp((count - (DENSITY_START_ROWS - 1)) / (DENSITY_FULL_ROWS - (DENSITY_START_ROWS - 1)), 0, 1)
-}
-
-function denseGroups(items: TimelineItem[]) {
-  const dense = new Set<number>()
-  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
-
-  items.forEach((item) => {
-    const members: number[] = []
-    items.forEach((candidate, candidateIndex) => {
-      if (Math.abs(candidate.idealOffsetPx - item.idealOffsetPx) <= halfWindow) members.push(candidateIndex)
-    })
-    if (members.length >= DENSITY_START_ROWS) members.forEach((member) => dense.add(member))
+function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
+  const activeKeys = new Set<string>()
+  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    if (row === exceptRow) return
+    const ideal = rowIdealDisplayOffset(row)
+    const key = rowKey(row)
+    if (ideal == null || !key) return
+    activeKeys.add(key)
+    setDisplayOffset(row, ideal + (visualResidualByKey.get(key) ?? 0), ideal)
   })
 
-  const groups: number[][] = []
-  let current: number[] = []
-  for (let index = 0; index < items.length; index += 1) {
-    if (!dense.has(index)) {
-      if (current.length) groups.push(current)
-      current = []
-      continue
-    }
-
-    const previous = current.at(-1)
-    if (previous != null && items[index].idealOffsetPx - items[previous].idealOffsetPx > LOCAL_DENSITY_WINDOW_PX) {
-      groups.push(current)
-      current = []
-    }
-    current.push(index)
+  for (const key of visualResidualByKey.keys()) {
+    if (!activeKeys.has(key) && key !== (exceptRow ? rowKey(exceptRow) : '')) visualResidualByKey.delete(key)
   }
-  if (current.length) groups.push(current)
-  return groups
 }
 
-function packDenseGroup(items: TimelineItem[], indices: number[]) {
-  if (indices.length < 2) return
-  const group = indices.map((index) => items[index])
-  const packed = [group[0].idealOffsetPx]
+function nearestTouchPosition(row: HTMLElement, requested: number) {
+  let best = requested
+  let distance = VISUAL_SNAP_PX + 0.001
 
-  for (let index = 1; index < group.length; index += 1) {
-    const left = group[index - 1]
-    const right = group[index]
-    const idealGap = Math.max(0, right.idealOffsetPx - left.idealOffsetPx)
-    const minimumGap = minimumSpacing(left, right)
-    const midpoint = (left.idealOffsetPx + right.idealOffsetPx) / 2
-    const pressure = compressionPressure(localCount(items, midpoint))
-    const nextGap = idealGap <= minimumGap
-      ? minimumGap
-      : minimumGap + (idealGap - minimumGap) * (1 - pressure)
-    packed.push(packed[index - 1] + nextGap)
+  for (const other of sameSideRows(row)) {
+    const otherOffset = rowCurrentDisplayOffset(other)
+    if (otherOffset == null) continue
+    const spacing = minimumSpacing(row, other)
+    for (const candidate of [otherOffset - spacing, otherOffset + spacing]) {
+      const candidateDistance = Math.abs(requested - candidate)
+      if (candidateDistance < distance) {
+        best = candidate
+        distance = candidateDistance
+      }
+    }
   }
 
-  const meanIdeal = group.reduce((sum, item) => sum + item.idealOffsetPx, 0) / group.length
-  const meanPacked = packed.reduce((sum, value) => sum + value, 0) / packed.length
-  let correction = meanIdeal - meanPacked
-
-  const firstIndex = indices[0]
-  const lastIndex = indices[indices.length - 1]
-  const previous = firstIndex > 0 ? items[firstIndex - 1] : null
-  const next = lastIndex < items.length - 1 ? items[lastIndex + 1] : null
-  const minFirst = previous ? previous.idealOffsetPx + minimumSpacing(previous, group[0]) : Number.NEGATIVE_INFINITY
-  const maxLast = next ? next.idealOffsetPx - minimumSpacing(group[group.length - 1], next) : Number.POSITIVE_INFINITY
-
-  if (packed[0] + correction < minFirst) correction += minFirst - (packed[0] + correction)
-  if (packed[packed.length - 1] + correction > maxLast) correction += maxLast - (packed[packed.length - 1] + correction)
-
-  group.forEach((item, index) => setDisplayOffset(item.row, packed[index] + correction, item.idealOffsetPx))
+  return distance <= VISUAL_SNAP_PX ? best : requested
 }
 
-function packSide(rows: HTMLElement[]) {
-  const items = rows
-    .map((row) => {
-      const idealOffsetPx = rowIdealDisplayOffset(row)
-      return idealOffsetPx == null ? null : { row, idealOffsetPx, heightPx: rowHeightPx(row) }
-    })
-    .filter((item): item is TimelineItem => item !== null)
-    .sort((left, right) => left.idealOffsetPx - right.idealOffsetPx)
+function avoidVisualOverlap(row: HTMLElement, requested: number, physicalDelta: number) {
+  let candidate = requested
+  const others = sameSideRows(row)
+  const movingUp = physicalDelta < 0
 
-  // The true TLDT remains untouched. Packing only reduces the visual gap caused by
-  // separation when a local time window gets busy.
-  items.forEach((item) => setDisplayOffset(item.row, item.idealOffsetPx, item.idealOffsetPx))
-  denseGroups(items).forEach((group) => packDenseGroup(items, group))
+  for (let pass = 0; pass < others.length + 2; pass += 1) {
+    let changed = false
+    for (const other of others) {
+      const otherOffset = rowCurrentDisplayOffset(other)
+      if (otherOffset == null) continue
+      const spacing = minimumSpacing(row, other)
+      if (Math.abs(candidate - otherOffset) >= spacing - 0.25) continue
+
+      // When approaching a strip from below/upward, stop directly below it. When
+      // approaching from above/downward, stop directly above it. Reordering itself
+      // is still handled by the real TLDT drag/cascade path.
+      candidate = movingUp ? otherOffset + spacing : otherOffset - spacing
+      changed = true
+    }
+    if (!changed) break
+  }
+  return candidate
 }
 
-function decorateRows() {
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
-  packSide(rows.filter((row) => rowDisplaySide(row) === 'LEFT'))
-  packSide(rows.filter((row) => rowDisplaySide(row) === 'RIGHT'))
+function compactDropPosition(row: HTMLElement, requested: number, physicalDelta: number) {
+  return avoidVisualOverlap(row, nearestTouchPosition(row, requested), physicalDelta)
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -194,31 +183,37 @@ export function installTimelineDisplayScaleRuntime() {
   let scheduled = false
   let disposed = false
 
-  const scheduleDecorate = () => {
+  const scheduleApply = () => {
     if (disposed || scheduled || drag) return
     scheduled = true
     window.requestAnimationFrame(() => {
       scheduled = false
-      if (!disposed && !drag) decorateRows()
+      if (!disposed && !drag) applyStoredVisualPositions()
     })
   }
 
-  // Dragging any non-control part of the strip keeps the original behavior: it changes
-  // TLDT/sequence. The packing above is presentation-only and is recalculated after
-  // the target move finishes.
+  // Normal drag always continues to drive the original TLDT/sequence logic. If the
+  // target later gets held apart by SEP/cascade, the pointer's extra travel is kept as
+  // a presentation-only residual so the controller can visually join the strips.
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
 
-    const displayed = Number.parseFloat(row.style.getPropertyValue('--display-offset-px'))
+    const key = rowKey(row)
     const ideal = rowIdealDisplayOffset(row)
+    const displayed = rowCurrentDisplayOffset(row)
+    if (!key || ideal == null || displayed == null) return
+
     drag = {
       row,
+      key,
       pointerId: event.pointerId,
       startClientY: event.clientY,
-      startDisplayOffsetPx: Number.isFinite(displayed) ? displayed : (ideal ?? 0),
+      startDisplayOffsetPx: displayed,
+      lastDisplayOffsetPx: displayed,
+      lastPhysicalDeltaPx: 0,
     }
   }
 
@@ -231,34 +226,62 @@ export function installTimelineDisplayScaleRuntime() {
     const logicalDelta = physicalDelta * TIMELINE_LOGICAL_PX_PER_MINUTE / TIMELINE_DISPLAY_PX_PER_MINUTE
     const logicalClientY = drag.startClientY + logicalDelta
     const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
+    const pointerDisplay = drag.startDisplayOffsetPx + physicalDelta
 
-    setDisplayOffset(drag.row, drag.startDisplayOffsetPx + physicalDelta, ideal)
+    drag.lastDisplayOffsetPx = pointerDisplay
+    drag.lastPhysicalDeltaPx = physicalDelta
+    setDisplayOffset(drag.row, pointerDisplay, ideal)
+
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
     props.onPointerMove(fakePointer(drag.row, event.pointerId, logicalClientY))
   }
 
-  const clearDrag = (event?: PointerEvent) => {
-    if (event && drag && event.pointerId !== drag.pointerId) return
+  const finishDrag = (event?: PointerEvent) => {
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return
+    const finished = drag
     drag = null
-    scheduleDecorate()
+
+    // React/cascade completes on pointer-up. Read the resulting real TLDT position only
+    // after that render, then preserve only the part of the pointer movement that the
+    // real timeline could not follow because of separation/cascade constraints.
+    window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        if (disposed) return
+        const row = findRow(finished.key)
+        if (!row) {
+          visualResidualByKey.delete(finished.key)
+          return
+        }
+        const ideal = rowIdealDisplayOffset(row)
+        if (ideal == null) return
+
+        const desired = compactDropPosition(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
+        const residual = desired - ideal
+        if (Math.abs(residual) <= RESIDUAL_TOLERANCE_PX) visualResidualByKey.delete(finished.key)
+        else visualResidualByKey.set(finished.key, residual)
+
+        setDisplayOffset(row, ideal + (visualResidualByKey.get(finished.key) ?? 0), ideal)
+        applyStoredVisualPositions(row)
+      })
+    }, 0)
   }
 
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
-  document.addEventListener('pointerup', clearDrag, true)
-  document.addEventListener('pointercancel', clearDrag, true)
+  document.addEventListener('pointerup', finishDrag, true)
+  document.addEventListener('pointercancel', finishDrag, true)
 
-  decorateRows()
-  const observer = new MutationObserver(scheduleDecorate)
+  applyStoredVisualPositions()
+  const observer = new MutationObserver(scheduleApply)
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ['style', 'data-display-side'],
   })
-  const timer = window.setInterval(scheduleDecorate, 500)
+  const timer = window.setInterval(scheduleApply, 500)
 
   return () => {
     disposed = true
@@ -267,12 +290,14 @@ export function installTimelineDisplayScaleRuntime() {
     window.clearInterval(timer)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)
-    document.removeEventListener('pointerup', clearDrag, true)
-    document.removeEventListener('pointercancel', clearDrag, true)
+    document.removeEventListener('pointerup', finishDrag, true)
+    document.removeEventListener('pointercancel', finishDrag, true)
+    visualResidualByKey.clear()
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
       row.style.removeProperty('--display-offset-px')
       row.style.removeProperty('--ideal-display-offset-px')
       delete row.dataset.timelinePacked
+      delete row.dataset.visualCompact
       delete row.dataset.visualStripMoved
       delete row.dataset.visualDragging
     })
