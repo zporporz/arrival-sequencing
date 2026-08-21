@@ -139,7 +139,7 @@ function updateManualLabels() {
 
 function updateInteractionHint() {
   const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
-  if (hint) hint.textContent = 'DRAG STRIP = MOVE LABEL · DRAG TLDT = SET TARGET · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
+  if (hint) hint.textContent = 'DRAG = SET TARGET · LABELS PACK VISUALLY WHEN BUSY · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
 }
 
 function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
