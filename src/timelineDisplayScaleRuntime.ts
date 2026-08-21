@@ -34,8 +34,8 @@ type TimelineItem = {
 
 const LOCAL_DENSITY_WINDOW_MINUTES = 15
 const LOCAL_DENSITY_WINDOW_PX = LOCAL_DENSITY_WINDOW_MINUTES * TIMELINE_DISPLAY_PX_PER_MINUTE
-const DENSITY_START_ROWS = 6
-const DENSITY_FULL_ROWS = 10
+const DENSITY_START_ROWS = 5
+const DENSITY_FULL_ROWS = 8
 const MIN_VISUAL_GAP_PX = 2
 const FALLBACK_ROW_HEIGHT_PX = 18
 
@@ -88,13 +88,12 @@ function denseGroups(items: TimelineItem[]) {
   const dense = new Set<number>()
   const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
 
-  items.forEach((item, index) => {
+  items.forEach((item) => {
     const members: number[] = []
     items.forEach((candidate, candidateIndex) => {
       if (Math.abs(candidate.idealOffsetPx - item.idealOffsetPx) <= halfWindow) members.push(candidateIndex)
     })
     if (members.length >= DENSITY_START_ROWS) members.forEach((member) => dense.add(member))
-    void index
   })
 
   const groups: number[][] = []
@@ -135,13 +134,10 @@ function packDenseGroup(items: TimelineItem[], indices: number[]) {
     packed.push(packed[index - 1] + nextGap)
   }
 
-  // Keep compression centred around the real times so the whole cluster does not
-  // drift only upward or downward.
   const meanIdeal = group.reduce((sum, item) => sum + item.idealOffsetPx, 0) / group.length
   const meanPacked = packed.reduce((sum, value) => sum + value, 0) / packed.length
   let correction = meanIdeal - meanPacked
 
-  // Do not let the compressed cluster overlap a nearby row that was left on exact time.
   const firstIndex = indices[0]
   const lastIndex = indices[indices.length - 1]
   const previous = firstIndex > 0 ? items[firstIndex - 1] : null
@@ -164,7 +160,6 @@ function packSide(rows: HTMLElement[]) {
     .filter((item): item is TimelineItem => item !== null)
     .sort((left, right) => left.idealOffsetPx - right.idealOffsetPx)
 
-  // Default is exact-time placement. Only locally dense windows are compressed.
   items.forEach((item) => setDisplayOffset(item.row, item.idealOffsetPx, item.idealOffsetPx))
   denseGroups(items).forEach((group) => packDenseGroup(items, group))
 }
@@ -204,10 +199,6 @@ export function installTimelineDisplayScaleRuntime() {
     })
   }
 
-  // React still uses the historical 10 px/min target math. Convert physical drag
-  // distance from the 20 px/min display scale back into logical movement. While the
-  // pointer is down the dragged strip follows the pointer; on release local-density
-  // packing is recalculated around the new true TLDT.
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
