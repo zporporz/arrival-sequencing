@@ -127,6 +127,11 @@ function etaCell(row: HTMLElement) {
   return children.length > 4 ? children.item(4) as HTMLElement | null : null
 }
 
+function displayedEtaFfMs(row: HTMLElement, now: Date) {
+  const value = etaCell(row)?.textContent?.trim() || ''
+  return value ? parseHmNearNow(value, now) : null
+}
+
 function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
   const className = `status-${status.toLowerCase()}`
   element.classList.remove('status-unstable', 'status-stable', 'status-superstable', 'status-frozen')
@@ -240,27 +245,26 @@ function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
 function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStatus, key: string) {
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
-  const targetTto = targetTtoMs(row, now)
 
   if (status === 'UNSTABLE') {
+    // AUTO / UNSTABLE always follows the latest calculation.
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE') {
     if (!manual) {
+      // STABLE still follows live ETA-FF until ATC first takes target control.
       lockedEtaFfByKey.delete(key)
-    } else {
-      const movedTime = targetTto ?? liveEta
-      if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
-    }
-  } else if (status === 'SUPERSTABLE') {
-    if (manual) {
-      const movedTime = targetTto ?? liveEta
-      if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
-    } else if (!lockedEtaFfByKey.has(key) && liveEta != null) {
-      lockedEtaFfByKey.set(key, liveEta)
+    } else if (!lockedEtaFfByKey.has(key)) {
+      // First ATC intervention freezes the displayed ETA-FF at the prediction that was
+      // visible at takeover. Later TLDT/TTO drags must never move this displayed field.
+      const takeoverEta = liveEta ?? displayedEtaFfMs(row, now)
+      if (takeoverEta != null) lockedEtaFfByKey.set(key, takeoverEta)
     }
   } else if (!lockedEtaFfByKey.has(key)) {
-    const frozenTime = manual ? targetTto ?? liveEta : liveEta
-    if (frozenTime != null) lockedEtaFfByKey.set(key, frozenTime)
+    // SUPERSTABLE/FROZEN preserve whichever ETA-FF was already locked in STABLE.
+    // If the flight reaches these stages without prior manual intervention, capture
+    // the current prediction once on entry and keep it fixed thereafter.
+    const entryEta = liveEta ?? displayedEtaFfMs(row, now)
+    if (entryEta != null) lockedEtaFfByKey.set(key, entryEta)
   }
 
   const locked = lockedEtaFfByKey.get(key)
