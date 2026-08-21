@@ -59,6 +59,14 @@ const DEMO_PERFORMANCE_CATEGORY_BY_TYPE: Readonly<Record<string, AircraftPerform
   B763: 'D',
 }
 
+// AppMaestroV24 creates the eight synthetic rows from these original natural-landing
+// offsets. Recover the common test anchor from each prediction, then spread ETA-FF
+// across the lifecycle bands. This keeps the scenario deterministic while allowing
+// UNSTABLE, STABLE, SUPERSTABLE and FROZEN to be tested in one run.
+const DEMO_ORIGINAL_LANDING_OFFSET_MINUTES = [8, 8.5, 9, 9.5, 10, 11, 13, 16] as const
+const DEMO_ETA_FF_OFFSET_MINUTES = [26, 20, 16, 12, 8, 4, 2, null] as const
+const DEMO_FROZEN_LANDING_OFFSET_MINUTES = 3
+
 const manualSequenceOrder = new Map<string, number>()
 
 export function amanSequenceOrderIdentity(airport: string, callsign: string) {
@@ -92,6 +100,25 @@ const toMillis = (iso: string) => {
 }
 
 const toIso = (millis: number) => new Date(millis).toISOString()
+
+function lifecycleTestPrediction(arrival: AmanArrivalPrediction): AmanArrivalPrediction {
+  const match = arrival.id.match(/^demo:(VTBD|VTBS):(\d+)$/i)
+  if (!match) return arrival
+
+  const index = Number(match[2])
+  const originalLandingOffset = DEMO_ORIGINAL_LANDING_OFFSET_MINUTES[index]
+  const etaFfOffset = DEMO_ETA_FF_OFFSET_MINUTES[index]
+  if (originalLandingOffset == null || etaFfOffset === undefined) return arrival
+
+  const nominalMs = Math.max(0, arrival.nominalStarSeconds) * 1000
+  const originalNaturalLandingMs = toMillis(arrival.predictedIawpAt) + nominalMs
+  const anchorMs = originalNaturalLandingMs - originalLandingOffset * 60_000
+  const predictedIawpMs = etaFfOffset == null
+    ? anchorMs + DEMO_FROZEN_LANDING_OFFSET_MINUTES * 60_000 - nominalMs
+    : anchorMs + etaFfOffset * 60_000
+
+  return { ...arrival, predictedIawpAt: toIso(predictedIawpMs) }
+}
 
 export function calculateArrivalMetrics(
   arrival: AmanArrivalPrediction,
@@ -212,7 +239,8 @@ export function autoSequenceUnstableArrivals(
 ): AmanSequenceRow[] {
   const byRunway = new Map<string, AmanArrivalPrediction[]>()
 
-  for (const arrival of arrivals) {
+  for (const rawArrival of arrivals) {
+    const arrival = lifecycleTestPrediction(rawArrival)
     const runway = arrival.runway.trim().toUpperCase()
     if (!runway) throw new Error(`Runway is required for ${arrival.callsign}`)
     const normalized = { ...arrival, runway }
