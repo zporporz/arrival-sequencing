@@ -47,6 +47,18 @@ const FINAL_APPROACH_SPACING = {
   CD_BEHIND_A_NM: 12,
 } as const
 
+// TEST TRAFFIC must exercise the same pair-separation paths as live traffic without
+// depending on an async SimBrief lookup. These are deterministic categories for the
+// fixed aircraft types in DEMO_SPECS; live traffic still uses the persisted SimBrief `per`.
+const DEMO_PERFORMANCE_CATEGORY_BY_TYPE: Readonly<Record<string, AircraftPerformanceCategory>> = {
+  A320: 'C',
+  A321: 'C',
+  A388: 'C',
+  AT76: 'B',
+  B738: 'C',
+  B763: 'C',
+}
+
 const manualSequenceOrder = new Map<string, number>()
 
 export function amanSequenceOrderIdentity(airport: string, callsign: string) {
@@ -114,7 +126,16 @@ function isA380(value: string | null | undefined) {
 }
 
 function performanceCategory(arrival: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>) {
-  return arrival.performanceCategory ?? cachedAircraftPerformanceCategory(arrival.aircraftType)
+  if (arrival.performanceCategory) return arrival.performanceCategory
+
+  const cached = cachedAircraftPerformanceCategory(arrival.aircraftType)
+  if (cached) return cached
+
+  const id = String((arrival as { id?: string }).id || '').toLowerCase()
+  if (id.startsWith('demo:')) {
+    return DEMO_PERFORMANCE_CATEGORY_BY_TYPE[normalizedAircraftType(arrival.aircraftType)] ?? null
+  }
+  return null
 }
 
 /**
