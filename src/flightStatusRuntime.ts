@@ -1,18 +1,9 @@
 import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
-import { BKK_VOR_COORDINATES } from './core/amanConstants'
 
-export type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
-
-const STABLE_BEFORE_IAWP_MINUTES = 15
-const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
-const FROZEN_BEFORE_LANDING_MINUTES = 4
-const STABLE_DISTANCE_NM = 200
-const SUPERSTABLE_DISTANCE_NM = 90
 const FINAL_TRIGGER_RADIUS_NM = 10
 const FINAL_HEADING_TOLERANCE_DEGREES = 40
 const FINAL_BEARING_TOLERANCE_DEGREES = 35
 const LIVE_FINAL_REFRESH_MS = 30_000
-const PX_PER_MINUTE = 10
 
 const AIRPORT_REFERENCE: Record<'VTBD' | 'VTBS', { lat: number; lon: number }> = {
   VTBD: { lat: 13.9126, lon: 100.6068 },
@@ -31,7 +22,6 @@ type LiveFinalInfo = {
   airport: 'VTBD' | 'VTBS'
   callsign: string
   distanceNm: number
-  bkkDistanceNm: number
   bearingToAirport: number
   state: string
   heading: number | null
@@ -39,69 +29,6 @@ type LiveFinalInfo = {
 }
 
 const liveFinalByKey = new Map<string, LiveFinalInfo>()
-
-function parseClock(value: string) {
-  const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
-  if (!match) return null
-  const hours = Number(match[1])
-  const minutes = Number(match[2])
-  const seconds = Number(match[3] || 0)
-  if (hours > 23 || minutes > 59 || seconds > 59) return null
-  return { hours, minutes, seconds }
-}
-
-function forwardMinutes(fromHm: string, toHm: string) {
-  const from = parseClock(fromHm)
-  const to = parseClock(toHm)
-  if (!from || !to) return null
-
-  const fromSeconds = from.hours * 3600 + from.minutes * 60 + from.seconds
-  const toSeconds = to.hours * 3600 + to.minutes * 60 + to.seconds
-  const diffSeconds = (toSeconds - fromSeconds + 24 * 3600) % (24 * 3600)
-  const diffMinutes = diffSeconds / 60
-  return diffMinutes <= 180 ? diffMinutes : null
-}
-
-function parseHmNearNow(value: string, now: Date) {
-  const clock = parseClock(value)
-  if (!clock) return null
-  const candidate = new Date(now)
-  candidate.setUTCHours(clock.hours, clock.minutes, clock.seconds, 0)
-  const delta = candidate.getTime() - now.getTime()
-  if (delta < -12 * 60 * 60 * 1000) candidate.setUTCDate(candidate.getUTCDate() + 1)
-  if (delta > 12 * 60 * 60 * 1000) candidate.setUTCDate(candidate.getUTCDate() - 1)
-  return candidate.getTime()
-}
-
-function rowPredictedIawpMs(row: HTMLElement, now: Date) {
-  const title = row.getAttribute('title') || ''
-  const hm = title.match(/(?:ETA-FF|Predicted IAWP)\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
-  return hm ? parseHmNearNow(hm, now) : null
-}
-
-function rowTargetTtoHm(row: HTMLElement) {
-  const title = row.getAttribute('title') || ''
-  return title.match(/STA-FF\/TTO\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
-    || row.children.item(4)?.textContent?.trim()
-    || ''
-}
-
-function rowTargetTtoMs(row: HTMLElement, now: Date) {
-  const hm = rowTargetTtoHm(row)
-  return hm ? parseHmNearNow(hm, now) : null
-}
-
-function rowTargetTldtMs(row: HTMLElement, now: Date) {
-  const title = row.getAttribute('title') || ''
-  const hm = title.match(/STA\/TLDT\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
-  return hm ? parseHmNearNow(hm, now) : null
-}
-
-function rowHasManualTarget(row: HTMLElement) {
-  return row.classList.contains('is-stable')
-    || row.dataset.targetMode === 'MANUAL'
-    || row.querySelector('.runway-assignment.is-manual') != null
-}
 
 function toRadians(value: number) {
   return value * Math.PI / 180
@@ -144,123 +71,57 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  const match = text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)
-  return match?.[1] || null
+  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || null
 }
 
 function rowCallsign(row: HTMLElement) {
   return row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
 }
 
-function liveInfoForRow(row: HTMLElement) {
-  const airport = rowAirport(row)
-  const callsign = rowCallsign(row)
-  if (!airport || !callsign) return null
-  return liveFinalByKey.get(`${airport}:${callsign}`) || null
+function testTrafficEnabled() {
+  return document.querySelector('.aman-demo-toggle.is-active') != null
 }
 
-function isLiveTenNmFinal(row: HTMLElement) {
-  const airport = rowAirport(row)
-  const runway = rowRunway(row)
-  const info = liveInfoForRow(row)
-  if (!airport || !runway || !info || info.onGround === true || info.distanceNm > FINAL_TRIGGER_RADIUS_NM) return false
-
-  const expectedHeading = RUNWAY_FINAL_HEADING[`${airport}:${runway}`]
-  if (!Number.isFinite(expectedHeading)) return false
-
-  const stateLooksApproach = info.state === 'approach' || info.state === 'final'
-  const headingLooksFinal = info.heading != null
-    && headingDifference(info.heading, expectedHeading) <= FINAL_HEADING_TOLERANCE_DEGREES
-  const bearingLooksFinal = headingDifference(info.bearingToAirport, expectedHeading) <= FINAL_BEARING_TOLERANCE_DEGREES
-
-  const final = bearingLooksFinal && (stateLooksApproach || headingLooksFinal)
-  row.dataset.finalDistanceNm = info.distanceNm.toFixed(1)
-  row.dataset.finalTenNm = final ? 'true' : 'false'
-  return final
+function clearFinalData(row: HTMLElement) {
+  delete row.dataset.finalDistanceNm
+  row.dataset.finalTenNm = 'false'
 }
 
-function distanceFallbackStatus(row: HTMLElement): AmanFlightStatus | null {
-  const info = liveInfoForRow(row)
-  if (!info || info.onGround === true || !Number.isFinite(info.bkkDistanceNm)) return null
-
-  if (info.bkkDistanceNm <= SUPERSTABLE_DISTANCE_NM) return 'SUPERSTABLE'
-  if (info.bkkDistanceNm <= STABLE_DISTANCE_NM) return 'STABLE'
-  return 'UNSTABLE'
-}
-
-function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
-  const cells = row.children
-  const tldtHm = cells.item(0)?.textContent?.trim() || ''
-  const ttoHm = rowTargetTtoHm(row)
-  const nominalMinutes = forwardMinutes(ttoHm, tldtHm)
-
-  if (isLiveTenNmFinal(row)) return 'FROZEN'
-
-  if (rowHasManualTarget(row)) {
-    // After ATC intervention, the target time drives STABLE/SUPERSTABLE status.
-    // This deliberately lets a SUPERSTABLE flight be dragged back out to STABLE.
-    // Once manually stabilized it does not regress to UNSTABLE; STABLE is the
-    // outer manual band until the flight reaches FROZEN.
-    const targetLandingMs = rowTargetTldtMs(row, now)
-    if (targetLandingMs != null) {
-      const minutesToLanding = (targetLandingMs - now.getTime()) / 60_000
-      if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
+function applyLiveFinalData() {
+  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    // TEST TRAFFIC uses the same TLDT lifecycle engine as live traffic. It has no
+    // IVAO position sensor, so the 10 NM fallback is deliberately disabled there.
+    if (row.classList.contains('is-demo') || testTrafficEnabled()) {
+      clearFinalData(row)
+      return
     }
 
-    const targetIawpMs = rowTargetTtoMs(row, now)
-    if (targetIawpMs != null) {
-      const minutesToIawp = (targetIawpMs - now.getTime()) / 60_000
-      if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
-      return 'STABLE'
+    const airport = rowAirport(row)
+    const runway = rowRunway(row)
+    const callsign = rowCallsign(row)
+    if (!airport || !runway || !callsign) {
+      clearFinalData(row)
+      return
     }
-  }
 
-  // AUTO flights use the continuously recalculated natural ETA-FF.
-  const directPredictedIawpMs = rowPredictedIawpMs(row, now)
-  if (directPredictedIawpMs != null && nominalMinutes != null) {
-    const predictedLandingMs = directPredictedIawpMs + nominalMinutes * 60_000
-    const minutesToIawp = (directPredictedIawpMs - now.getTime()) / 60_000
-    const minutesToLanding = (predictedLandingMs - now.getTime()) / 60_000
+    const info = liveFinalByKey.get(`${airport}:${callsign}`)
+    const expectedHeading = RUNWAY_FINAL_HEADING[`${airport}:${runway}`]
+    if (!info || info.onGround === true || !Number.isFinite(expectedHeading)) {
+      clearFinalData(row)
+      return
+    }
 
-    if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
-    if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
-    if (minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
-    return 'UNSTABLE'
-  }
+    const stateLooksApproach = info.state === 'approach' || info.state === 'final'
+    const headingLooksFinal = info.heading != null
+      && headingDifference(info.heading, expectedHeading) <= FINAL_HEADING_TOLERANCE_DEGREES
+    const bearingLooksFinal = headingDifference(info.bearingToAirport, expectedHeading) <= FINAL_BEARING_TOLERANCE_DEGREES
+    const final = info.distanceNm <= FINAL_TRIGGER_RADIUS_NM
+      && bearingLooksFinal
+      && (stateLooksApproach || headingLooksFinal)
 
-  const distanceStatus = distanceFallbackStatus(row)
-  if (distanceStatus) return distanceStatus
-
-  const delayText = cells.item(5)?.textContent?.trim() || ''
-  const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
-  const delayMinutes = Number.parseFloat(delayText)
-  if (!Number.isFinite(offsetPx) || !Number.isFinite(delayMinutes) || nominalMinutes == null) return 'UNSTABLE'
-
-  const targetTldtMs = now.getTime() - (offsetPx / PX_PER_MINUTE) * 60_000
-  const targetTtoMs = targetTldtMs - nominalMinutes * 60_000
-  const predictedIawpMs = targetTtoMs - delayMinutes * 60_000
-  const predictedLandingMs = predictedIawpMs + nominalMinutes * 60_000
-  const minutesToIawp = (predictedIawpMs - now.getTime()) / 60_000
-  const minutesToLanding = (predictedLandingMs - now.getTime()) / 60_000
-
-  if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
-  if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
-  if (minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
-  return 'UNSTABLE'
-}
-
-function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
-  const className = `status-${status.toLowerCase()}`
-  if (element.dataset.flightStatus === status) return
-
-  element.classList.remove(
-    'status-unstable',
-    'status-stable',
-    'status-superstable',
-    'status-frozen',
-  )
-  element.classList.add(className)
-  element.dataset.flightStatus = status
+    row.dataset.finalDistanceNm = info.distanceNm.toFixed(1)
+    row.dataset.finalTenNm = final ? 'true' : 'false'
+  })
 }
 
 function updateManualLabels() {
@@ -278,39 +139,20 @@ function updateManualLabels() {
   })
 }
 
-function refreshFlightStatuses() {
-  const now = new Date()
-  const byCallsign = new Map<string, AmanFlightStatus>()
-
-  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    const status = rowFlightStatus(row, now)
-    applyStatusClass(row, status)
-
-    const callsign = row.querySelector('strong')?.textContent?.trim()
-    if (callsign) byCallsign.set(callsign, status)
-  })
-
-  document.querySelectorAll<HTMLElement>('.aman-inbound-row').forEach((row) => {
-    const callsignElement = row.querySelector<HTMLElement>('strong')
-    if (!callsignElement) return
-    const callsign = callsignElement.textContent?.trim() || ''
-    const status = byCallsign.get(callsign) || 'UNSTABLE'
-    applyStatusClass(callsignElement, status)
-  })
-
-  updateManualLabels()
+function updateInteractionHint() {
+  const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
+  if (hint) hint.textContent = 'DRAG = SET TARGET · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
 }
 
 function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
   if (!flight.callsign || !Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return null
   const reference = AIRPORT_REFERENCE[airport]
-  const latitude = flight.latitude as number
-  const longitude = flight.longitude as number
+  const latitude = Number(flight.latitude)
+  const longitude = Number(flight.longitude)
   return {
     airport,
     callsign: flight.callsign.trim().toUpperCase(),
     distanceNm: distanceNm(reference.lat, reference.lon, latitude, longitude),
-    bkkDistanceNm: distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, latitude, longitude),
     bearingToAirport: bearingDegrees(latitude, longitude, reference.lat, reference.lon),
     state: String(flight.state || '').trim().toLowerCase(),
     heading: Number.isFinite(flight.heading) ? Number(flight.heading) : null,
@@ -319,6 +161,12 @@ function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFli
 }
 
 async function refreshLiveFinalData() {
+  if (testTrafficEnabled()) {
+    liveFinalByKey.clear()
+    applyLiveFinalData()
+    return
+  }
+
   try {
     const results = await Promise.all((['VTBD', 'VTBS'] as const).map(async (airport) => {
       try {
@@ -335,30 +183,28 @@ async function refreshLiveFinalData() {
     for (const flight of results.flat()) {
       liveFinalByKey.set(`${flight.airport}:${flight.callsign}`, flight)
     }
-    refreshFlightStatuses()
+    applyLiveFinalData()
   } catch {
-    // Time-based lifecycle remains available when live final data fails.
+    // The shared lifecycle runtime still has the TLDT four-minute trigger.
   }
-}
-
-function updateInteractionHint() {
-  const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
-  if (hint) hint.textContent = 'DRAG = SET TARGET · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
 }
 
 export function installFlightStatusRuntime() {
   updateInteractionHint()
-  refreshFlightStatuses()
+  updateManualLabels()
+  applyLiveFinalData()
   void refreshLiveFinalData()
 
-  const statusTimer = window.setInterval(() => {
+  const uiTimer = window.setInterval(() => {
     updateInteractionHint()
-    refreshFlightStatuses()
+    updateManualLabels()
+    applyLiveFinalData()
   }, 1_000)
   const liveFinalTimer = window.setInterval(() => void refreshLiveFinalData(), LIVE_FINAL_REFRESH_MS)
 
   return () => {
-    window.clearInterval(statusTimer)
+    window.clearInterval(uiTimer)
     window.clearInterval(liveFinalTimer)
+    liveFinalByKey.clear()
   }
 }
