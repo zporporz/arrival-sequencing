@@ -33,6 +33,7 @@ import StaffNavdataAdmin from './StaffNavdataAdmin'
 import StaffAdminTools from './StaffAdminTools'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
+import { installEtaFfLifecycleRuntime } from './etaFfLifecycleRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
 import { installReconnectTrafficFetch, installReconnectUiRuntime } from './reconnectRecovery'
@@ -65,6 +66,7 @@ function AppWithRuntime() {
     const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
     const removeTimelineRuntime = installTimelineScrollableRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
+    const removeEtaFfLifecycleRuntime = installEtaFfLifecycleRuntime()
     const removeAirportScopeRuntime = installAirportScopeRuntime()
     const removeReconnectUiRuntime = installReconnectUiRuntime()
     const removeOnlinePresenceRuntime = installOnlinePresenceRuntime()
@@ -87,6 +89,7 @@ function AppWithRuntime() {
       removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
       removeFlightStatusRuntime()
+      removeEtaFfLifecycleRuntime()
       removeAirportScopeRuntime()
       removeReconnectUiRuntime()
       removeOnlinePresenceRuntime()
