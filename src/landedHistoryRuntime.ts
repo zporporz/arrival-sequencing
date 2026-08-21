@@ -15,8 +15,10 @@ type Payload = { flights?: LandedRecord[] }
 const STORAGE_KEY = 'aman-airport-display-sides-v1'
 const LIVE_POLL_MS = 15_000
 const RENDER_MS = 1_000
+const LANDED_MENU_CLASS = 'aman-landed-stage-menu'
 
 const testLandedByKey = new Map<string, LandedRecord>()
+const testMissedByKey = new Set<string>()
 
 function testTrafficEnabled() {
   return document.querySelector('.aman-demo-toggle.is-active') != null
@@ -93,15 +95,17 @@ function testRowRunway(row: HTMLElement) {
 }
 
 function collectTestLandings(nowMs: number) {
-  const activeKeys = new Set<string>()
-
   document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo').forEach((row) => {
     const airport = testRowAirport(row)
     const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
     if (!airport || !callsign) return
 
     const key = `${airport}:${callsign}`
-    activeKeys.add(key)
+    if (testMissedByKey.has(key)) {
+      delete row.dataset.testLanded
+      return
+    }
+
     const existing = testLandedByKey.get(key)
     if (existing) {
       row.dataset.testLanded = 'true'
@@ -114,9 +118,6 @@ function collectTestLandings(nowMs: number) {
       return
     }
 
-    // TEST TRAFFIC has no IVAO terminal-state sensor. Crossing TLDT creates one
-    // synthetic terminal observation so the same first-observation ALDT freeze and
-    // landed-history rendering can be exercised without touching production data.
     const landedAt = new Date(nowMs).toISOString()
     const aircraft = row.children.item(2)?.textContent?.trim().toUpperCase() || null
     const runway = testRowRunway(row)
@@ -134,36 +135,135 @@ function collectTestLandings(nowMs: number) {
     })
     row.dataset.testLanded = 'true'
   })
-
-  document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo[data-test-landed]').forEach((row) => {
-    const airport = testRowAirport(row)
-    const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
-    if (!airport || !callsign || !testLandedByKey.has(`${airport}:${callsign}`)) {
-      delete row.dataset.testLanded
-    }
-  })
-
-  // Records remain frozen for the configured history window even after the active
-  // synthetic row disappears. They are cleared only when TEST TRAFFIC is switched off.
-  void activeKeys
 }
 
 function clearTestLandings() {
   testLandedByKey.clear()
+  testMissedByKey.clear()
   document.querySelectorAll<HTMLElement>('.aman-flight-row[data-test-landed]').forEach((row) => {
     delete row.dataset.testLanded
   })
 }
 
-function buildRow(record: LandedRecord, side: DisplaySide, nowMs: number) {
+function closeLandedMenu() {
+  document.querySelector(`.${LANDED_MENU_CLASS}`)?.remove()
+}
+
+function showToast(message: string) {
+  let toast = document.querySelector<HTMLElement>('.aman-runtime-toast')
+  if (!toast) {
+    toast = document.createElement('div')
+    toast.className = 'aman-runtime-toast'
+    document.body.appendChild(toast)
+  }
+  toast.textContent = message
+  toast.classList.add('is-visible')
+  window.setTimeout(() => toast?.classList.remove('is-visible'), 2200)
+}
+
+async function writeMissedApproach(record: LandedRecord) {
+  const response = await fetch('/api/sequence/aman-state', {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      action: 'setOperationalState',
+      serviceDate: new Date().toISOString().slice(0, 10),
+      airport: record.airport,
+      callsign: record.callsign,
+      operationalState: 'MISSED_APPROACH',
+    }),
+  })
+  const payload = await response.json() as { error?: string }
+  if (!response.ok) throw new Error(payload.error || `AMAN API returned ${response.status}`)
+}
+
+async function dismissLiveLanded(record: LandedRecord) {
+  const response = await fetch('/api/sequence/landed-history', {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ action: 'dismissLanded', airport: record.airport, callsign: record.callsign }),
+  })
+  const payload = await response.json() as { error?: string }
+  if (!response.ok) throw new Error(payload.error || `Landed history API returned ${response.status}`)
+}
+
+function handleGoAround(record: LandedRecord, liveRecords: LandedRecord[], setLiveRecords: (rows: LandedRecord[]) => void) {
+  closeLandedMenu()
+  const key = `${record.airport}:${record.callsign}`
+  const isTest = String(record.snapshot?.source || '') === 'TEST_TRAFFIC'
+
+  if (isTest) {
+    testLandedByKey.delete(key)
+    testMissedByKey.add(key)
+    document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo').forEach((row) => {
+      if (testRowAirport(row) === record.airport && row.querySelector('strong')?.textContent?.trim().toUpperCase() === record.callsign) {
+        delete row.dataset.testLanded
+        row.dataset.testMissedApproach = 'true'
+      }
+    })
+    showToast(`${record.callsign}: TEST GO AROUND / MISSED APPROACH`)
+    return
+  }
+
+  void (async () => {
+    try {
+      // Mark MISSED first so the landed-history capture endpoint suppresses any new
+      // terminal observation while the aircraft is still near/on the runway.
+      await writeMissedApproach(record)
+      await dismissLiveLanded(record)
+      setLiveRecords(liveRecords.filter((row) => !(row.airport === record.airport && row.callsign === record.callsign)))
+      showToast(`${record.callsign}: MISSED APPROACH · awaiting airborne reinsert`)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error))
+    }
+  })()
+}
+
+function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords: LandedRecord[], setLiveRecords: (rows: LandedRecord[]) => void) {
+  closeLandedMenu()
+  const menu = document.createElement('div')
+  menu.className = `${LANDED_MENU_CLASS} aman-runtime-ops-menu`
+  menu.style.left = `${Math.min(x, window.innerWidth - 270)}px`
+  menu.style.top = `${Math.min(y, window.innerHeight - 260)}px`
+
+  const header = document.createElement('header')
+  header.innerHTML = `<strong>${record.callsign}</strong><span>${record.airport} · LANDED · ALDT ${formatHm(record.landed_at)}Z</span>`
+  menu.appendChild(header)
+
+  const section = document.createElement('div')
+  section.className = 'aman-runtime-ops-section'
+  section.textContent = 'LANDED STAGE'
+  menu.appendChild(section)
+
+  const ga = document.createElement('button')
+  ga.type = 'button'
+  ga.textContent = 'GO AROUND / MISSED APPROACH'
+  ga.addEventListener('click', (event) => {
+    event.stopPropagation()
+    handleGoAround(record, liveRecords, setLiveRecords)
+  })
+  menu.appendChild(ga)
+
+  const note = document.createElement('small')
+  note.textContent = 'ALDT is the first observed actual landing time. GA removes the landed record and moves the flight to MISSED APPROACH.'
+  menu.appendChild(note)
+  document.body.appendChild(menu)
+}
+
+function buildRow(record: LandedRecord, side: DisplaySide, nowMs: number, liveRecords: LandedRecord[], setLiveRecords: (rows: LandedRecord[]) => void) {
   const landedMs = new Date(record.landed_at).getTime()
   const row = document.createElement('div')
   row.className = 'aman-landed-history-row'
   row.dataset.landedKey = `${record.airport}:${record.callsign}:${record.landed_at}`
   row.dataset.displaySide = side
+  row.dataset.flightStatus = 'LANDED'
   row.dataset.landedSource = String(record.snapshot?.source || 'LIVE')
   row.style.setProperty('--landed-offset-px', `${Math.round((nowMs - landedMs) / 60_000 * TIMELINE_DISPLAY_PX_PER_MINUTE * 100) / 100}px`)
-  row.title = `LANDED · ${record.airport} · ${record.callsign} · ALDT ${formatHm(record.landed_at)}Z · FIRST OBSERVED`
+  row.title = `LANDED · ${record.airport} · ${record.callsign} · ALDT ${formatHm(record.landed_at)}Z · click/right-click for actions`
 
   const aldt = document.createElement('span')
   aldt.className = 'tldt'
@@ -182,6 +282,14 @@ function buildRow(record: LandedRecord, side: DisplaySide, nowMs: number) {
   const runway = document.createElement('em')
   runway.textContent = String(record.snapshot?.runway || (record.snapshot?.source === 'TEST_TRAFFIC' ? 'TEST' : 'LANDED'))
   row.append(aldt, callsign, aircraft, fix, actual, state, runway)
+
+  const open = (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    openLandedMenu(record, event.clientX, event.clientY, liveRecords, setLiveRecords)
+  }
+  row.addEventListener('click', open)
+  row.addEventListener('contextmenu', open)
   return row
 }
 
@@ -189,6 +297,7 @@ export function installLandedHistoryRuntime() {
   let disposed = false
   let liveRecords: LandedRecord[] = []
   let previousTestMode = false
+  const setLiveRecords = (rows: LandedRecord[]) => { liveRecords = rows; render() }
 
   const currentRecords = () => testTrafficEnabled()
     ? [...testLandedByKey.values()]
@@ -225,7 +334,7 @@ export function installLandedHistoryRuntime() {
       const key = `${record.airport}:${record.callsign}:${record.landed_at}`
       let row = layer.querySelector<HTMLElement>(`.aman-landed-history-row[data-landed-key="${CSS.escape(key)}"]`)
       if (!row) {
-        row = buildRow(record, sides[record.airport], nowMs)
+        row = buildRow(record, sides[record.airport], nowMs, liveRecords, setLiveRecords)
         layer.appendChild(row)
       }
       row.dataset.displaySide = sides[record.airport]
@@ -254,6 +363,12 @@ export function installLandedHistoryRuntime() {
     render()
   }
 
+  const closeOnOutside = (event: PointerEvent) => {
+    const menu = document.querySelector(`.${LANDED_MENU_CLASS}`)
+    if (menu && event.target instanceof Node && !menu.contains(event.target)) closeLandedMenu()
+  }
+
+  document.addEventListener('pointerdown', closeOnOutside, true)
   void refreshLive()
   render()
   const poll = window.setInterval(() => void refreshLive(), LIVE_POLL_MS)
@@ -263,6 +378,8 @@ export function installLandedHistoryRuntime() {
     disposed = true
     window.clearInterval(poll)
     window.clearInterval(renderTimer)
+    document.removeEventListener('pointerdown', closeOnOutside, true)
+    closeLandedMenu()
     clearTestLandings()
     document.querySelectorAll('.aman-landed-history-row').forEach((row) => row.remove())
   }
