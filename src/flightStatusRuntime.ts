@@ -86,6 +86,23 @@ function rowTargetTtoHm(row: HTMLElement) {
     || ''
 }
 
+function rowTargetTtoMs(row: HTMLElement, now: Date) {
+  const hm = rowTargetTtoHm(row)
+  return hm ? parseHmNearNow(hm, now) : null
+}
+
+function rowTargetTldtMs(row: HTMLElement, now: Date) {
+  const title = row.getAttribute('title') || ''
+  const hm = title.match(/STA\/TLDT\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
+  return hm ? parseHmNearNow(hm, now) : null
+}
+
+function rowHasManualTarget(row: HTMLElement) {
+  return row.classList.contains('is-stable')
+    || row.dataset.targetMode === 'MANUAL'
+    || row.querySelector('.runway-assignment.is-manual') != null
+}
+
 function toRadians(value: number) {
   return value * Math.PI / 180
 }
@@ -166,9 +183,6 @@ function distanceFallbackStatus(row: HTMLElement): AmanFlightStatus | null {
   const info = liveInfoForRow(row)
   if (!info || info.onGround === true || !Number.isFinite(info.bkkDistanceNm)) return null
 
-  // Source table lists these as approximate BKK VOR distance bands (based on 480 kt).
-  // Use them only when the ETA/IAWP timing metadata is unavailable; timing remains the
-  // primary lifecycle trigger so slower/faster aircraft are not forced into a wrong band.
   if (info.bkkDistanceNm <= SUPERSTABLE_DISTANCE_NM) return 'SUPERSTABLE'
   if (info.bkkDistanceNm <= STABLE_DISTANCE_NM) return 'STABLE'
   return 'UNSTABLE'
@@ -177,21 +191,31 @@ function distanceFallbackStatus(row: HTMLElement): AmanFlightStatus | null {
 function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
   const cells = row.children
   const tldtHm = cells.item(0)?.textContent?.trim() || ''
-  // The timeline display can show a lifecycle-controlled ETA-FF instead of TTO.
-  // Always recover the target TTO from immutable React title metadata so status
-  // classification is independent of whichever clock is currently rendered.
   const ttoHm = rowTargetTtoHm(row)
   const nominalMinutes = forwardMinutes(ttoHm, tldtHm)
 
-  // MAESTRO source: Frozen = 4 minutes before landing, or approximately 10 NM final.
-  // The live 10 NM detector is an independent positional trigger.
   if (isLiveTenNmFinal(row)) return 'FROZEN'
 
-  // MAESTRO source timing thresholds:
-  // Stable      = 15 min before IAWP / Feeder Fix
-  // Superstable =  5 min before IAWP / Feeder Fix
-  // Frozen      =  4 min before predicted landing
-  // Use ETA-FF (natural prediction), never the manually dragged target, for lifecycle.
+  if (rowHasManualTarget(row)) {
+    // After ATC intervention, the target time drives STABLE/SUPERSTABLE status.
+    // This deliberately lets a SUPERSTABLE flight be dragged back out to STABLE.
+    // Once manually stabilized it does not regress to UNSTABLE; STABLE is the
+    // outer manual band until the flight reaches FROZEN.
+    const targetLandingMs = rowTargetTldtMs(row, now)
+    if (targetLandingMs != null) {
+      const minutesToLanding = (targetLandingMs - now.getTime()) / 60_000
+      if (minutesToLanding <= FROZEN_BEFORE_LANDING_MINUTES) return 'FROZEN'
+    }
+
+    const targetIawpMs = rowTargetTtoMs(row, now)
+    if (targetIawpMs != null) {
+      const minutesToIawp = (targetIawpMs - now.getTime()) / 60_000
+      if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
+      return 'STABLE'
+    }
+  }
+
+  // AUTO flights use the continuously recalculated natural ETA-FF.
   const directPredictedIawpMs = rowPredictedIawpMs(row, now)
   if (directPredictedIawpMs != null && nominalMinutes != null) {
     const predictedLandingMs = directPredictedIawpMs + nominalMinutes * 60_000
@@ -204,12 +228,9 @@ function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
     return 'UNSTABLE'
   }
 
-  // Source-backed approximate distance bands are a fallback only.
   const distanceStatus = distanceFallbackStatus(row)
   if (distanceStatus) return distanceStatus
 
-  // Last-resort fallback for a row that has neither usable ETA-FF metadata nor live
-  // BKK-distance data. Reconstruct the natural prediction from target + displayed delay.
   const delayText = cells.item(5)?.textContent?.trim() || ''
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   const delayMinutes = Number.parseFloat(delayText)
