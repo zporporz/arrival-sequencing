@@ -37,8 +37,6 @@ export type AmanSequenceConfig = {
   ) => number
 }
 
-// Final approach spacing working rules supplied for the Thailand AMAN model.
-// X following Y means X is the follower and Y is the leader.
 const FINAL_APPROACH_SPACING = {
   B_BEHIND_B_SECONDS: 2 * 60,
   OTHER_BEHIND_B_SECONDS: 4 * 60,
@@ -47,9 +45,6 @@ const FINAL_APPROACH_SPACING = {
   CD_BEHIND_A_NM: 12,
 } as const
 
-// TEST TRAFFIC exercises the same pair-separation resolver as live traffic without
-// waiting for an async SimBrief lookup. This mapping is used only for `demo:` rows;
-// it never populates the live aircraft-performance cache.
 const DEMO_PERFORMANCE_CATEGORY_BY_TYPE: Readonly<Record<string, AircraftPerformanceCategory>> = {
   A320: 'C',
   A321: 'C',
@@ -59,15 +54,12 @@ const DEMO_PERFORMANCE_CATEGORY_BY_TYPE: Readonly<Record<string, AircraftPerform
   B763: 'D',
 }
 
-// AppMaestroV24 creates the eight synthetic rows from these original natural-landing
-// offsets. Recover the common test anchor from each prediction, then spread ETA-FF
-// across the lifecycle bands. This keeps the scenario deterministic while allowing
-// UNSTABLE, STABLE, SUPERSTABLE and FROZEN to be tested in one run.
 const DEMO_ORIGINAL_LANDING_OFFSET_MINUTES = [8, 8.5, 9, 9.5, 10, 11, 13, 16] as const
 const DEMO_ETA_FF_OFFSET_MINUTES = [26, 20, 16, 12, 8, 4, 2, null] as const
 const DEMO_FROZEN_LANDING_OFFSET_MINUTES = 3
 
 const manualSequenceOrder = new Map<string, number>()
+const controllerDelayBaselineById = new Map<string, number>()
 
 export function amanSequenceOrderIdentity(airport: string, callsign: string) {
   return `${airport.trim().toUpperCase()}:${callsign.trim().toUpperCase()}`
@@ -121,25 +113,45 @@ function lifecycleTestPrediction(arrival: AmanArrivalPrediction): AmanArrivalPre
 }
 
 /**
- * Calculate timeline metrics for one planned landing target.
+ * Delay is strictly a planning value created by controller target movement.
  *
- * Delay is a controller-planning value, not a live-performance error. The caller may
- * supply the TLDT that existed when ATC took control of the flight. If no planning
- * baseline is supplied (AUTO sequencing), the current target is its own baseline and
- * TDLY is therefore zero even when live ETA-FF/trajectory changes or automatic
- * separation moves the AUTO target.
+ * During the post-AUTO cascade pass, `arrival` is an AmanSequenceRow and therefore
+ * contains the current AUTO TLDT. The first time the requested target differs from
+ * that AUTO TLDT, capture the AUTO value as the controller baseline. That baseline
+ * survives later live ETA-FF / AUTO TLDT changes, so vectoring or speed variation
+ * cannot manufacture or erase TDLY. When the requested target returns to AUTO, the
+ * baseline is cleared and TDLY returns to zero.
  */
 export function calculateArrivalMetrics(
   arrival: AmanArrivalPrediction,
   targetLandingAt: string,
-  planningBaselineLandingAt: string = targetLandingAt,
+  planningBaselineLandingAt?: string,
 ): Omit<AmanSequenceRow, 'sequenceIndex' | 'autoShiftSeconds'> {
   const predictedIawpMs = toMillis(arrival.predictedIawpAt)
   const targetLandingMs = toMillis(targetLandingAt)
-  const planningBaselineLandingMs = toMillis(planningBaselineLandingAt)
   const nominalMs = Math.max(0, arrival.nominalStarSeconds) * 1000
   const naturalLandingMs = predictedIawpMs + nominalMs
   const ttoMs = targetLandingMs - nominalMs
+
+  let planningBaselineLandingMs = planningBaselineLandingAt
+    ? toMillis(planningBaselineLandingAt)
+    : targetLandingMs
+
+  const currentAutoTldt = (arrival as Partial<AmanSequenceRow>).tldt
+  if (!planningBaselineLandingAt && currentAutoTldt) {
+    const currentAutoMs = toMillis(currentAutoTldt)
+    const differsFromAuto = Math.abs(targetLandingMs - currentAutoMs) > 500
+
+    if (differsFromAuto) {
+      const existingBaseline = controllerDelayBaselineById.get(arrival.id)
+      planningBaselineLandingMs = existingBaseline ?? currentAutoMs
+      if (existingBaseline == null) controllerDelayBaselineById.set(arrival.id, currentAutoMs)
+    } else {
+      controllerDelayBaselineById.delete(arrival.id)
+      planningBaselineLandingMs = targetLandingMs
+    }
+  }
+
   const delaySeconds = Math.round((targetLandingMs - planningBaselineLandingMs) / 1000)
   const delayMinutes = delaySeconds / 60
 
@@ -174,11 +186,6 @@ function performanceCategory(arrival: Pick<AmanArrivalPrediction, 'aircraftType'
   return cachedAircraftPerformanceCategory(arrival.aircraftType)
 }
 
-/**
- * Returns the special final-approach spacing for the pair. A positive value replaces
- * normal LAND SEP for that listed pair. Zero means no special rule, so LAND SEP applies.
- * NM rules are converted to timeline seconds at the AMAN 140 kt final reference speed.
- */
 export function finalApproachSpecialSeparationSeconds(
   leader: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
   follower: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
@@ -208,10 +215,6 @@ export function finalApproachSpecialSeparationSeconds(
   return 0
 }
 
-/**
- * One source of truth for pair spacing everywhere in the HMI. Listed final-approach
- * rules replace LAND SEP; otherwise the supplied landing separation is preserved.
- */
 export function resolveAmanPairwiseSeparationSeconds(
   leader: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
   follower: Pick<AmanArrivalPrediction, 'aircraftType' | 'performanceCategory'>,
@@ -281,8 +284,6 @@ export function autoSequenceUnstableArrivals(
         targetLandingMs = Math.max(targetLandingMs, earliestAllowedMs)
       }
 
-      // AUTO sequencing establishes the planning baseline. It may move TLDT for
-      // separation, but it must not manufacture controller delay on its own.
       const targetLandingAt = toIso(targetLandingMs)
       const metrics = calculateArrivalMetrics(arrival, targetLandingAt, targetLandingAt)
       const row: AmanSequenceRow = {
