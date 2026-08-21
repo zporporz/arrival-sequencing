@@ -34,6 +34,7 @@ import StaffAdminTools from './StaffAdminTools'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installEtaFfLifecycleRuntime } from './etaFfLifecycleRuntime'
+import { installTestTrafficIsolationRuntime } from './testTrafficIsolationRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
 import { installReconnectTrafficFetch, installReconnectUiRuntime } from './reconnectRecovery'
@@ -63,6 +64,9 @@ function adminRoute() {
 
 function AppWithRuntime() {
   useEffect(() => {
+    // Install isolation first so synthetic TEST TRAFFIC can exercise the same local
+    // handlers without writing fake callsigns into production shared flight state.
+    const removeTestTrafficIsolationRuntime = installTestTrafficIsolationRuntime()
     const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
     const removeTimelineRuntime = installTimelineScrollableRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
@@ -107,6 +111,7 @@ function AppWithRuntime() {
       removeStaffNavdataLinkRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
+      removeTestTrafficIsolationRuntime()
     }
   }, [])
 
