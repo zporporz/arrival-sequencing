@@ -1,6 +1,6 @@
 export const VTBS_STAR19_NOMINAL_MINUTES = {
   LEBIM: 21,
-  DOLNI: 20,
+  TUMGA: 20,
   EASTE: 19,
   WILLA: 21,
   NORTA: 20,
@@ -8,7 +8,7 @@ export const VTBS_STAR19_NOMINAL_MINUTES = {
 
 export const VTBS_STAR01_NOMINAL_MINUTES = {
   LEBIM: 20,
-  DOLNI: 17,
+  TUMGA: 17,
   EASTE: 19,
   WILLA: 24,
   NORTA: 22,
