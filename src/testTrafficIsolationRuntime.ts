@@ -16,6 +16,7 @@ type SharedStateDetail = {
 
 const SHARED_STATE_EVENT = 'aman:shared-state'
 const AMAN_STATE_PATH = '/api/sequence/aman-state'
+const SHARED_GUARD_MS = 250
 const TEST_FLIGHT_ACTIONS = new Set([
   'setManualTarget',
   'clearManualTarget',
@@ -116,6 +117,7 @@ function fakeSuccess(body: Record<string, unknown>) {
 
 export function installTestTrafficIsolationRuntime() {
   const originalFetch = window.fetch.bind(window)
+  let latestSharedState: SharedStateDetail | undefined
 
   const isolatedFetch: typeof window.fetch = async (input, init) => {
     if (!testTrafficEnabled()) return originalFetch(input, init)
@@ -153,12 +155,21 @@ export function installTestTrafficIsolationRuntime() {
   window.fetch = isolatedFetch
 
   const onSharedState = (event: Event) => {
-    protectDemoStateFromSharedApply((event as CustomEvent<SharedStateDetail>).detail)
+    latestSharedState = (event as CustomEvent<SharedStateDetail>).detail
+    protectDemoStateFromSharedApply(latestSharedState)
   }
   window.addEventListener(SHARED_STATE_EVENT, onSharedState)
 
+  // The shared runtime re-applies state every second. Keep the latest revisions stamped
+  // on newly rendered TEST rows/config blocks for the whole time TEST mode is active.
+  const guardTimer = window.setInterval(() => {
+    protectDemoStateFromSharedApply(latestSharedState)
+  }, SHARED_GUARD_MS)
+
   return () => {
+    window.clearInterval(guardTimer)
     window.removeEventListener(SHARED_STATE_EVENT, onSharedState)
+    latestSharedState = undefined
     if (window.fetch === isolatedFetch) window.fetch = originalFetch
   }
 }
