@@ -30,12 +30,11 @@ type DragState = {
 }
 
 const FALLBACK_ROW_HEIGHT_PX = 18
-const VISUAL_SNAP_PX = 12
-const MIN_VISUAL_GAP_PX = 0
 const RESIDUAL_TOLERANCE_PX = 3
+const MIN_VISUAL_GAP_PX = 0
 
-// Visual-only residual created when the controller keeps pulling after the real TLDT
-// has already been constrained by separation/cascade. It never changes sequencing math.
+// Presentation-only offset used only after the real TLDT has been constrained by
+// separation/cascade. The real sequence time never reads this value.
 const visualResidualByKey = new Map<string, number>()
 
 function reactProps<T>(element: Element): T | null {
@@ -62,8 +61,6 @@ function rowIdealDisplayOffset(row: HTMLElement) {
 }
 
 function rowCurrentDisplayOffset(row: HTMLElement) {
-  const value = Number.parseFloat(row.style.getPropertyValue('--display-offset-px'))
-  if (Number.isFinite(value)) return value
   const ideal = rowIdealDisplayOffset(row)
   if (ideal == null) return null
   const key = rowKey(row)
@@ -92,75 +89,63 @@ function findRow(key: string) {
   return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).find((row) => rowKey(row) === key) ?? null
 }
 
-function sameSideRows(row: HTMLElement) {
+function orderedSideRows(row: HTMLElement) {
   const side = rowDisplaySide(row)
-  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).filter((candidate) =>
-    candidate !== row && rowDisplaySide(candidate) === side,
-  )
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
+    .filter((candidate) => rowDisplaySide(candidate) === side && rowIdealDisplayOffset(candidate) != null)
+    .sort((left, right) => (rowIdealDisplayOffset(left) ?? 0) - (rowIdealDisplayOffset(right) ?? 0))
+}
+
+function adjacentRows(row: HTMLElement) {
+  const ordered = orderedSideRows(row)
+  const index = ordered.indexOf(row)
+  return {
+    before: index > 0 ? ordered[index - 1] : null,
+    after: index >= 0 && index < ordered.length - 1 ? ordered[index + 1] : null,
+  }
 }
 
 function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
   const activeKeys = new Set<string>()
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    if (row === exceptRow) return
-    const ideal = rowIdealDisplayOffset(row)
     const key = rowKey(row)
-    if (ideal == null || !key) return
+    const ideal = rowIdealDisplayOffset(row)
+    if (!key || ideal == null) return
     activeKeys.add(key)
+    if (row === exceptRow) return
     setDisplayOffset(row, ideal + (visualResidualByKey.get(key) ?? 0), ideal)
   })
 
   for (const key of visualResidualByKey.keys()) {
-    if (!activeKeys.has(key) && key !== (exceptRow ? rowKey(exceptRow) : '')) visualResidualByKey.delete(key)
+    if (!activeKeys.has(key)) visualResidualByKey.delete(key)
   }
 }
 
-function nearestTouchPosition(row: HTMLElement, requested: number) {
-  let best = requested
-  let distance = VISUAL_SNAP_PX + 0.001
+function clampToAdjacentBlock(row: HTMLElement, requested: number, physicalDelta: number) {
+  const ideal = rowIdealDisplayOffset(row)
+  if (ideal == null) return requested
 
-  for (const other of sameSideRows(row)) {
-    const otherOffset = rowCurrentDisplayOffset(other)
-    if (otherOffset == null) continue
-    const spacing = minimumSpacing(row, other)
-    for (const candidate of [otherOffset - spacing, otherOffset + spacing]) {
-      const candidateDistance = Math.abs(requested - candidate)
-      if (candidateDistance < distance) {
-        best = candidate
-        distance = candidateDistance
-      }
-    }
+  const { before, after } = adjacentRows(row)
+  let minimum = Number.NEGATIVE_INFINITY
+  let maximum = Number.POSITIVE_INFINITY
+
+  if (before) {
+    const offset = rowCurrentDisplayOffset(before)
+    if (offset != null) minimum = offset + minimumSpacing(before, row)
+  }
+  if (after) {
+    const offset = rowCurrentDisplayOffset(after)
+    if (offset != null) maximum = offset - minimumSpacing(row, after)
   }
 
-  return distance <= VISUAL_SNAP_PX ? best : requested
-}
+  // Normal compacting never crosses the adjacent flight. Repeating the same drag
+  // therefore cannot accumulate more offset once block edge touches block edge.
+  const clamped = Math.min(maximum, Math.max(minimum, requested))
 
-function avoidVisualOverlap(row: HTMLElement, requested: number, physicalDelta: number) {
-  let candidate = requested
-  const others = sameSideRows(row)
-  const movingUp = physicalDelta < 0
-
-  for (let pass = 0; pass < others.length + 2; pass += 1) {
-    let changed = false
-    for (const other of others) {
-      const otherOffset = rowCurrentDisplayOffset(other)
-      if (otherOffset == null) continue
-      const spacing = minimumSpacing(row, other)
-      if (Math.abs(candidate - otherOffset) >= spacing - 0.25) continue
-
-      // When approaching a strip from below/upward, stop directly below it. When
-      // approaching from above/downward, stop directly above it. Reordering itself
-      // is still handled by the real TLDT drag/cascade path.
-      candidate = movingUp ? otherOffset + spacing : otherOffset - spacing
-      changed = true
-    }
-    if (!changed) break
-  }
-  return candidate
-}
-
-function compactDropPosition(row: HTMLElement, requested: number, physicalDelta: number) {
-  return avoidVisualOverlap(row, nearestTouchPosition(row, requested), physicalDelta)
+  // If the surrounding visual stack has no room, keep the strip on the nearest legal
+  // edge in the direction the controller is pulling instead of flipping through it.
+  if (minimum > maximum) return physicalDelta < 0 ? maximum : minimum
+  return clamped
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -192,9 +177,8 @@ export function installTimelineDisplayScaleRuntime() {
     })
   }
 
-  // Normal drag always continues to drive the original TLDT/sequence logic. If the
-  // target later gets held apart by SEP/cascade, the pointer's extra travel is kept as
-  // a presentation-only residual so the controller can visually join the strips.
+  // Normal drag always drives the original TLDT logic. Presentation compaction is
+  // resolved only after React/cascade has produced the legal target time.
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
@@ -243,9 +227,6 @@ export function installTimelineDisplayScaleRuntime() {
     const finished = drag
     drag = null
 
-    // React/cascade completes on pointer-up. Read the resulting real TLDT position only
-    // after that render, then preserve only the part of the pointer movement that the
-    // real timeline could not follow because of separation/cascade constraints.
     window.setTimeout(() => {
       window.requestAnimationFrame(() => {
         if (disposed) return
@@ -257,7 +238,10 @@ export function installTimelineDisplayScaleRuntime() {
         const ideal = rowIdealDisplayOffset(row)
         if (ideal == null) return
 
-        const desired = compactDropPosition(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
+        // Crucially, clamp against the row's current adjacent sequence neighbours.
+        // This makes touching the hard visual limit: no overlap, no repeated-drag
+        // accumulation, and no accidental visual crossing/swap.
+        const desired = clampToAdjacentBlock(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
         const residual = desired - ideal
         if (Math.abs(residual) <= RESIDUAL_TOLERANCE_PX) visualResidualByKey.delete(finished.key)
         else visualResidualByKey.set(finished.key, residual)
