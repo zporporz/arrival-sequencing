@@ -12,7 +12,7 @@ AMAN / MAESTRO-style arrival sequencing prototype for IVAO Thailand.
 
 ## Current status — 21 Aug 2026
 
-The live and TEST TRAFFIC paths now share the same sequencing, manual-target, separation, lifecycle, TLDT-freeze and landed-history logic. TEST TRAFFIC supplies deterministic synthetic inputs while its flight and workspace changes remain isolated from production shared state.
+The live and TEST TRAFFIC paths share the same sequencing, manual-target, separation, lifecycle, TLDT protection and landed-history logic. TEST TRAFFIC supplies deterministic synthetic inputs while its flight and workspace changes remain isolated from production shared state.
 
 Primary project reference for the broader MAESTRO alignment remains:
 
@@ -111,7 +111,7 @@ One lifecycle runtime is used for both live and TEST TRAFFIC rows.
 - Approximately 5 minutes before the Feeder Fix.
 - The current TLDT / target is protected from later automatic ETA refresh and cascade movement.
 - Live ETA-FF continues in the background, so delay remains dynamic.
-- ATC may still drag the target.
+- ATC may still drag the target repeatedly.
 - If the new target no longer meets the SUPERSTABLE condition, the flight returns to STABLE while retaining ATC target ownership.
 
 ## FROZEN
@@ -123,10 +123,11 @@ FROZEN is entered when either condition is met:
 
 After entry:
 
-- FROZEN is sticky until the active row leaves the sequence.
-- TLDT is fixed at the value captured at the gate.
-- Automatic ETA refresh and cascade cannot move that TLDT.
-- Drag, double-click target reset and runway editing are blocked for that row.
+- FROZEN remains the lifecycle state until the active row leaves the sequence.
+- The current TLDT is protected from automatic ETA refresh and cascade movement.
+- **ATC may still drag the FROZEN target manually in both LIVE and TEST modes.** Each intentional drag replaces the protected TLDT.
+- Automatic calculation/cascade cannot overwrite the controller's latest FROZEN TLDT.
+- Double-click return-to-AUTO and runway editing remain blocked while FROZEN.
 
 TEST TRAFFIC has no real radar position, so it uses the same **TLDT minus four minutes** gate but deliberately does not fabricate the 10 NM positional sensor.
 
@@ -162,7 +163,7 @@ It uses the same code paths as live traffic for:
 - UNSTABLE → STABLE → SUPERSTABLE → FROZEN lifecycle;
 - SUPERSTABLE target protection;
 - TLDT four-minute FROZEN gate;
-- FROZEN edit blocking;
+- manual FROZEN target movement with automatic movement still protected;
 - landed-history row construction and fixed first-observed ALDT behavior.
 
 The eight synthetic rows are distributed across all four lifecycle bands at test start: three UNSTABLE examples, two STABLE examples, two SUPERSTABLE examples and one FROZEN example. Their shared scenario anchor remains fixed, so the rows progress through the lifecycle as UTC time advances instead of sliding forward indefinitely.
@@ -195,7 +196,7 @@ TEST TRAFFIC flight-specific AMAN requests and runway-workspace sync requests ar
 ## Manual sequence
 
 - Drag sets a manual / controlled landing target.
-- Repeated drag remains available in STABLE and SUPERSTABLE.
+- Repeated drag remains available in STABLE, SUPERSTABLE and FROZEN.
 - Double-click returns a non-FROZEN flight to AUTO.
 - Manual runway assignment uses the same cascade and conflict logic as AUTO.
 - Separation conflicts are checked after same-runway and cross-runway processing.
