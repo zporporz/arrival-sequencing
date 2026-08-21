@@ -139,7 +139,9 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
   const targetLanding = targetTldtMs(row, now)
   const finalTenNm = row.dataset.finalTenNm === 'true'
   if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
-    const frozen = superstableTldtByKey.get(key) ?? targetLanding
+    // Use the latest rendered TLDT first so an intentional SUPERSTABLE drag into
+    // the four-minute gate freezes the new target, not the previous protected one.
+    const frozen = targetLanding ?? superstableTldtByKey.get(key)
     if (frozen != null) frozenTldtByKey.set(key, frozen)
     superstableTldtByKey.delete(key)
     return 'FROZEN'
@@ -323,7 +325,7 @@ function refreshRows() {
   }
 }
 
-function blockFrozenPointer(event: PointerEvent) {
+function blockFrozenPointer(event: Event) {
   if (!(event.target instanceof Element)) return
   const row = event.target.closest<HTMLElement>('.aman-flight-row')
   if (!row || row.dataset.flightStatus !== 'FROZEN') return
