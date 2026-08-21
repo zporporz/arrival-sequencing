@@ -25,6 +25,7 @@ type DragOrderState = {
   runway: string
   startY: number
   startTargetMs: number
+  allowReorder: boolean
   moved: boolean
 }
 
@@ -106,7 +107,7 @@ function currentGroupOrder(airport: string, runway: string) {
 }
 
 function updateDragOrder(requestedTargetMs: number) {
-  if (!drag) return
+  if (!drag || !drag.allowReorder) return
   const overrides = new Map<string, number>([[drag.identity, requestedTargetMs]])
   const next = orderFromTargets(drag.airport, drag.runway, overrides)
   if (!next.length) return
@@ -206,12 +207,13 @@ export function installManualSequenceReorderRuntime() {
       runway,
       startY: event.clientY,
       startTargetMs: targetMs,
+      allowReorder: event.altKey,
       moved: false,
     }
   }
 
   const onPointerMove = (event: PointerEvent) => {
-    if (!drag || drag.pointerId !== event.pointerId) return
+    if (!drag || drag.pointerId !== event.pointerId || !drag.allowReorder) return
     const deltaY = event.clientY - drag.startY
     if (Math.abs(deltaY) <= MOVE_TOLERANCE_PX) return
     drag.moved = true
@@ -223,7 +225,7 @@ export function installManualSequenceReorderRuntime() {
     if (!drag || drag.pointerId !== event.pointerId) return
     const finished = drag
     drag = null
-    if (finished.moved) reconcileGroupAfterRender(finished.airport, finished.runway)
+    if (finished.allowReorder && finished.moved) reconcileGroupAfterRender(finished.airport, finished.runway)
   }
 
   const onDoubleClick = (event: MouseEvent) => {
