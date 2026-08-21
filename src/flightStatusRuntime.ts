@@ -1,18 +1,4 @@
 import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
-import { primeAircraftPerformanceCategoryCache } from './core/aircraftPerformanceCategory'
-
-// Module imports run before React mounts. Seed the synthetic airframes here so TEST
-// TRAFFIC reaches the exact same pairwise separation resolver on its first render.
-// Live predictions still carry SimBrief `per` directly and therefore take precedence.
-primeAircraftPerformanceCategoryCache({
-  C208: 'A',
-  AT76: 'B',
-  A320: 'C',
-  A321: 'C',
-  B738: 'C',
-  A388: 'D',
-  B763: 'D',
-})
 
 const FINAL_TRIGGER_RADIUS_NM = 10
 const FINAL_HEADING_TOLERANCE_DEGREES = 40
