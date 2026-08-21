@@ -1,4 +1,4 @@
-import { TIMELINE_DISPLAY_PX_PER_MINUTE } from './timelineScale'
+import { TIMELINE_DISPLAY_PX_PER_MINUTE, TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
 
 type AirportCode = 'VTBD' | 'VTBS'
 type DisplaySide = 'LEFT' | 'RIGHT'
@@ -12,13 +12,53 @@ type LandedRecord = {
 
 type Payload = { flights?: LandedRecord[] }
 
+type FakePointerEvent = {
+  button: number
+  preventDefault: () => void
+  currentTarget: {
+    setPointerCapture: (pointerId: number) => void
+    hasPointerCapture: (pointerId: number) => boolean
+    releasePointerCapture: (pointerId: number) => void
+  }
+  pointerId: number
+  clientY: number
+}
+
+type ReactRowProps = {
+  onPointerDown?: (event: FakePointerEvent) => void
+  onPointerMove?: (event: FakePointerEvent) => void
+  onPointerUp?: (event: FakePointerEvent) => void
+}
+
 const STORAGE_KEY = 'aman-airport-display-sides-v1'
 const LIVE_POLL_MS = 15_000
 const RENDER_MS = 1_000
 const LANDED_MENU_CLASS = 'aman-landed-stage-menu'
+const MISSED_APPROACH_OFFSET_MS = 10 * 60_000
+const POINTER_ID = 70425
 
 const testLandedByKey = new Map<string, LandedRecord>()
 const testMissedByKey = new Set<string>()
+
+function reactProps<T>(element: Element): T | null {
+  const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
+  if (!key) return null
+  return (element as unknown as Record<string, unknown>)[key] as T
+}
+
+function fakePointer(clientY: number): FakePointerEvent {
+  return {
+    button: 0,
+    preventDefault: () => {},
+    currentTarget: {
+      setPointerCapture: () => {},
+      hasPointerCapture: () => false,
+      releasePointerCapture: () => {},
+    },
+    pointerId: POINTER_ID,
+    clientY,
+  }
+}
 
 function testTrafficEnabled() {
   return document.querySelector('.aman-demo-toggle.is-active') != null
@@ -94,6 +134,25 @@ function testRowRunway(row: HTMLElement) {
   return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || null
 }
 
+function findTestFlightRow(record: LandedRecord) {
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo')).find((row) =>
+    testRowAirport(row) === record.airport
+      && row.querySelector('strong')?.textContent?.trim().toUpperCase() === record.callsign,
+  ) ?? null
+}
+
+function applyTestTarget(row: HTMLElement, targetMs: number) {
+  const currentMs = testRowTldtMs(row, Date.now())
+  const props = reactProps<ReactRowProps>(row)
+  if (currentMs == null || !props?.onPointerDown || !props.onPointerMove || !props.onPointerUp) return false
+  const deltaMinutes = (targetMs - currentMs) / 60_000
+  const y = -deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE
+  props.onPointerDown(fakePointer(0))
+  props.onPointerMove(fakePointer(y))
+  props.onPointerUp(fakePointer(y))
+  return true
+}
+
 function collectTestLandings(nowMs: number) {
   document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo').forEach((row) => {
     const airport = testRowAirport(row)
@@ -142,6 +201,7 @@ function clearTestLandings() {
   testMissedByKey.clear()
   document.querySelectorAll<HTMLElement>('.aman-flight-row[data-test-landed]').forEach((row) => {
     delete row.dataset.testLanded
+    delete row.dataset.testMissedApproach
   })
 }
 
@@ -161,22 +221,31 @@ function showToast(message: string) {
   window.setTimeout(() => toast?.classList.remove('is-visible'), 2200)
 }
 
-async function writeMissedApproach(record: LandedRecord) {
+function missedTargetMs(record: LandedRecord) {
+  const landedMs = new Date(record.landed_at).getTime()
+  return (Number.isFinite(landedMs) ? landedMs : Date.now()) + MISSED_APPROACH_OFFSET_MS
+}
+
+async function writeMissedApproachTarget(record: LandedRecord) {
+  const runway = String(record.snapshot?.runway || '').trim().toUpperCase() || null
+  const targetMs = missedTargetMs(record)
   const response = await fetch('/api/sequence/aman-state', {
     method: 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      action: 'setOperationalState',
+      action: 'setMissedApproachTarget',
       serviceDate: new Date().toISOString().slice(0, 10),
       airport: record.airport,
       callsign: record.callsign,
-      operationalState: 'MISSED_APPROACH',
+      manualTldt: new Date(targetMs).toISOString(),
+      manualRunway: runway,
     }),
   })
   const payload = await response.json() as { error?: string }
   if (!response.ok) throw new Error(payload.error || `AMAN API returned ${response.status}`)
+  return targetMs
 }
 
 async function dismissLiveLanded(record: LandedRecord) {
@@ -195,28 +264,27 @@ function handleGoAround(record: LandedRecord, liveRecords: LandedRecord[], setLi
   closeLandedMenu()
   const key = `${record.airport}:${record.callsign}`
   const isTest = String(record.snapshot?.source || '') === 'TEST_TRAFFIC'
+  const targetMs = missedTargetMs(record)
 
   if (isTest) {
+    const row = findTestFlightRow(record)
     testLandedByKey.delete(key)
     testMissedByKey.add(key)
-    document.querySelectorAll<HTMLElement>('.aman-flight-row.is-demo').forEach((row) => {
-      if (testRowAirport(row) === record.airport && row.querySelector('strong')?.textContent?.trim().toUpperCase() === record.callsign) {
-        delete row.dataset.testLanded
-        row.dataset.testMissedApproach = 'true'
-      }
-    })
-    showToast(`${record.callsign}: TEST GO AROUND / MISSED APPROACH`)
+    if (row) {
+      delete row.dataset.testLanded
+      row.dataset.testMissedApproach = 'true'
+      applyTestTarget(row, targetMs)
+    }
+    showToast(`${record.callsign}: TEST MISSED · TLDT ${formatHm(new Date(targetMs).toISOString())}Z (+10M)`)
     return
   }
 
   void (async () => {
     try {
-      // Mark MISSED first so the landed-history capture endpoint suppresses any new
-      // terminal observation while the aircraft is still near/on the runway.
-      await writeMissedApproach(record)
+      const liveTargetMs = await writeMissedApproachTarget(record)
       await dismissLiveLanded(record)
       setLiveRecords(liveRecords.filter((row) => !(row.airport === record.airport && row.callsign === record.callsign)))
-      showToast(`${record.callsign}: MISSED APPROACH · awaiting airborne reinsert`)
+      showToast(`${record.callsign}: MISSED · target ${formatHm(new Date(liveTargetMs).toISOString())}Z (+10M)`)
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error))
     }
@@ -239,9 +307,10 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   section.textContent = 'LANDED STAGE'
   menu.appendChild(section)
 
+  const target = new Date(missedTargetMs(record)).toISOString()
   const ga = document.createElement('button')
   ga.type = 'button'
-  ga.textContent = 'GO AROUND / MISSED APPROACH'
+  ga.textContent = `GO AROUND / MISSED → ${formatHm(target)}Z (+10M)`
   ga.addEventListener('click', (event) => {
     event.stopPropagation()
     handleGoAround(record, liveRecords, setLiveRecords)
@@ -249,7 +318,7 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   menu.appendChild(ga)
 
   const note = document.createElement('small')
-  note.textContent = 'ALDT is the first observed actual landing time. GA removes the landed record and moves the flight to MISSED APPROACH.'
+  note.textContent = 'GA removes LANDED and reserves a new manual TLDT exactly 10 minutes after ALDT.'
   menu.appendChild(note)
   document.body.appendChild(menu)
 }
