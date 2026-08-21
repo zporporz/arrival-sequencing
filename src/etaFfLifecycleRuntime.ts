@@ -3,7 +3,6 @@ type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 const REFRESH_MS = 250
 
 const lockedEtaFfByKey = new Map<string, number>()
-const lastStatusByKey = new Map<string, AmanFlightStatus>()
 
 function parseClock(value: string) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
@@ -71,6 +70,7 @@ function targetTtoMs(row: HTMLElement, now: Date) {
 
 function isManualTarget(row: HTMLElement) {
   return row.classList.contains('is-stable')
+    || row.dataset.targetMode === 'MANUAL'
     || row.querySelector('.runway-assignment.is-manual') != null
 }
 
@@ -86,32 +86,37 @@ function resolveDisplayedEta(row: HTMLElement, now: Date) {
   const status = rowStatus(row)
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
-  const previousStatus = lastStatusByKey.get(key)
+  const targetTto = targetTtoMs(row, now)
 
   if (status === 'UNSTABLE') {
+    // UNSTABLE always follows the continuously recalculated live ETA-FF.
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE') {
     if (!manual) {
+      // STABLE still follows live calculation until ATC intervenes.
       lockedEtaFfByKey.delete(key)
-    } else if (!lockedEtaFfByKey.has(key)) {
-      // First ATC intervention during STABLE: the displayed ETA-FF becomes the
-      // time moved by ATC (the row's current target time over) and stops following
-      // the live ETA. The live ETA continues behind the scenes and therefore the
-      // delay value can move +/- while this displayed time remains fixed.
-      const movedTime = targetTtoMs(row, now) ?? liveEta
+    } else {
+      // Once ATC moves a STABLE flight, stop following the live calculation.
+      // Every later ATC move is still allowed and replaces the locked displayed time.
+      const movedTime = targetTto ?? liveEta
       if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
     }
+  } else if (status === 'SUPERSTABLE') {
+    if (manual) {
+      // SUPERSTABLE is still draggable. Track every ATC move so the flight can
+      // move back out to STABLE when the new time no longer meets the condition.
+      const movedTime = targetTto ?? liveEta
+      if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
+    } else if (!lockedEtaFfByKey.has(key) && liveEta != null) {
+      // With no ATC intervention, entering SUPERSTABLE freezes the visible ETA-FF.
+      lockedEtaFfByKey.set(key, liveEta)
+    }
   } else if (!lockedEtaFfByKey.has(key)) {
-    // SUPERSTABLE and FROZEN automatically freeze the displayed ETA-FF even if
-    // nobody has manually moved the flight. If this runtime attaches after a
-    // manual target already exists, preserve that target time as the visible lock.
-    const frozenTime = manual
-      ? targetTtoMs(row, now) ?? liveEta
-      : liveEta
+    // FROZEN is the final lock. ATC target movement may still affect TLDT/delay,
+    // but the displayed ETA-FF no longer follows either live calculation or drag.
+    const frozenTime = manual ? targetTto ?? liveEta : liveEta
     if (frozenTime != null) lockedEtaFfByKey.set(key, frozenTime)
   }
-
-  lastStatusByKey.set(key, status)
 
   const locked = lockedEtaFfByKey.get(key)
   const display = locked ?? liveEta
@@ -123,7 +128,6 @@ function resolveDisplayedEta(row: HTMLElement, now: Date) {
     display,
     locked: locked != null,
     liveEta,
-    previousStatus,
   }
 }
 
@@ -154,9 +158,6 @@ function refreshRows() {
   for (const key of lockedEtaFfByKey.keys()) {
     if (!activeKeys.has(key)) lockedEtaFfByKey.delete(key)
   }
-  for (const key of lastStatusByKey.keys()) {
-    if (!activeKeys.has(key)) lastStatusByKey.delete(key)
-  }
 }
 
 export function installEtaFfLifecycleRuntime() {
@@ -165,6 +166,5 @@ export function installEtaFfLifecycleRuntime() {
   return () => {
     window.clearInterval(timer)
     lockedEtaFfByKey.clear()
-    lastStatusByKey.clear()
   }
 }
