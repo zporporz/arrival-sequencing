@@ -445,6 +445,14 @@ function liveRouteEstimate(
     const confidence = trend.sampleCount >= 3 && trend.windowSeconds >= 30 && progress.offRouteNm <= 25
       ? 'HIGH'
       : 'MEDIUM'
+    const diagnostic = `ETA DBG ${descending ? 'DESCENT' : 'CRUISE'} · REM ${remainingNm.toFixed(1)}NM · OFF ${progress.offRouteNm.toFixed(1)}NM · OBS ${Math.round(observedGsKt)}KT · AVG ${Math.round(travel.averageGroundSpeedKt)}KT · VS ${verticalTrendFpm == null ? 'NA' : Math.round(verticalTrendFpm)} · SAMPLES ${trend.sampleCount}/${trend.windowSeconds}s`
+    const modelReason = descending
+      ? `Segmented descent ETA uses ${profileValues(performance).label}`
+      : triggerFt < POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT
+        ? `Position/route ETA active from filed cruise ${Math.round(triggerFt / 100)}00 ft`
+        : trend.sampleCount >= 2
+          ? 'Position/route ETA uses live GS trend'
+          : 'Position/route ETA active'
 
     return {
       source: 'LIVE_ROUTE',
@@ -454,13 +462,7 @@ function liveRouteEstimate(
       offRouteNm: progress.offRouteNm,
       groundSpeedKt: travel.averageGroundSpeedKt,
       pastCrossing: false,
-      reason: descending
-        ? `Segmented descent ETA uses ${profileValues(performance).label}, ${Math.round(observedGsKt)} kt live GS trend and ${Math.round(verticalTrendFpm ?? -1500)} fpm`
-        : triggerFt < POSITION_MODEL_MAX_TRIGGER_ALTITUDE_FT
-          ? `Position/route ETA active from filed cruise ${Math.round(triggerFt / 100)}00 ft; ${Math.round(observedGsKt)} kt live GS trend used`
-          : trend.sampleCount >= 2
-            ? `Position/route ETA uses ${Math.round(observedGsKt)} kt live GS trend`
-            : null,
+      reason: `${diagnostic} · ${modelReason}`,
       modelPhase: descending ? 'DESCENT' : 'CRUISE',
       trackSampleCount: trend.sampleCount,
       verticalTrendFpm,
@@ -479,7 +481,7 @@ function liveRouteEstimate(
     offRouteNm: progress.offRouteNm,
     groundSpeedKt: observedGsKt,
     pastCrossing: true,
-    reason: 'IAWP already passed; crossing time back-estimated from the live GS trend',
+    reason: `ETA DBG PASSED · SINCE ${distanceSinceFix.toFixed(1)}NM · OFF ${progress.offRouteNm.toFixed(1)}NM · OBS ${Math.round(observedGsKt)}KT · SAMPLES ${trend.sampleCount}/${trend.windowSeconds}s · IAWP crossing back-estimated`,
     modelPhase: descending ? 'DESCENT' : 'CRUISE',
     trackSampleCount: trend.sampleCount,
     verticalTrendFpm,
@@ -503,7 +505,7 @@ function eetEstimate(
     offRouteNm: null,
     groundSpeedKt: null,
     pastCrossing: false,
-    reason: source === 'FILED_EOBT_EET' ? 'Provisional filed-time estimate' : null,
+    reason: `ETA DBG FALLBACK ${source} · EET ${(filedEetSeconds / 60).toFixed(1)}MIN · STAR ${(nominalStarSeconds / 60).toFixed(1)}MIN`,
     modelPhase: 'FALLBACK',
   }
 }
@@ -554,7 +556,7 @@ export function estimateIawpArrival(
     offRouteNm: null,
     groundSpeedKt: observedGroundSpeedKt(flight, trend),
     pastCrossing: false,
-    reason: 'No usable live route or flight-plan timing source',
+    reason: `ETA DBG UNAVAILABLE · SAMPLES ${trend.sampleCount}/${trend.windowSeconds}s · No usable live route or flight-plan timing source`,
     modelPhase: 'FALLBACK',
     trackSampleCount: trend.sampleCount,
     verticalTrendFpm: resolvedVerticalTrendFpm(flight, trend),
