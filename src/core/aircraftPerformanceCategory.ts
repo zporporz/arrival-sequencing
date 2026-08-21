@@ -31,21 +31,6 @@ export function cachedAircraftPerformanceCategory(aircraftType: string | null | 
   return null
 }
 
-/**
- * Seed known categories before synthetic/test predictions are sequenced. Live traffic
- * still carries the SimBrief category directly; this only removes the async first-render
- * gap for deterministic test airframes that do not pass through live traffic loading.
- */
-export function primeAircraftPerformanceCategoryCache(
-  entries: Readonly<Record<string, AircraftPerformanceCategory | null>>,
-) {
-  for (const [rawType, category] of Object.entries(entries)) {
-    const type = normalizeAircraftType(rawType)
-    if (!type) continue
-    categoryCache.set(type, category)
-  }
-}
-
 export function clearAircraftPerformanceCategoryCache() {
   categoryCache.clear()
   categoryRequests.clear()
