@@ -79,6 +79,13 @@ function rowPredictedIawpMs(row: HTMLElement, now: Date) {
   return hm ? parseHmNearNow(hm, now) : null
 }
 
+function rowTargetTtoHm(row: HTMLElement) {
+  const title = row.getAttribute('title') || ''
+  return title.match(/STA-FF\/TTO\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
+    || row.children.item(4)?.textContent?.trim()
+    || ''
+}
+
 function toRadians(value: number) {
   return value * Math.PI / 180
 }
@@ -170,7 +177,10 @@ function distanceFallbackStatus(row: HTMLElement): AmanFlightStatus | null {
 function rowFlightStatus(row: HTMLElement, now: Date): AmanFlightStatus {
   const cells = row.children
   const tldtHm = cells.item(0)?.textContent?.trim() || ''
-  const ttoHm = cells.item(4)?.textContent?.trim() || ''
+  // The timeline display can show a lifecycle-controlled ETA-FF instead of TTO.
+  // Always recover the target TTO from immutable React title metadata so status
+  // classification is independent of whichever clock is currently rendered.
+  const ttoHm = rowTargetTtoHm(row)
   const nominalMinutes = forwardMinutes(ttoHm, tldtHm)
 
   // MAESTRO source: Frozen = 4 minutes before landing, or approximately 10 NM final.
