@@ -89,8 +89,6 @@ function clearFinalData(row: HTMLElement) {
 
 function applyLiveFinalData() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    // TEST TRAFFIC uses the same TLDT lifecycle engine as live traffic. It has no
-    // IVAO position sensor, so the 10 NM fallback is deliberately disabled there.
     if (row.classList.contains('is-demo') || testTrafficEnabled()) {
       clearFinalData(row)
       return
@@ -141,7 +139,7 @@ function updateManualLabels() {
 
 function updateInteractionHint() {
   const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
-  if (hint) hint.textContent = 'DRAG = SET TARGET · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
+  if (hint) hint.textContent = 'DRAG STRIP = MOVE LABEL · DRAG TLDT = SET TARGET · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
 }
 
 function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
