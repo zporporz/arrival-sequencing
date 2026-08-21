@@ -12,7 +12,7 @@ AMAN / MAESTRO-style arrival sequencing prototype for IVAO Thailand.
 
 ## Current status — 21 Aug 2026
 
-The live and TEST TRAFFIC paths now share the same sequencing, manual-target, separation, lifecycle, TLDT-freeze and landed-history logic. TEST TRAFFIC supplies deterministic synthetic inputs and never writes its fake callsigns into production shared flight state.
+The live and TEST TRAFFIC paths now share the same sequencing, manual-target, separation, lifecycle, TLDT-freeze and landed-history logic. TEST TRAFFIC supplies deterministic synthetic inputs while its flight and workspace changes remain isolated from production shared state.
 
 Primary project reference for the broader MAESTRO alignment remains:
 
@@ -165,11 +165,13 @@ It uses the same code paths as live traffic for:
 - FROZEN edit blocking;
 - landed-history row construction and fixed first-observed ALDT behavior.
 
+The eight synthetic rows are distributed across all four lifecycle bands at test start: three UNSTABLE examples, two STABLE examples, two SUPERSTABLE examples and one FROZEN example. Their shared scenario anchor remains fixed, so the rows progress through the lifecycle as UTC time advances instead of sliding forward indefinitely.
+
 Synthetic aircraft categories are assigned deterministically only to `demo:` predictions before pairwise separation is resolved. They neither wait for an asynchronous SimBrief request nor populate the live aircraft-performance cache.
 
 For the final landed step, TEST TRAFFIC creates one synthetic terminal observation when the test row reaches TLDT. This drives the same fixed landed-history display without calling or modifying production landing data.
 
-TEST TRAFFIC flight-specific AMAN state requests are intercepted locally. Fake callsigns therefore do not create, clear, or overwrite production `aman_flight_states` rows.
+TEST TRAFFIC flight-specific AMAN requests and runway-workspace sync requests are intercepted locally. Fake callsigns, test runway modes and test spacing changes therefore cannot create, clear or overwrite production shared-state rows.
 
 ### Deliberate TEST limitations
 
@@ -177,7 +179,7 @@ TEST TRAFFIC flight-specific AMAN state requests are intercepted locally. Fake c
 - Its ETA input is deterministic synthetic data; it does not validate ETA-FF accuracy.
 - It has no real 10 NM final sensor.
 - Its terminal observation is synthesized at TLDT rather than received from IVAO.
-- Shared multi-controller persistence of synthetic flight targets is intentionally disabled.
+- Shared multi-controller persistence of synthetic targets and test workspace changes is intentionally disabled.
 
 ---
 
@@ -281,7 +283,7 @@ The HMI provides project-level speed, path-stretching, holding, runway-change an
 - Controller presence and realtime propagation.
 - Disconnect / reconnect ghost recovery with position plausibility checks.
 
-Synthetic TEST TRAFFIC flight rows are intentionally isolated from production flight-state writes.
+TEST TRAFFIC rows and test workspace edits are intentionally isolated from production shared-state writes and remote shared-state re-application while test mode is active.
 
 ---
 
