@@ -18,6 +18,11 @@ function cleanAirport(value) {
   return AIRPORT_REFERENCE[airport] ? airport : null;
 }
 
+function cleanCallsign(value) {
+  const callsign = String(value || '').trim().toUpperCase();
+  return callsign ? callsign.slice(0, 20) : null;
+}
+
 function finite(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -40,6 +45,21 @@ function airlineAircraft(pilot) {
   return String(pilot?.flightPlan?.aircraftId || pilot?.flightPlan?.aircraft?.icaoCode || '').trim().toUpperCase() || null;
 }
 
+async function operationallySuppressedCallsigns(env, serviceDate, airport) {
+  try {
+    const result = await supabaseAdminRequest(
+      env,
+      `aman_flight_states?select=callsign,operational_state&service_date=eq.${encodeURIComponent(serviceDate)}&airport=eq.${encodeURIComponent(airport)}`,
+    );
+    return new Set((result.data || [])
+      .filter((row) => row?.operational_state && String(row.operational_state).toUpperCase() !== 'NORMAL')
+      .map((row) => String(row.callsign || '').trim().toUpperCase())
+      .filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
 async function captureCurrentLanded(env, airport) {
   if (!env.IVAO_API_KEY) return;
   const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup', {
@@ -52,6 +72,7 @@ async function captureCurrentLanded(env, airport) {
   const reference = AIRPORT_REFERENCE[airport];
   const nowIso = new Date().toISOString();
   const serviceDate = nowIso.slice(0, 10);
+  const suppressedCallsigns = await operationallySuppressedCallsigns(env, serviceDate, airport);
   const rows = [];
 
   for (const pilot of pilots) {
@@ -66,7 +87,7 @@ async function captureCurrentLanded(env, airport) {
 
     const sessionId = String(pilot.id ?? '').trim();
     const callsign = String(pilot.callsign || '').trim().toUpperCase();
-    if (!sessionId || !callsign) continue;
+    if (!sessionId || !callsign || suppressedCallsigns.has(callsign)) continue;
     const trackMs = new Date(track.timestamp || '').getTime();
     const landedAt = Number.isFinite(trackMs) ? new Date(trackMs).toISOString() : nowIso;
     rows.push({
@@ -128,5 +149,31 @@ export async function onRequestGet(context) {
     return json({ airport, fetchedAt: new Date().toISOString(), flights: result.data || [] });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+  }
+}
+
+export async function onRequestPost(context) {
+  try {
+    const payload = await context.request.json();
+    const action = String(payload?.action || '').trim();
+    if (action !== 'dismissLanded') return json({ error: 'Unsupported landed-history action' }, 400);
+
+    const airport = cleanAirport(payload.airport);
+    const callsign = cleanCallsign(payload.callsign);
+    if (!airport || !callsign) return json({ error: 'Airport and callsign are required' }, 400);
+
+    const serviceDate = new Date().toISOString().slice(0, 10);
+    await supabaseAdminRequest(
+      context.env,
+      `aman_landed_history?service_date=eq.${encodeURIComponent(serviceDate)}&airport=eq.${encodeURIComponent(airport)}&callsign=eq.${encodeURIComponent(callsign)}`,
+      {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      },
+    );
+
+    return json({ ok: true, airport, callsign });
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : String(error) }, 400);
   }
 }
