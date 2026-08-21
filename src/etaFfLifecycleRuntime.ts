@@ -140,7 +140,6 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
-  // FROZEN remains a lifecycle state, but ATC may still move its protected target.
   if (frozenTldtByKey.has(key)) return 'FROZEN'
 
   const targetLanding = targetTldtMs(row, now)
@@ -198,6 +197,12 @@ function localDragActive(key: string) {
 }
 
 function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
+  if (!isManualTarget(row)) {
+    superstableTldtByKey.delete(key)
+    delete row.dataset.superstableTldt
+    return
+  }
+
   const current = targetTldtMs(row, now)
   if (current == null) return
 
@@ -207,15 +212,13 @@ function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
     superstableTldtByKey.set(key, current)
   }
 
-  // A local drag or a newer shared revision is an intentional ATC target change.
   if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
     superstableTldtByKey.set(key, current)
     row.dataset.superstableTldt = new Date(current).toISOString()
     return
   }
 
-  // Automatic calculation/cascade must not walk a SUPERSTABLE target.
-  if (!isManualTarget(row) || Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
+  if (Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
     applyTargetThroughReact(row, protectedTarget, now)
   }
 
@@ -227,8 +230,6 @@ function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
   const current = targetTldtMs(row, now)
   if (protectedTarget == null || current == null) return
 
-  // FROZEN blocks automatic movement, not the controller. A local drag or a manual
-  // target received from another controller replaces the protected TLDT immediately.
   if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
     frozenTldtByKey.set(key, current)
     row.dataset.frozenTldt = new Date(current).toISOString()
@@ -247,22 +248,15 @@ function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStat
   const manual = isManualTarget(row)
 
   if (status === 'UNSTABLE') {
-    // AUTO / UNSTABLE always follows the latest calculation.
     lockedEtaFfByKey.delete(key)
-  } else if (status === 'STABLE') {
+  } else if (status === 'STABLE' || status === 'SUPERSTABLE') {
     if (!manual) {
-      // STABLE still follows live ETA-FF until ATC first takes target control.
       lockedEtaFfByKey.delete(key)
     } else if (!lockedEtaFfByKey.has(key)) {
-      // First ATC intervention freezes the displayed ETA-FF at the prediction that was
-      // visible at takeover. Later TLDT/TTO drags must never move this displayed field.
       const takeoverEta = liveEta ?? displayedEtaFfMs(row, now)
       if (takeoverEta != null) lockedEtaFfByKey.set(key, takeoverEta)
     }
   } else if (!lockedEtaFfByKey.has(key)) {
-    // SUPERSTABLE/FROZEN preserve whichever ETA-FF was already locked in STABLE.
-    // If the flight reaches these stages without prior manual intervention, capture
-    // the current prediction once on entry and keep it fixed thereafter.
     const entryEta = liveEta ?? displayedEtaFfMs(row, now)
     if (entryEta != null) lockedEtaFfByKey.set(key, entryEta)
   }
@@ -287,7 +281,7 @@ function refreshRows() {
     const status = statusFromCurrentTarget(row, now, key)
     applyStatusClass(row, status)
 
-    if (status === 'SUPERSTABLE') {
+    if (status === 'SUPERSTABLE' && isManualTarget(row)) {
       enforceSuperstableTldt(row, now, key)
     } else if (status === 'FROZEN') {
       enforceFrozenTldt(row, now, key)
@@ -370,13 +364,9 @@ export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
 
-  // Every lifecycle stage, including FROZEN, may be dragged by ATC in both LIVE and
-  // TEST modes. Only automatic calculation/cascade remains locked out of FROZEN.
   document.addEventListener('pointerdown', markLocalDrag, true)
   document.addEventListener('pointerup', finishLocalDrag, true)
   document.addEventListener('pointercancel', finishLocalDrag, true)
-
-  // Keep the existing FROZEN protection for reset/runway edits; this does not block drag.
   document.addEventListener('dblclick', blockFrozenNonDragEdit, true)
   document.addEventListener('change', blockFrozenNonDragEdit, true)
 
