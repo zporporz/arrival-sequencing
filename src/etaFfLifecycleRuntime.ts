@@ -1,8 +1,52 @@
 type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
+type FakePointerEvent = {
+  button: number
+  preventDefault: () => void
+  currentTarget: {
+    setPointerCapture: (pointerId: number) => void
+    hasPointerCapture: (pointerId: number) => boolean
+    releasePointerCapture: (pointerId: number) => void
+  }
+  pointerId: number
+  clientY: number
+}
+
+type ReactRowProps = {
+  onPointerDown?: (event: FakePointerEvent) => void
+  onPointerMove?: (event: FakePointerEvent) => void
+  onPointerUp?: (event: FakePointerEvent) => void
+}
+
 const REFRESH_MS = 250
+const PX_PER_MINUTE = 10
+const POINTER_ID = 70423
+const STABLE_BEFORE_IAWP_MINUTES = 15
+const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
+const FROZEN_BEFORE_TLDT_MINUTES = 4
 
 const lockedEtaFfByKey = new Map<string, number>()
+const frozenTldtByKey = new Map<string, number>()
+
+function reactProps<T>(element: Element): T | null {
+  const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
+  if (!key) return null
+  return (element as unknown as Record<string, unknown>)[key] as T
+}
+
+function fakePointer(clientY: number): FakePointerEvent {
+  return {
+    button: 0,
+    preventDefault: () => {},
+    currentTarget: {
+      setPointerCapture: () => {},
+      hasPointerCapture: () => false,
+      releasePointerCapture: () => {},
+    },
+    pointerId: POINTER_ID,
+    clientY,
+  }
+}
 
 function parseClock(value: string) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
@@ -48,12 +92,6 @@ function rowKey(row: HTMLElement) {
   return airport && callsign ? `${airport}:${callsign}` : ''
 }
 
-function rowStatus(row: HTMLElement): AmanFlightStatus {
-  const value = String(row.dataset.flightStatus || '').trim().toUpperCase()
-  if (value === 'STABLE' || value === 'SUPERSTABLE' || value === 'FROZEN') return value
-  return 'UNSTABLE'
-}
-
 function titleTime(row: HTMLElement, pattern: RegExp, now: Date) {
   const title = row.getAttribute('title') || ''
   const value = title.match(pattern)?.[1]
@@ -68,6 +106,10 @@ function targetTtoMs(row: HTMLElement, now: Date) {
   return titleTime(row, /STA-FF\/TTO\s+(\d{2}:\d{2}(?::\d{2})?)Z/i, now)
 }
 
+function targetTldtMs(row: HTMLElement, now: Date) {
+  return titleTime(row, /STA\/TLDT\s+(\d{2}:\d{2}(?::\d{2})?)Z/i, now)
+}
+
 function isManualTarget(row: HTMLElement) {
   return row.classList.contains('is-stable')
     || row.dataset.targetMode === 'MANUAL'
@@ -79,41 +121,95 @@ function etaCell(row: HTMLElement) {
   return children.length > 4 ? children.item(4) as HTMLElement | null : null
 }
 
-function resolveDisplayedEta(row: HTMLElement, now: Date) {
-  const key = rowKey(row)
-  if (!key) return null
+function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
+  const className = `status-${status.toLowerCase()}`
+  element.classList.remove('status-unstable', 'status-stable', 'status-superstable', 'status-frozen')
+  element.classList.add(className)
+  element.dataset.flightStatus = status
+}
 
-  const status = rowStatus(row)
+function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
+  // Once the four-minute gate has been crossed, FROZEN is sticky until the row
+  // leaves the live sequence and becomes a landed-history row.
+  if (frozenTldtByKey.has(key)) return 'FROZEN'
+
+  const targetLanding = targetTldtMs(row, now)
+  const finalTenNm = row.dataset.finalTenNm === 'true'
+  if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
+    if (targetLanding != null) frozenTldtByKey.set(key, targetLanding)
+    return 'FROZEN'
+  }
+
+  if (isManualTarget(row)) {
+    const targetIawp = targetTtoMs(row, now)
+    if (targetIawp != null && (targetIawp - now.getTime()) / 60_000 <= SUPERSTABLE_BEFORE_IAWP_MINUTES) {
+      return 'SUPERSTABLE'
+    }
+    return 'STABLE'
+  }
+
+  const liveEta = liveEtaFfMs(row, now)
+  if (liveEta != null) {
+    const minutesToIawp = (liveEta - now.getTime()) / 60_000
+    if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
+    if (minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
+    return 'UNSTABLE'
+  }
+
+  const current = String(row.dataset.flightStatus || '').trim().toUpperCase()
+  if (current === 'STABLE' || current === 'SUPERSTABLE') return current
+  return 'UNSTABLE'
+}
+
+function applyTargetThroughReact(row: HTMLElement, targetMs: number, now: Date) {
+  const currentMs = targetTldtMs(row, now)
+  const props = reactProps<ReactRowProps>(row)
+  if (currentMs == null || !props?.onPointerDown || !props.onPointerMove || !props.onPointerUp) return false
+
+  const deltaMinutes = (targetMs - currentMs) / 60_000
+  props.onPointerDown(fakePointer(0))
+  props.onPointerMove(fakePointer(-deltaMinutes * PX_PER_MINUTE))
+  props.onPointerUp(fakePointer(-deltaMinutes * PX_PER_MINUTE))
+  return true
+}
+
+function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
+  const frozen = frozenTldtByKey.get(key)
+  if (frozen == null) return
+  const current = targetTldtMs(row, now)
+  const manual = isManualTarget(row)
+
+  // Entering FROZEN converts the current TLDT into a protected local target.
+  // Re-apply it if a later live ETA refresh or cascade tries to move the row.
+  if (!manual || current == null || Math.abs(current - frozen) > 2_000) {
+    applyTargetThroughReact(row, frozen, now)
+  }
+
+  row.dataset.frozenTldt = new Date(frozen).toISOString()
+}
+
+function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStatus, key: string) {
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
   const targetTto = targetTtoMs(row, now)
 
   if (status === 'UNSTABLE') {
-    // UNSTABLE always follows the continuously recalculated live ETA-FF.
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE') {
     if (!manual) {
-      // STABLE still follows live calculation until ATC intervenes.
       lockedEtaFfByKey.delete(key)
     } else {
-      // Once ATC moves a STABLE flight, stop following the live calculation.
-      // Every later ATC move is still allowed and replaces the locked displayed time.
       const movedTime = targetTto ?? liveEta
       if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
     }
   } else if (status === 'SUPERSTABLE') {
     if (manual) {
-      // SUPERSTABLE is still draggable. Track every ATC move so the flight can
-      // move back out to STABLE when the new time no longer meets the condition.
       const movedTime = targetTto ?? liveEta
       if (movedTime != null) lockedEtaFfByKey.set(key, movedTime)
     } else if (!lockedEtaFfByKey.has(key) && liveEta != null) {
-      // With no ATC intervention, entering SUPERSTABLE freezes the visible ETA-FF.
       lockedEtaFfByKey.set(key, liveEta)
     }
   } else if (!lockedEtaFfByKey.has(key)) {
-    // FROZEN is the final lock. ATC target movement may still affect TLDT/delay,
-    // but the displayed ETA-FF no longer follows either live calculation or drag.
     const frozenTime = manual ? targetTto ?? liveEta : liveEta
     if (frozenTime != null) lockedEtaFfByKey.set(key, frozenTime)
   }
@@ -122,23 +218,28 @@ function resolveDisplayedEta(row: HTMLElement, now: Date) {
   const display = locked ?? liveEta
   if (display == null) return null
 
-  return {
-    key,
-    status,
-    display,
-    locked: locked != null,
-    liveEta,
-  }
+  return { display, locked: locked != null, liveEta }
 }
 
 function refreshRows() {
   const now = new Date()
   const activeKeys = new Set<string>()
+  const statusByCallsign = new Map<string, AmanFlightStatus>()
 
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    const resolved = resolveDisplayedEta(row, now)
+    const key = rowKey(row)
+    if (!key) return
+    activeKeys.add(key)
+
+    const status = statusFromCurrentTarget(row, now, key)
+    applyStatusClass(row, status)
+    if (status === 'FROZEN') enforceFrozenTldt(row, now, key)
+
+    const callsign = rowCallsign(row)
+    if (callsign) statusByCallsign.set(callsign, status)
+
+    const resolved = resolveDisplayedEta(row, now, status, key)
     if (!resolved) return
-    activeKeys.add(resolved.key)
 
     const cell = etaCell(row)
     if (cell) {
@@ -146,8 +247,8 @@ function refreshRows() {
       if (cell.textContent?.trim() !== next) cell.textContent = next
       cell.dataset.etaFf = next
       cell.dataset.etaFfLocked = resolved.locked ? 'true' : 'false'
-      cell.dataset.etaFfStatus = resolved.status
-      cell.setAttribute('aria-label', `ETA-FF ${next} ${resolved.status}${resolved.locked ? ' locked' : ' live'}`)
+      cell.dataset.etaFfStatus = status
+      cell.setAttribute('aria-label', `ETA-FF ${next} ${status}${resolved.locked ? ' locked' : ' live'}`)
     }
 
     row.dataset.etaFfDisplay = formatHm(resolved.display)
@@ -155,16 +256,40 @@ function refreshRows() {
     row.dataset.etaFfLive = resolved.liveEta == null ? '' : formatHm(resolved.liveEta)
   })
 
+  document.querySelectorAll<HTMLElement>('.aman-inbound-row').forEach((row) => {
+    const callsign = row.querySelector<HTMLElement>('strong')?.textContent?.trim().toUpperCase() || ''
+    const target = row.querySelector<HTMLElement>('strong')
+    const status = statusByCallsign.get(callsign)
+    if (target && status) applyStatusClass(target, status)
+  })
+
   for (const key of lockedEtaFfByKey.keys()) {
     if (!activeKeys.has(key)) lockedEtaFfByKey.delete(key)
   }
+  for (const key of frozenTldtByKey.keys()) {
+    if (!activeKeys.has(key)) frozenTldtByKey.delete(key)
+  }
+}
+
+function blockFrozenDrag(event: PointerEvent) {
+  if (event.button !== 0 || !(event.target instanceof Element)) return
+  if (event.target.closest('select')) return
+  const row = event.target.closest<HTMLElement>('.aman-flight-row')
+  if (!row || row.dataset.flightStatus !== 'FROZEN') return
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
 }
 
 export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
+  document.addEventListener('pointerdown', blockFrozenDrag, true)
+
   return () => {
     window.clearInterval(timer)
+    document.removeEventListener('pointerdown', blockFrozenDrag, true)
     lockedEtaFfByKey.clear()
+    frozenTldtByKey.clear()
   }
 }
