@@ -207,7 +207,7 @@ export function installManualSequenceReorderRuntime() {
       runway,
       startY: event.clientY,
       startTargetMs: targetMs,
-      allowReorder: event.altKey,
+      allowReorder: event.shiftKey,
       moved: false,
     }
   }
