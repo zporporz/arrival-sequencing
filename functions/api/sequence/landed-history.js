@@ -101,9 +101,11 @@ async function captureCurrentLanded(env, airport) {
   }
 
   if (rows.length) {
+    // The first observed terminal-state sample is the ALDT proxy. Do not merge later
+    // taxi/parking samples over the same flight, otherwise landed_at walks forward.
     await supabaseAdminRequest(env, 'aman_landed_history?on_conflict=service_date,airport,callsign,raw_session_id', {
       method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
       body: JSON.stringify(rows),
     });
   }
