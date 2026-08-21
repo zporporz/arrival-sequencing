@@ -45,14 +45,25 @@ function airlineAircraft(pilot) {
   return String(pilot?.flightPlan?.aircraftId || pilot?.flightPlan?.aircraft?.icaoCode || '').trim().toUpperCase() || null;
 }
 
-async function operationallySuppressedCallsigns(env, serviceDate, airport) {
+async function suppressedCallsigns(env, serviceDate, airport) {
   try {
     const result = await supabaseAdminRequest(
       env,
-      `aman_flight_states?select=callsign,operational_state&service_date=eq.${encodeURIComponent(serviceDate)}&airport=eq.${encodeURIComponent(airport)}`,
+      `aman_flight_states?select=callsign,operational_state,target_mode,manual_tldt&service_date=eq.${encodeURIComponent(serviceDate)}&airport=eq.${encodeURIComponent(airport)}`,
     );
+    const nowMs = Date.now();
     return new Set((result.data || [])
-      .filter((row) => row?.operational_state && String(row.operational_state).toUpperCase() !== 'NORMAL')
+      .filter((row) => {
+        const operational = String(row?.operational_state || 'NORMAL').toUpperCase();
+        if (operational !== 'NORMAL') return true;
+
+        // A future MANUAL target on a flight that has just been reinserted after a
+        // missed approach protects it from being immediately captured as LANDED again
+        // while IVAO still reports rollout/taxi near the airport.
+        if (String(row?.target_mode || '').toUpperCase() !== 'MANUAL' || !row?.manual_tldt) return false;
+        const targetMs = new Date(row.manual_tldt).getTime();
+        return Number.isFinite(targetMs) && targetMs > nowMs;
+      })
       .map((row) => String(row.callsign || '').trim().toUpperCase())
       .filter(Boolean));
   } catch {
@@ -72,7 +83,7 @@ async function captureCurrentLanded(env, airport) {
   const reference = AIRPORT_REFERENCE[airport];
   const nowIso = new Date().toISOString();
   const serviceDate = nowIso.slice(0, 10);
-  const suppressedCallsigns = await operationallySuppressedCallsigns(env, serviceDate, airport);
+  const blockedCallsigns = await suppressedCallsigns(env, serviceDate, airport);
   const rows = [];
 
   for (const pilot of pilots) {
@@ -87,7 +98,7 @@ async function captureCurrentLanded(env, airport) {
 
     const sessionId = String(pilot.id ?? '').trim();
     const callsign = String(pilot.callsign || '').trim().toUpperCase();
-    if (!sessionId || !callsign || suppressedCallsigns.has(callsign)) continue;
+    if (!sessionId || !callsign || blockedCallsigns.has(callsign)) continue;
     const trackMs = new Date(track.timestamp || '').getTime();
     const landedAt = Number.isFinite(trackMs) ? new Date(trackMs).toISOString() : nowIso;
     rows.push({
@@ -122,8 +133,6 @@ async function captureCurrentLanded(env, airport) {
   }
 
   if (rows.length) {
-    // The first observed terminal-state sample is the ALDT proxy. Do not merge later
-    // taxi/parking samples over the same flight, otherwise landed_at walks forward.
     await supabaseAdminRequest(env, 'aman_landed_history?on_conflict=service_date,airport,callsign,raw_session_id', {
       method: 'POST',
       headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
