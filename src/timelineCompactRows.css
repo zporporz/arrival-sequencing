@@ -1,22 +1,21 @@
-/* Readable true-time timeline rows.
-   Every row stays exactly on its STA/TLDT anchor. We keep the label compact enough for
-   a busy stream, but primary operational text is never reduced to unreadable 7–9 px.
-   Detailed EDLY/ADLY/matrix/LEAVE information remains in the row tooltip/system state;
-   the timeline itself shows only the whole-minute delay plus runway. */
+/* Compact true-time timeline rows.
+   Keep all operational fields visible, but reduce the horizontal footprint so two-sided
+   timelines remain usable on smaller controller displays. TLDT/ETA-FF keep their full
+   values; the label and its columns scale down together instead of clipping one field. */
 
 .aman-flight-row,
 .aman-flight-row[data-display-side="RIGHT"],
 .aman-flight-row.display-right {
   transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
-  min-height: 20px !important;
-  height: 20px !important;
-  width: min(585px, calc(50% - 34px));
-  grid-template-columns: 52px minmax(104px, 1.25fr) 50px 28px 54px 50px 58px !important;
-  gap: 6px !important;
-  padding: 1px 6px !important;
+  min-height: 19px !important;
+  height: 19px !important;
+  width: min(525px, calc(50% - 30px));
+  grid-template-columns: 48px minmax(92px, 1.2fr) 44px 24px 48px 42px 50px !important;
+  gap: 5px !important;
+  padding: 1px 5px !important;
   border-left-width: 2px !important;
   background: rgba(7, 15, 27, .84) !important;
-  font-size: 11px !important;
+  font-size: 10.5px !important;
   line-height: 1 !important;
   transition: none !important;
   box-shadow: none !important;
@@ -25,16 +24,16 @@
 .aman-flight-row[data-display-side="LEFT"],
 .aman-flight-row.display-left {
   transform: translateY(calc(var(--offset-px, 0px) - 50%)) !important;
-  min-height: 20px !important;
-  height: 20px !important;
-  width: min(585px, calc(50% - 34px));
-  grid-template-columns: 58px 50px 54px 28px 50px minmax(104px, 1.25fr) 52px !important;
-  gap: 6px !important;
-  padding: 1px 6px !important;
+  min-height: 19px !important;
+  height: 19px !important;
+  width: min(525px, calc(50% - 30px));
+  grid-template-columns: 50px 42px 48px 24px 44px minmax(92px, 1.2fr) 48px !important;
+  gap: 5px !important;
+  padding: 1px 5px !important;
   border-left: 0 !important;
   border-right-width: 2px !important;
   background: rgba(7, 15, 27, .84) !important;
-  font-size: 11px !important;
+  font-size: 10.5px !important;
   line-height: 1 !important;
   transition: none !important;
   box-shadow: none !important;
@@ -47,16 +46,21 @@
 .aman-flight-row > em,
 .aman-flight-row .runway-assignment,
 .aman-flight-row .runway-assignment select {
-  font-size: 11px !important;
+  font-size: 10.5px !important;
   line-height: 1 !important;
 }
 
 .aman-flight-row .tldt {
   font-weight: 950;
+  letter-spacing: -.25px;
 }
 
 .aman-flight-row > strong {
-  font-size: 13px !important;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px !important;
   line-height: 1 !important;
   font-weight: 950;
 }
@@ -67,14 +71,14 @@
 
 .aman-flight-row .runway-assignment,
 .aman-flight-row .runway-assignment select {
-  height: 18px !important;
-  min-height: 18px !important;
+  height: 17px !important;
+  min-height: 17px !important;
 }
 
 .aman-flight-row .runway-assignment select {
-  width: 54px !important;
-  min-width: 54px !important;
-  padding: 0 4px !important;
+  width: 48px !important;
+  min-width: 48px !important;
+  padding: 0 3px !important;
   border-radius: 2px !important;
   font-weight: 900 !important;
 }
@@ -84,13 +88,13 @@
 .aman-flight-row > b,
 .aman-delay-stack {
   min-width: 0 !important;
-  height: 18px !important;
+  height: 17px !important;
   display: flex !important;
   align-items: center !important;
   justify-content: flex-end !important;
   overflow: visible !important;
   white-space: nowrap !important;
-  font-size: 12px !important;
+  font-size: 11px !important;
   line-height: 1 !important;
   text-align: right !important;
 }
@@ -104,9 +108,9 @@
 .aman-delay-stack::before {
   content: attr(data-rounded-delay);
   display: inline-block;
-  min-width: 30px;
+  min-width: 26px;
   color: currentColor;
-  font: 950 12px/1 Consolas, monospace;
+  font: 950 11px/1 Consolas, monospace;
   text-align: right;
 }
 
@@ -163,37 +167,8 @@
   display: none !important;
 }
 
+/* Laptop / compact controller display. */
 @media (max-width: 1250px) {
-  .aman-flight-row,
-  .aman-flight-row[data-display-side="LEFT"],
-  .aman-flight-row[data-display-side="RIGHT"],
-  .aman-flight-row.display-left,
-  .aman-flight-row.display-right {
-    min-height: 19px !important;
-    height: 19px !important;
-    width: calc(50% - 28px);
-    grid-template-columns: 46px minmax(88px, 1fr) 42px 24px 48px 46px 52px !important;
-    gap: 4px !important;
-    padding: 1px 5px !important;
-    font-size: 10px !important;
-  }
-
-  .aman-flight-row[data-display-side="LEFT"],
-  .aman-flight-row.display-left {
-    grid-template-columns: 52px 46px 48px 24px 42px minmax(88px, 1fr) 46px !important;
-  }
-
-  .aman-flight-row > strong { font-size: 12px !important; }
-  .aman-flight-row .tldt,
-  .aman-flight-row > span:nth-child(3),
-  .aman-flight-row > span:nth-child(5),
-  .aman-flight-row .fix-code,
-  .aman-flight-row .runway-assignment,
-  .aman-flight-row .runway-assignment select { font-size: 10px !important; }
-  .aman-delay-stack::before { font-size: 11px !important; }
-}
-
-@media (max-width: 700px) {
   .aman-flight-row,
   .aman-flight-row[data-display-side="LEFT"],
   .aman-flight-row[data-display-side="RIGHT"],
@@ -201,7 +176,81 @@
   .aman-flight-row.display-right {
     min-height: 18px !important;
     height: 18px !important;
+    width: min(455px, calc(50% - 24px));
+    grid-template-columns: 45px minmax(78px, 1fr) 38px 20px 43px 36px 44px !important;
+    gap: 3px !important;
+    padding: 1px 4px !important;
+    font-size: 9.5px !important;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row.display-left {
+    grid-template-columns: 44px 36px 43px 20px 38px minmax(78px, 1fr) 45px !important;
   }
 
   .aman-flight-row > strong { font-size: 11px !important; }
+  .aman-flight-row .tldt,
+  .aman-flight-row > span:nth-child(3),
+  .aman-flight-row > span:nth-child(5),
+  .aman-flight-row .fix-code,
+  .aman-flight-row .runway-assignment,
+  .aman-flight-row .runway-assignment select { font-size: 9.5px !important; }
+  .aman-flight-row .runway-assignment,
+  .aman-flight-row .runway-assignment select { height: 16px !important; min-height: 16px !important; }
+  .aman-flight-row .runway-assignment select { width: 44px !important; min-width: 44px !important; padding: 0 2px !important; }
+  .aman-delay-stack::before { min-width: 23px; font-size: 10px !important; }
+}
+
+/* Narrow two-sided timeline: compress every field together so the time columns no
+   longer force the whole label across the centre of the display. */
+@media (max-width: 900px) {
+  .aman-flight-row,
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"],
+  .aman-flight-row.display-left,
+  .aman-flight-row.display-right {
+    width: calc(50% - 18px);
+    grid-template-columns: 44px minmax(64px, 1fr) 34px 18px 38px 32px 40px !important;
+    gap: 2px !important;
+    padding: 1px 3px !important;
+    font-size: 9px !important;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row.display-left {
+    grid-template-columns: 40px 32px 38px 18px 34px minmax(64px, 1fr) 44px !important;
+  }
+
+  .aman-flight-row > strong { font-size: 10.5px !important; }
+  .aman-flight-row .tldt,
+  .aman-flight-row > span:nth-child(3),
+  .aman-flight-row > span:nth-child(5),
+  .aman-flight-row .fix-code,
+  .aman-flight-row .runway-assignment,
+  .aman-flight-row .runway-assignment select { font-size: 9px !important; }
+  .aman-flight-row .runway-assignment select { width: 40px !important; min-width: 40px !important; }
+  .aman-delay-stack::before { min-width: 20px; font-size: 9.5px !important; }
+}
+
+@media (max-width: 650px) {
+  .aman-flight-row,
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row[data-display-side="RIGHT"],
+  .aman-flight-row.display-left,
+  .aman-flight-row.display-right {
+    min-height: 17px !important;
+    height: 17px !important;
+    width: calc(50% - 14px);
+    grid-template-columns: 42px minmax(58px, 1fr) 30px 16px 34px 28px 36px !important;
+    gap: 2px !important;
+    padding: 1px 2px !important;
+  }
+
+  .aman-flight-row[data-display-side="LEFT"],
+  .aman-flight-row.display-left {
+    grid-template-columns: 36px 28px 34px 16px 30px minmax(58px, 1fr) 42px !important;
+  }
+
+  .aman-flight-row > strong { font-size: 10px !important; }
+  .aman-flight-row .runway-assignment select { width: 36px !important; min-width: 36px !important; padding: 0 1px !important; }
 }
