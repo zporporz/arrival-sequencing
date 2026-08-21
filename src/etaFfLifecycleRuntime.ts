@@ -1,3 +1,5 @@
+import { TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
+
 type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
 type FakePointerEvent = {
@@ -19,14 +21,16 @@ type ReactRowProps = {
 }
 
 const REFRESH_MS = 250
-const PX_PER_MINUTE = 10
 const POINTER_ID = 70423
 const STABLE_BEFORE_IAWP_MINUTES = 15
 const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
 const FROZEN_BEFORE_TLDT_MINUTES = 4
+const TARGET_TOLERANCE_MS = 2_000
 
 const lockedEtaFfByKey = new Map<string, number>()
+const superstableTldtByKey = new Map<string, number>()
 const frozenTldtByKey = new Map<string, number>()
+const sharedRevisionByKey = new Map<string, string>()
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -129,14 +133,15 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
-  // Once the four-minute gate has been crossed, FROZEN is sticky until the row
-  // leaves the live sequence and becomes a landed-history row.
+  // FROZEN is sticky until the active row leaves and the landing-history row takes over.
   if (frozenTldtByKey.has(key)) return 'FROZEN'
 
   const targetLanding = targetTldtMs(row, now)
   const finalTenNm = row.dataset.finalTenNm === 'true'
   if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
-    if (targetLanding != null) frozenTldtByKey.set(key, targetLanding)
+    const frozen = superstableTldtByKey.get(key) ?? targetLanding
+    if (frozen != null) frozenTldtByKey.set(key, frozen)
+    superstableTldtByKey.delete(key)
     return 'FROZEN'
   }
 
@@ -168,20 +173,53 @@ function applyTargetThroughReact(row: HTMLElement, targetMs: number, now: Date) 
 
   const deltaMinutes = (targetMs - currentMs) / 60_000
   props.onPointerDown(fakePointer(0))
-  props.onPointerMove(fakePointer(-deltaMinutes * PX_PER_MINUTE))
-  props.onPointerUp(fakePointer(-deltaMinutes * PX_PER_MINUTE))
+  props.onPointerMove(fakePointer(-deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE))
+  props.onPointerUp(fakePointer(-deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE))
   return true
+}
+
+function sharedTargetChanged(row: HTMLElement, key: string) {
+  const revision = row.dataset.sharedRevision || ''
+  if (!revision) return false
+  const previous = sharedRevisionByKey.get(key)
+  sharedRevisionByKey.set(key, revision)
+  return previous != null && previous !== revision
+}
+
+function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
+  const current = targetTldtMs(row, now)
+  if (current == null) return
+
+  let protectedTarget = superstableTldtByKey.get(key)
+  if (protectedTarget == null) {
+    protectedTarget = current
+    superstableTldtByKey.set(key, current)
+  }
+
+  // A local drag or a newer shared revision is an intentional ATC target change.
+  // Accept every such move; the next lifecycle pass can then return the flight to
+  // STABLE if its new target is outside the five-minute SUPERSTABLE condition.
+  if (row.classList.contains('is-dragging') || sharedTargetChanged(row, key)) {
+    superstableTldtByKey.set(key, current)
+    row.dataset.superstableTldt = new Date(current).toISOString()
+    return
+  }
+
+  // Automatic calculation/cascade must not walk a SUPERSTABLE target. Convert the
+  // current target into React's manual-target state once, then re-apply it if needed.
+  if (!isManualTarget(row) || Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
+    applyTargetThroughReact(row, protectedTarget, now)
+  }
+
+  row.dataset.superstableTldt = new Date(protectedTarget).toISOString()
 }
 
 function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
   const frozen = frozenTldtByKey.get(key)
   if (frozen == null) return
   const current = targetTldtMs(row, now)
-  const manual = isManualTarget(row)
 
-  // Entering FROZEN converts the current TLDT into a protected local target.
-  // Re-apply it if a later live ETA refresh or cascade tries to move the row.
-  if (!manual || current == null || Math.abs(current - frozen) > 2_000) {
+  if (!isManualTarget(row) || current == null || Math.abs(current - frozen) > TARGET_TOLERANCE_MS) {
     applyTargetThroughReact(row, frozen, now)
   }
 
@@ -233,7 +271,15 @@ function refreshRows() {
 
     const status = statusFromCurrentTarget(row, now, key)
     applyStatusClass(row, status)
-    if (status === 'FROZEN') enforceFrozenTldt(row, now, key)
+
+    if (status === 'SUPERSTABLE') {
+      enforceSuperstableTldt(row, now, key)
+    } else if (status === 'FROZEN') {
+      enforceFrozenTldt(row, now, key)
+    } else {
+      superstableTldtByKey.delete(key)
+      delete row.dataset.superstableTldt
+    }
 
     const callsign = rowCallsign(row)
     if (callsign) statusByCallsign.set(callsign, status)
@@ -266,14 +312,28 @@ function refreshRows() {
   for (const key of lockedEtaFfByKey.keys()) {
     if (!activeKeys.has(key)) lockedEtaFfByKey.delete(key)
   }
+  for (const key of superstableTldtByKey.keys()) {
+    if (!activeKeys.has(key)) superstableTldtByKey.delete(key)
+  }
   for (const key of frozenTldtByKey.keys()) {
     if (!activeKeys.has(key)) frozenTldtByKey.delete(key)
   }
+  for (const key of sharedRevisionByKey.keys()) {
+    if (!activeKeys.has(key)) sharedRevisionByKey.delete(key)
+  }
 }
 
-function blockFrozenDrag(event: PointerEvent) {
-  if (event.button !== 0 || !(event.target instanceof Element)) return
-  if (event.target.closest('select')) return
+function blockFrozenPointer(event: PointerEvent) {
+  if (!(event.target instanceof Element)) return
+  const row = event.target.closest<HTMLElement>('.aman-flight-row')
+  if (!row || row.dataset.flightStatus !== 'FROZEN') return
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
+function blockFrozenChange(event: Event) {
+  if (!(event.target instanceof Element)) return
   const row = event.target.closest<HTMLElement>('.aman-flight-row')
   if (!row || row.dataset.flightStatus !== 'FROZEN') return
   event.preventDefault()
@@ -284,12 +344,18 @@ function blockFrozenDrag(event: PointerEvent) {
 export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
-  document.addEventListener('pointerdown', blockFrozenDrag, true)
+  document.addEventListener('pointerdown', blockFrozenPointer, true)
+  document.addEventListener('dblclick', blockFrozenPointer, true)
+  document.addEventListener('change', blockFrozenChange, true)
 
   return () => {
     window.clearInterval(timer)
-    document.removeEventListener('pointerdown', blockFrozenDrag, true)
+    document.removeEventListener('pointerdown', blockFrozenPointer, true)
+    document.removeEventListener('dblclick', blockFrozenPointer, true)
+    document.removeEventListener('change', blockFrozenChange, true)
     lockedEtaFfByKey.clear()
+    superstableTldtByKey.clear()
     frozenTldtByKey.clear()
+    sharedRevisionByKey.clear()
   }
 }
