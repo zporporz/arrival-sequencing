@@ -26,6 +26,21 @@ type DragState = {
   startDisplayOffsetPx: number
 }
 
+type TimelineItem = {
+  row: HTMLElement
+  idealOffsetPx: number
+  heightPx: number
+}
+
+const LOCAL_DENSITY_WINDOW_MINUTES = 15
+const LOCAL_DENSITY_WINDOW_PX = LOCAL_DENSITY_WINDOW_MINUTES * TIMELINE_DISPLAY_PX_PER_MINUTE
+const DENSITY_START_ROWS = 6
+const DENSITY_FULL_ROWS = 10
+const MIN_VISUAL_GAP_PX = 2
+const FALLBACK_ROW_HEIGHT_PX = 18
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
   if (!key) return null
@@ -38,20 +53,126 @@ function rowIdealDisplayOffset(row: HTMLElement) {
   return Math.round(logicalOffset * TIMELINE_DISPLAY_SCALE * 100) / 100
 }
 
+function rowDisplaySide(row: HTMLElement) {
+  return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
+}
+
+function rowHeightPx(row: HTMLElement) {
+  const measured = row.getBoundingClientRect().height
+  return Number.isFinite(measured) && measured > 0 ? measured : FALLBACK_ROW_HEIGHT_PX
+}
+
 function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffsetPx: number) {
   const display = `${Math.round(displayOffsetPx * 100) / 100}px`
   const ideal = `${Math.round(idealOffsetPx * 100) / 100}px`
   if (row.style.getPropertyValue('--display-offset-px') !== display) row.style.setProperty('--display-offset-px', display)
   if (row.style.getPropertyValue('--ideal-display-offset-px') !== ideal) row.style.setProperty('--ideal-display-offset-px', ideal)
-  // Operational timeline labels must always represent their exact timestamp position.
-  row.dataset.timelinePacked = 'false'
+  row.dataset.timelinePacked = Math.abs(displayOffsetPx - idealOffsetPx) >= 0.5 ? 'true' : 'false'
 }
 
-function alignRowsToExactTime() {
-  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    const ideal = rowIdealDisplayOffset(row)
-    if (ideal != null) setDisplayOffset(row, ideal, ideal)
+function minimumSpacing(left: TimelineItem, right: TimelineItem) {
+  return (left.heightPx + right.heightPx) / 2 + MIN_VISUAL_GAP_PX
+}
+
+function localCount(items: TimelineItem[], centrePx: number) {
+  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
+  return items.reduce((count, item) => count + (Math.abs(item.idealOffsetPx - centrePx) <= halfWindow ? 1 : 0), 0)
+}
+
+function compressionPressure(count: number) {
+  if (count < DENSITY_START_ROWS) return 0
+  return clamp((count - (DENSITY_START_ROWS - 1)) / (DENSITY_FULL_ROWS - (DENSITY_START_ROWS - 1)), 0, 1)
+}
+
+function denseGroups(items: TimelineItem[]) {
+  const dense = new Set<number>()
+  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
+
+  items.forEach((item, index) => {
+    const members: number[] = []
+    items.forEach((candidate, candidateIndex) => {
+      if (Math.abs(candidate.idealOffsetPx - item.idealOffsetPx) <= halfWindow) members.push(candidateIndex)
+    })
+    if (members.length >= DENSITY_START_ROWS) members.forEach((member) => dense.add(member))
+    void index
   })
+
+  const groups: number[][] = []
+  let current: number[] = []
+  for (let index = 0; index < items.length; index += 1) {
+    if (!dense.has(index)) {
+      if (current.length) groups.push(current)
+      current = []
+      continue
+    }
+
+    const previous = current.at(-1)
+    if (previous != null && items[index].idealOffsetPx - items[previous].idealOffsetPx > LOCAL_DENSITY_WINDOW_PX) {
+      groups.push(current)
+      current = []
+    }
+    current.push(index)
+  }
+  if (current.length) groups.push(current)
+  return groups
+}
+
+function packDenseGroup(items: TimelineItem[], indices: number[]) {
+  if (indices.length < 2) return
+  const group = indices.map((index) => items[index])
+  const packed = [group[0].idealOffsetPx]
+
+  for (let index = 1; index < group.length; index += 1) {
+    const left = group[index - 1]
+    const right = group[index]
+    const idealGap = Math.max(0, right.idealOffsetPx - left.idealOffsetPx)
+    const minimumGap = minimumSpacing(left, right)
+    const midpoint = (left.idealOffsetPx + right.idealOffsetPx) / 2
+    const pressure = compressionPressure(localCount(items, midpoint))
+    const nextGap = idealGap <= minimumGap
+      ? minimumGap
+      : minimumGap + (idealGap - minimumGap) * (1 - pressure)
+    packed.push(packed[index - 1] + nextGap)
+  }
+
+  // Keep compression centred around the real times so the whole cluster does not
+  // drift only upward or downward.
+  const meanIdeal = group.reduce((sum, item) => sum + item.idealOffsetPx, 0) / group.length
+  const meanPacked = packed.reduce((sum, value) => sum + value, 0) / packed.length
+  let correction = meanIdeal - meanPacked
+
+  // Do not let the compressed cluster overlap a nearby row that was left on exact time.
+  const firstIndex = indices[0]
+  const lastIndex = indices[indices.length - 1]
+  const previous = firstIndex > 0 ? items[firstIndex - 1] : null
+  const next = lastIndex < items.length - 1 ? items[lastIndex + 1] : null
+  const minFirst = previous ? previous.idealOffsetPx + minimumSpacing(previous, group[0]) : Number.NEGATIVE_INFINITY
+  const maxLast = next ? next.idealOffsetPx - minimumSpacing(group[group.length - 1], next) : Number.POSITIVE_INFINITY
+
+  if (packed[0] + correction < minFirst) correction += minFirst - (packed[0] + correction)
+  if (packed[packed.length - 1] + correction > maxLast) correction += maxLast - (packed[packed.length - 1] + correction)
+
+  group.forEach((item, index) => setDisplayOffset(item.row, packed[index] + correction, item.idealOffsetPx))
+}
+
+function packSide(rows: HTMLElement[]) {
+  const items = rows
+    .map((row) => {
+      const idealOffsetPx = rowIdealDisplayOffset(row)
+      return idealOffsetPx == null ? null : { row, idealOffsetPx, heightPx: rowHeightPx(row) }
+    })
+    .filter((item): item is TimelineItem => item !== null)
+    .sort((left, right) => left.idealOffsetPx - right.idealOffsetPx)
+
+  // Default is exact-time placement. Only locally dense windows are compressed.
+  items.forEach((item) => setDisplayOffset(item.row, item.idealOffsetPx, item.idealOffsetPx))
+  denseGroups(items).forEach((group) => packDenseGroup(items, group))
+}
+
+function decorateRows() {
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
+  packSide(rows.filter((row) => rowDisplaySide(row) === 'LEFT'))
+  packSide(rows.filter((row) => rowDisplaySide(row) === 'RIGHT'))
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -74,18 +195,19 @@ export function installTimelineDisplayScaleRuntime() {
   let scheduled = false
   let disposed = false
 
-  const scheduleAlign = () => {
+  const scheduleDecorate = () => {
     if (disposed || scheduled || drag) return
     scheduled = true
     window.requestAnimationFrame(() => {
       scheduled = false
-      if (!disposed && !drag) alignRowsToExactTime()
+      if (!disposed && !drag) decorateRows()
     })
   }
 
-  // The rendered timeline uses 20 px/min while React's historical target math still
-  // uses 10 px/min. Convert physical pointer travel back into logical movement, but
-  // never visually pack or compress labels away from their true TLDT/STA position.
+  // React still uses the historical 10 px/min target math. Convert physical drag
+  // distance from the 20 px/min display scale back into logical movement. While the
+  // pointer is down the dragged strip follows the pointer; on release local-density
+  // packing is recalculated around the new true TLDT.
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
@@ -110,10 +232,9 @@ export function installTimelineDisplayScaleRuntime() {
     const physicalDelta = event.clientY - drag.startClientY
     const logicalDelta = physicalDelta * TIMELINE_LOGICAL_PX_PER_MINUTE / TIMELINE_DISPLAY_PX_PER_MINUTE
     const logicalClientY = drag.startClientY + logicalDelta
-
     const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
-    setDisplayOffset(drag.row, drag.startDisplayOffsetPx + physicalDelta, ideal)
 
+    setDisplayOffset(drag.row, drag.startDisplayOffsetPx + physicalDelta, ideal)
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
@@ -123,7 +244,7 @@ export function installTimelineDisplayScaleRuntime() {
   const clearDrag = (event?: PointerEvent) => {
     if (event && drag && event.pointerId !== drag.pointerId) return
     drag = null
-    scheduleAlign()
+    scheduleDecorate()
   }
 
   document.addEventListener('pointerdown', onPointerDown, true)
@@ -131,15 +252,15 @@ export function installTimelineDisplayScaleRuntime() {
   document.addEventListener('pointerup', clearDrag, true)
   document.addEventListener('pointercancel', clearDrag, true)
 
-  alignRowsToExactTime()
-  const observer = new MutationObserver(scheduleAlign)
+  decorateRows()
+  const observer = new MutationObserver(scheduleDecorate)
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ['style', 'data-display-side'],
   })
-  const timer = window.setInterval(scheduleAlign, 500)
+  const timer = window.setInterval(scheduleDecorate, 500)
 
   return () => {
     disposed = true
