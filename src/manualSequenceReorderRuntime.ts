@@ -48,7 +48,6 @@ function rowRunway(row: HTMLElement) {
 }
 
 function rowTargetMs(row: HTMLElement) {
-  // React continues to expose --offset-px in its historical 10 px/min coordinate.
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / TIMELINE_LOGICAL_PX_PER_MINUTE * 60_000
 
@@ -192,6 +191,11 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
 export function installManualSequenceReorderRuntime() {
   const onPointerDown = (event: PointerEvent) => {
     if (!(event.target instanceof Element) || event.target.closest('select')) return
+
+    // Body drag is now presentation-only. Sequence/target reorder follows only an
+    // intentional drag that begins on the TLDT time cell.
+    if (!event.target.closest('.aman-flight-row .tldt')) return
+
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
     const identity = rowIdentity(row)
@@ -216,7 +220,6 @@ export function installManualSequenceReorderRuntime() {
     const deltaY = event.clientY - drag.startY
     if (Math.abs(deltaY) <= MOVE_TOLERANCE_PX) return
     drag.moved = true
-    // Reorder follows the physical 20 px/min time scale shown to the controller.
     const requestedTargetMs = drag.startTargetMs + (-deltaY / TIMELINE_DISPLAY_PX_PER_MINUTE) * 60_000
     updateDragOrder(requestedTargetMs)
   }
