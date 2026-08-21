@@ -206,7 +206,10 @@ export async function onRequestPost(context) {
 
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
-        operational_state: 'MISSED_APPROACH',
+        // Reinsert immediately into the active sequence. The future MANUAL target is
+        // the missed-approach protection; landed-history capture suppresses it until
+        // that target has passed, so the aircraft cannot instantly become LANDED again.
+        operational_state: 'NORMAL',
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
         manual_runway: manualRunway,
