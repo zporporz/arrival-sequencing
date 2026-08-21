@@ -198,6 +198,28 @@ export async function onRequestPost(context) {
       return json({ ok: true, flightState: row });
     }
 
+    if (action === 'setMissedApproachTarget') {
+      const manualTldt = cleanIso(payload.manualTldt, true);
+      const suppliedRunway = cleanText(payload.manualRunway, 12)?.toUpperCase() || null;
+      const manualRunway = suppliedRunway || existing?.manual_runway || null;
+      const updatedAt = new Date().toISOString();
+
+      const row = await upsertFlightState(context.env, {
+        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        operational_state: 'MISSED_APPROACH',
+        target_mode: 'MANUAL',
+        manual_tldt: manualTldt,
+        manual_runway: manualRunway,
+        manual_updated_by_vid: auth.vid,
+        manual_updated_by_name: auth.name,
+        manual_updated_at: updatedAt,
+        operational_updated_by_vid: auth.vid,
+        operational_updated_by_name: auth.name,
+        operational_updated_at: updatedAt,
+      });
+      return json({ ok: true, flightState: row });
+    }
+
     if (action === 'clearManualTarget') {
       if (!existing) return json({ ok: true, flightState: null });
       const row = await patchFlightState(context.env, serviceDate, airport, callsign, {
