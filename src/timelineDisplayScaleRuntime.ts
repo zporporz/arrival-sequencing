@@ -19,27 +19,21 @@ type FakePointerEvent = {
   clientY: number
 }
 
+type DragMode = 'VISUAL' | 'TARGET'
+
 type DragState = {
+  mode: DragMode
   row: HTMLElement
+  key: string
   pointerId: number
   startClientY: number
   startDisplayOffsetPx: number
+  lastDisplayOffsetPx: number
 }
 
-type TimelineItem = {
-  row: HTMLElement
-  idealOffsetPx: number
-  heightPx: number
-}
-
-const LOCAL_DENSITY_WINDOW_MINUTES = 15
-const LOCAL_DENSITY_WINDOW_PX = LOCAL_DENSITY_WINDOW_MINUTES * TIMELINE_DISPLAY_PX_PER_MINUTE
-const DENSITY_START_ROWS = 5
-const DENSITY_FULL_ROWS = 8
-const MIN_VISUAL_GAP_PX = 2
-const FALLBACK_ROW_HEIGHT_PX = 18
-
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+const VISUAL_SNAP_PX = 10
+const VISUAL_JOIN_GAP_PX = 0
+const visualDeltaByKey = new Map<string, number>()
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -53,13 +47,28 @@ function rowIdealDisplayOffset(row: HTMLElement) {
   return Math.round(logicalOffset * TIMELINE_DISPLAY_SCALE * 100) / 100
 }
 
+function rowDisplayOffset(row: HTMLElement) {
+  const displayed = Number.parseFloat(row.style.getPropertyValue('--display-offset-px'))
+  if (Number.isFinite(displayed)) return displayed
+  const ideal = rowIdealDisplayOffset(row)
+  if (ideal == null) return null
+  return ideal + (visualDeltaByKey.get(rowKey(row)) ?? 0)
+}
+
 function rowDisplaySide(row: HTMLElement) {
   return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
 }
 
-function rowHeightPx(row: HTMLElement) {
-  const measured = row.getBoundingClientRect().height
-  return Number.isFinite(measured) && measured > 0 ? measured : FALLBACK_ROW_HEIGHT_PX
+function rowKey(row: HTMLElement) {
+  const title = row.getAttribute('title') || ''
+  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
+  return airport && callsign ? `${airport}:${callsign}` : ''
+}
+
+function rowHeight(row: HTMLElement) {
+  const height = row.getBoundingClientRect().height
+  return Number.isFinite(height) && height > 0 ? height : 18
 }
 
 function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffsetPx: number) {
@@ -67,107 +76,92 @@ function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffset
   const ideal = `${Math.round(idealOffsetPx * 100) / 100}px`
   if (row.style.getPropertyValue('--display-offset-px') !== display) row.style.setProperty('--display-offset-px', display)
   if (row.style.getPropertyValue('--ideal-display-offset-px') !== ideal) row.style.setProperty('--ideal-display-offset-px', ideal)
-  row.dataset.timelinePacked = Math.abs(displayOffsetPx - idealOffsetPx) >= 0.5 ? 'true' : 'false'
+
+  const key = rowKey(row)
+  const visualDelta = key ? visualDeltaByKey.get(key) ?? 0 : 0
+  row.dataset.visualStripMoved = Math.abs(visualDelta) >= 0.5 ? 'true' : 'false'
+  row.dataset.timelinePacked = 'false'
 }
 
-function minimumSpacing(left: TimelineItem, right: TimelineItem) {
-  return (left.heightPx + right.heightPx) / 2 + MIN_VISUAL_GAP_PX
-}
-
-function localCount(items: TimelineItem[], centrePx: number) {
-  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
-  return items.reduce((count, item) => count + (Math.abs(item.idealOffsetPx - centrePx) <= halfWindow ? 1 : 0), 0)
-}
-
-function compressionPressure(count: number) {
-  if (count < DENSITY_START_ROWS) return 0
-  return clamp((count - (DENSITY_START_ROWS - 1)) / (DENSITY_FULL_ROWS - (DENSITY_START_ROWS - 1)), 0, 1)
-}
-
-function denseGroups(items: TimelineItem[]) {
-  const dense = new Set<number>()
-  const halfWindow = LOCAL_DENSITY_WINDOW_PX / 2
-
-  items.forEach((item) => {
-    const members: number[] = []
-    items.forEach((candidate, candidateIndex) => {
-      if (Math.abs(candidate.idealOffsetPx - item.idealOffsetPx) <= halfWindow) members.push(candidateIndex)
-    })
-    if (members.length >= DENSITY_START_ROWS) members.forEach((member) => dense.add(member))
+function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
+  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    if (row === exceptRow) return
+    const ideal = rowIdealDisplayOffset(row)
+    if (ideal == null) return
+    const key = rowKey(row)
+    const delta = key ? visualDeltaByKey.get(key) ?? 0 : 0
+    setDisplayOffset(row, ideal + delta, ideal)
   })
-
-  const groups: number[][] = []
-  let current: number[] = []
-  for (let index = 0; index < items.length; index += 1) {
-    if (!dense.has(index)) {
-      if (current.length) groups.push(current)
-      current = []
-      continue
-    }
-
-    const previous = current.at(-1)
-    if (previous != null && items[index].idealOffsetPx - items[previous].idealOffsetPx > LOCAL_DENSITY_WINDOW_PX) {
-      groups.push(current)
-      current = []
-    }
-    current.push(index)
-  }
-  if (current.length) groups.push(current)
-  return groups
 }
 
-function packDenseGroup(items: TimelineItem[], indices: number[]) {
-  if (indices.length < 2) return
-  const group = indices.map((index) => items[index])
-  const packed = [group[0].idealOffsetPx]
+function sameSideRows(row: HTMLElement) {
+  const side = rowDisplaySide(row)
+  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).filter((candidate) =>
+    candidate !== row && rowDisplaySide(candidate) === side,
+  )
+}
 
-  for (let index = 1; index < group.length; index += 1) {
-    const left = group[index - 1]
-    const right = group[index]
-    const idealGap = Math.max(0, right.idealOffsetPx - left.idealOffsetPx)
-    const minimumGap = minimumSpacing(left, right)
-    const midpoint = (left.idealOffsetPx + right.idealOffsetPx) / 2
-    const pressure = compressionPressure(localCount(items, midpoint))
-    const nextGap = idealGap <= minimumGap
-      ? minimumGap
-      : minimumGap + (idealGap - minimumGap) * (1 - pressure)
-    packed.push(packed[index - 1] + nextGap)
+function touchingDistance(row: HTMLElement, other: HTMLElement) {
+  return (rowHeight(row) + rowHeight(other)) / 2 + VISUAL_JOIN_GAP_PX
+}
+
+function snapCandidate(row: HTMLElement, rawOffset: number) {
+  const ideal = rowIdealDisplayOffset(row)
+  let best = rawOffset
+  let bestDistance = VISUAL_SNAP_PX + 0.001
+
+  // Dragging back near the real-time position automatically re-aligns the strip.
+  if (ideal != null) {
+    const distance = Math.abs(rawOffset - ideal)
+    if (distance < bestDistance) {
+      best = ideal
+      bestDistance = distance
+    }
   }
 
-  const meanIdeal = group.reduce((sum, item) => sum + item.idealOffsetPx, 0) / group.length
-  const meanPacked = packed.reduce((sum, value) => sum + value, 0) / packed.length
-  let correction = meanIdeal - meanPacked
+  for (const other of sameSideRows(row)) {
+    const otherOffset = rowDisplayOffset(other)
+    if (otherOffset == null) continue
+    const spacing = touchingDistance(row, other)
+    for (const candidate of [otherOffset - spacing, otherOffset + spacing]) {
+      const distance = Math.abs(rawOffset - candidate)
+      if (distance < bestDistance) {
+        best = candidate
+        bestDistance = distance
+      }
+    }
+  }
 
-  const firstIndex = indices[0]
-  const lastIndex = indices[indices.length - 1]
-  const previous = firstIndex > 0 ? items[firstIndex - 1] : null
-  const next = lastIndex < items.length - 1 ? items[lastIndex + 1] : null
-  const minFirst = previous ? previous.idealOffsetPx + minimumSpacing(previous, group[0]) : Number.NEGATIVE_INFINITY
-  const maxLast = next ? next.idealOffsetPx - minimumSpacing(group[group.length - 1], next) : Number.POSITIVE_INFINITY
-
-  if (packed[0] + correction < minFirst) correction += minFirst - (packed[0] + correction)
-  if (packed[packed.length - 1] + correction > maxLast) correction += maxLast - (packed[packed.length - 1] + correction)
-
-  group.forEach((item, index) => setDisplayOffset(item.row, packed[index] + correction, item.idealOffsetPx))
+  return bestDistance <= VISUAL_SNAP_PX ? best : rawOffset
 }
 
-function packSide(rows: HTMLElement[]) {
-  const items = rows
-    .map((row) => {
-      const idealOffsetPx = rowIdealDisplayOffset(row)
-      return idealOffsetPx == null ? null : { row, idealOffsetPx, heightPx: rowHeightPx(row) }
-    })
-    .filter((item): item is TimelineItem => item !== null)
-    .sort((left, right) => left.idealOffsetPx - right.idealOffsetPx)
+function avoidOverlap(row: HTMLElement, requestedOffset: number, direction: number) {
+  let candidate = requestedOffset
+  const others = sameSideRows(row)
+  const pushDirection = direction === 0 ? 1 : Math.sign(direction)
 
-  items.forEach((item) => setDisplayOffset(item.row, item.idealOffsetPx, item.idealOffsetPx))
-  denseGroups(items).forEach((group) => packDenseGroup(items, group))
+  for (let pass = 0; pass < others.length + 2; pass += 1) {
+    let changed = false
+    for (const other of others) {
+      const otherOffset = rowDisplayOffset(other)
+      if (otherOffset == null) continue
+      const spacing = touchingDistance(row, other)
+      if (Math.abs(candidate - otherOffset) >= spacing - 0.25) continue
+
+      candidate = pushDirection >= 0
+        ? otherOffset + spacing
+        : otherOffset - spacing
+      changed = true
+    }
+    if (!changed) break
+  }
+
+  return candidate
 }
 
-function decorateRows() {
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
-  packSide(rows.filter((row) => rowDisplaySide(row) === 'LEFT'))
-  packSide(rows.filter((row) => rowDisplaySide(row) === 'RIGHT'))
+function visualDragOffset(row: HTMLElement, rawOffset: number, direction: number) {
+  const snapped = snapCandidate(row, rawOffset)
+  return avoidOverlap(row, snapped, direction)
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -190,12 +184,12 @@ export function installTimelineDisplayScaleRuntime() {
   let scheduled = false
   let disposed = false
 
-  const scheduleDecorate = () => {
+  const scheduleApply = () => {
     if (disposed || scheduled || drag) return
     scheduled = true
     window.requestAnimationFrame(() => {
       scheduled = false
-      if (!disposed && !drag) decorateRows()
+      if (!disposed && !drag) applyStoredVisualPositions()
     })
   }
 
@@ -205,53 +199,100 @@ export function installTimelineDisplayScaleRuntime() {
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
 
-    const displayed = Number.parseFloat(row.style.getPropertyValue('--display-offset-px'))
+    const key = rowKey(row)
     const ideal = rowIdealDisplayOffset(row)
+    if (!key || ideal == null) return
+
+    const displayed = rowDisplayOffset(row) ?? ideal
+    const mode: DragMode = event.target.closest('.tldt') ? 'TARGET' : 'VISUAL'
     drag = {
+      mode,
       row,
+      key,
       pointerId: event.pointerId,
       startClientY: event.clientY,
-      startDisplayOffsetPx: Number.isFinite(displayed) ? displayed : (ideal ?? 0),
+      startDisplayOffsetPx: displayed,
+      lastDisplayOffsetPx: displayed,
+    }
+
+    if (mode === 'VISUAL') {
+      row.dataset.visualDragging = 'true'
+      try { row.setPointerCapture?.(event.pointerId) } catch { /* no-op */ }
+      // Body drag is presentation-only. Do not let React convert it into a TLDT change.
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
     }
   }
 
   const onPointerMove = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
-    const props = reactProps<ReactRowProps>(drag.row)
-    if (!props?.onPointerMove) return
 
     const physicalDelta = event.clientY - drag.startClientY
+    if (drag.mode === 'VISUAL') {
+      const raw = drag.startDisplayOffsetPx + physicalDelta
+      const next = visualDragOffset(drag.row, raw, physicalDelta)
+      drag.lastDisplayOffsetPx = next
+      const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
+      setDisplayOffset(drag.row, next, ideal)
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+      return
+    }
+
+    const props = reactProps<ReactRowProps>(drag.row)
+    if (!props?.onPointerMove) return
     const logicalDelta = physicalDelta * TIMELINE_LOGICAL_PX_PER_MINUTE / TIMELINE_DISPLAY_PX_PER_MINUTE
     const logicalClientY = drag.startClientY + logicalDelta
     const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
 
-    setDisplayOffset(drag.row, drag.startDisplayOffsetPx + physicalDelta, ideal)
+    // TLDT-cell drag keeps the historical target-time behavior.
+    drag.lastDisplayOffsetPx = drag.startDisplayOffsetPx + physicalDelta
+    setDisplayOffset(drag.row, drag.lastDisplayOffsetPx, ideal)
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
     props.onPointerMove(fakePointer(drag.row, event.pointerId, logicalClientY))
   }
 
-  const clearDrag = (event?: PointerEvent) => {
-    if (event && drag && event.pointerId !== drag.pointerId) return
+  const finishDrag = (event?: PointerEvent) => {
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return
+    const finished = drag
     drag = null
-    scheduleDecorate()
+
+    if (finished.mode === 'VISUAL') {
+      const ideal = rowIdealDisplayOffset(finished.row)
+      if (ideal != null) {
+        const delta = finished.lastDisplayOffsetPx - ideal
+        if (Math.abs(delta) < 0.5) visualDeltaByKey.delete(finished.key)
+        else visualDeltaByKey.set(finished.key, delta)
+      }
+      delete finished.row.dataset.visualDragging
+      if (event) {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+      }
+    }
+
+    scheduleApply()
   }
 
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
-  document.addEventListener('pointerup', clearDrag, true)
-  document.addEventListener('pointercancel', clearDrag, true)
+  document.addEventListener('pointerup', finishDrag, true)
+  document.addEventListener('pointercancel', finishDrag, true)
 
-  decorateRows()
-  const observer = new MutationObserver(scheduleDecorate)
+  applyStoredVisualPositions()
+  const observer = new MutationObserver(scheduleApply)
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ['style', 'data-display-side'],
   })
-  const timer = window.setInterval(scheduleDecorate, 500)
+  const timer = window.setInterval(scheduleApply, 500)
 
   return () => {
     disposed = true
@@ -260,12 +301,15 @@ export function installTimelineDisplayScaleRuntime() {
     window.clearInterval(timer)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)
-    document.removeEventListener('pointerup', clearDrag, true)
-    document.removeEventListener('pointercancel', clearDrag, true)
+    document.removeEventListener('pointerup', finishDrag, true)
+    document.removeEventListener('pointercancel', finishDrag, true)
+    visualDeltaByKey.clear()
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
       row.style.removeProperty('--display-offset-px')
       row.style.removeProperty('--ideal-display-offset-px')
       delete row.dataset.timelinePacked
+      delete row.dataset.visualStripMoved
+      delete row.dataset.visualDragging
     })
   }
 }
