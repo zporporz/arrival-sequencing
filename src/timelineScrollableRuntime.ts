@@ -5,10 +5,6 @@ const FUTURE_HORIZON_MINUTES = 240
 const TOP_PADDING_PX = 36
 const BOTTOM_PADDING_PX = 30
 
-function formatHm(date: Date) {
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
-}
-
 function readBelowActualMinutes(select: HTMLSelectElement | null) {
   const value = Number(select?.value)
   return Number.isFinite(value) ? value : 10
@@ -16,6 +12,22 @@ function readBelowActualMinutes(select: HTMLSelectElement | null) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
+}
+
+function createTimeLabel(date: Date) {
+  const label = document.createElement('span')
+  label.className = 'aman-axis-time-box'
+
+  const hour = document.createElement('small')
+  hour.className = 'aman-axis-time-hour'
+  hour.textContent = String(date.getUTCHours()).padStart(2, '0')
+
+  const minute = document.createElement('strong')
+  minute.className = 'aman-axis-time-minute'
+  minute.textContent = String(date.getUTCMinutes()).padStart(2, '0')
+
+  label.append(hour, minute)
+  return label
 }
 
 export function installTimelineScrollableRuntime() {
@@ -112,11 +124,7 @@ export function installTimelineScrollableRuntime() {
       tick.className = `aman-runtime-minute-tick ${isMajor ? 'is-major' : 'is-minor'}`
       tick.style.top = `${Math.round(y)}px`
 
-      if (isMajor) {
-        const label = document.createElement('span')
-        label.textContent = formatHm(tickTime)
-        tick.appendChild(label)
-      }
+      if (isMajor) tick.appendChild(createTimeLabel(tickTime))
 
       const marker = document.createElement('i')
       tick.appendChild(marker)
