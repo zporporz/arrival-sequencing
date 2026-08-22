@@ -124,3 +124,21 @@
 
   .aman-landed-history-row strong { font-size: 7.5px; }
 }
+
+/* LANDED rows use the same protected centre-axis corridor as active/monitored rows.
+   Keep this block last so the older responsive width rules above cannot push a landed
+   strip back underneath the boxed time scale. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-landed-history-row {
+  left: calc(50% + var(--aman-axis-right-gutter, 28px)) !important;
+  right: auto !important;
+  width: min(610px, calc(50% - var(--aman-axis-right-gutter, 28px) - 10px)) !important;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-landed-history-row[data-display-side="LEFT"] {
+  left: auto !important;
+  right: calc(50% + var(--aman-axis-left-gutter, 72px)) !important;
+  width: min(610px, calc(50% - var(--aman-axis-left-gutter, 72px) - 10px)) !important;
+  overflow: hidden !important;
+}
