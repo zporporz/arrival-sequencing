@@ -6,15 +6,6 @@ const json = (body, status = 200) => Response.json(body, {
   headers: { 'Cache-Control': 'private, no-store' },
 });
 
-function finiteNumber(...values) {
-  for (const value of values) {
-    if (value == null || value === '') continue;
-    const number = Number(value);
-    if (Number.isFinite(number)) return number;
-  }
-  return null;
-}
-
 function cleanUpper(value) {
   const text = String(value || '').trim().toUpperCase();
   return text || null;
@@ -31,27 +22,22 @@ function aircraftType(pilot) {
   return cleanUpper(fp.aircraftId) || cleanUpper(aircraft.icaoCode) || null;
 }
 
-async function readCollectorToken(env) {
-  const result = await supabaseAdminRequest(
-    env,
-    'aman_collector_state?select=collector_token&collector_key=eq.ivao-flight-index&limit=1',
-  );
-  return String(result.data?.[0]?.collector_token || '').trim();
-}
-
-async function claimCollector(env) {
-  const result = await supabaseAdminRequest(env, 'rpc/claim_aman_flight_index_collector', {
+async function authorizeAndClaim(env, suppliedToken) {
+  const result = await supabaseAdminRequest(env, 'rpc/authorize_and_claim_aman_flight_index_collector', {
     method: 'POST',
-    body: JSON.stringify({ min_interval_seconds: 45 }),
+    body: JSON.stringify({ supplied_token: suppliedToken, min_interval_seconds: 45 }),
   });
   return result.data === true;
 }
 
-async function updateCollectorState(env, patch) {
-  await supabaseAdminRequest(env, 'aman_collector_state?collector_key=eq.ivao-flight-index', {
-    method: 'PATCH',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+async function finishCollector(env, suppliedToken, success, errorMessage = null) {
+  await supabaseAdminRequest(env, 'rpc/finish_aman_flight_index_collector', {
+    method: 'POST',
+    body: JSON.stringify({
+      supplied_token: suppliedToken,
+      success,
+      error_message: errorMessage,
+    }),
   });
 }
 
@@ -97,23 +83,19 @@ function buildRows(data, fetchedAt) {
       last_seen_at: fetchedAt,
       last_track_at: trackAt,
       last_state: track.state ? String(track.state).trim() : null,
-      // Intentionally do not store route, position, GS, altitude, heading or track history.
-      // IVAO remains the source for historical track replay when diagnosis is needed.
-      _gs_check: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
     });
   }
 
-  return rows.map(({ _gs_check, ...row }) => row);
+  return rows;
 }
 
 export async function onRequestPost(context) {
   const suppliedToken = String(context.request.headers.get('x-collector-token') || '').trim();
-  try {
-    const expectedToken = await readCollectorToken(context.env);
-    if (!expectedToken || suppliedToken !== expectedToken) return json({ error: 'Unauthorized collector request' }, 401);
+  if (!suppliedToken) return json({ error: 'Unauthorized collector request' }, 401);
 
-    const claimed = await claimCollector(context.env);
-    if (!claimed) return json({ ok: true, skipped: 'collector already ran recently' });
+  try {
+    const claimed = await authorizeAndClaim(context.env, suppliedToken);
+    if (!claimed) return json({ ok: true, skipped: 'unauthorized or collector already ran recently' });
 
     const fetchedAt = new Date().toISOString();
     const data = await fetchWhazzup(context.env);
@@ -124,16 +106,12 @@ export async function onRequestPost(context) {
       body: JSON.stringify({ rows }),
     });
 
-    await updateCollectorState(context.env, {
-      last_success_at: fetchedAt,
-      last_error: null,
-    });
-
+    await finishCollector(context.env, suppliedToken, true, null);
     return json({ ok: true, fetchedAt, rows: rows.length, affected: Number(result.data || 0) });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     try {
-      await updateCollectorState(context.env, { last_error: message.slice(0, 1000) });
+      await finishCollector(context.env, suppliedToken, false, message.slice(0, 1000));
     } catch {}
     return json({ error: message }, 500);
   }
