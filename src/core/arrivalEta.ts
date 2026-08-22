@@ -316,6 +316,12 @@ function positionModelActive(flight: IvaoArrivalTrafficFlight, trend: TrackTrend
   return flight.altitude >= positionModelTriggerAltitudeFt(flight) - 500
 }
 
+function climbProtectionActive(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
+  if (flight.onGround === true || !finite(flight.altitude)) return false
+  if (isDescending(flight, trend)) return false
+  return flight.altitude < positionModelTriggerAltitudeFt(flight) - 500
+}
+
 function observedGroundSpeedKt(flight: IvaoArrivalTrafficFlight, trend: TrackTrend) {
   if (finite(trend.smoothedGroundSpeedKt) && trend.smoothedGroundSpeedKt >= MIN_LIVE_GS_KT) {
     const current = finite(flight.groundSpeed) && flight.groundSpeed >= MIN_LIVE_GS_KT ? flight.groundSpeed : trend.smoothedGroundSpeedKt
@@ -488,6 +494,47 @@ function liveRouteEstimate(
   }
 }
 
+function provisionalClimbLiveEstimate(
+  flight: IvaoArrivalTrafficFlight,
+  geometry: RouteGeometry,
+  refFix: string,
+  fetchedAt: string,
+  trend: TrackTrend,
+): ArrivalEtaEstimate | null {
+  if (flight.onGround === true || !finite(flight.altitude)) return null
+
+  const observedGsKt = observedGroundSpeedKt(flight, trend)
+  if (!finite(observedGsKt) || observedGsKt < MIN_LIVE_GS_KT) return null
+
+  const progress = routeProgress(flight, geometry)
+  if (!progress || progress.offRouteNm > MAX_ROUTE_DEVIATION_NM) return null
+
+  const targets = fixDistances(geometry, refFix)
+  if (!targets.length) return null
+
+  const ahead = targets.find((distance) => distance >= progress.progressNm - 1)
+  if (ahead == null) return null
+
+  const remainingNm = Math.max(0, ahead - progress.progressNm) + progress.offRouteNm
+  const trackBaseMs = safeTime(flight.trackTimestamp) ?? safeTime(fetchedAt) ?? Date.now()
+  const etaMs = trackBaseMs + remainingNm / observedGsKt * 3600_000
+  const triggerFt = positionModelTriggerAltitudeFt(flight)
+
+  return {
+    source: 'LIVE_ROUTE',
+    predictedIawpAt: new Date(etaMs).toISOString(),
+    confidence: 'MEDIUM',
+    remainingNm,
+    offRouteNm: progress.offRouteNm,
+    groundSpeedKt: observedGsKt,
+    pastCrossing: false,
+    reason: `CLIMB PROVISIONAL · REM ${remainingNm.toFixed(1)}NM · OBS ${Math.round(observedGsKt)}KT · ALT ${Math.round(flight.altitude)}FT · LIVE unrestricted at ${Math.round(triggerFt / 100)}00FT`,
+    modelPhase: 'CRUISE',
+    trackSampleCount: trend.sampleCount,
+    verticalTrendFpm: resolvedVerticalTrendFpm(flight, trend),
+  }
+}
+
 function eetEstimate(
   source: Exclude<ArrivalEtaSource, 'LIVE_ROUTE' | 'UNAVAILABLE'>,
   departureIso: string | null,
@@ -510,11 +557,49 @@ function eetEstimate(
   }
 }
 
+function takeoffBaselineEstimate(
+  flight: IvaoArrivalTrafficFlight,
+  nominalStarSeconds: number,
+  referenceIso: string,
+) {
+  const actualDepartureIso = flight.actualDepartureTimeSeconds != null && flight.onGround !== true
+    ? secondsOfDayToNearestUtc(flight.actualDepartureTimeSeconds, referenceIso)
+    : null
+  const actual = eetEstimate('ACTUAL_DEPARTURE_EET', actualDepartureIso, flight.filedEetSeconds, nominalStarSeconds)
+  if (actual) return actual
+  return eetEstimate('TRACKED_TAKEOFF_EET', flight.trackedTakeoffAt, flight.filedEetSeconds, nominalStarSeconds)
+}
+
+function protectedClimbEstimate(baseline: ArrivalEtaEstimate, provisional: ArrivalEtaEstimate | null) {
+  const baselineMs = safeTime(baseline.predictedIawpAt)
+  const provisionalMs = safeTime(provisional?.predictedIawpAt)
+  if (baselineMs == null) return provisional ?? baseline
+  if (provisional && provisionalMs != null && provisionalMs < baselineMs) {
+    const gainSeconds = Math.round((baselineMs - provisionalMs) / 1000)
+    return {
+      ...provisional,
+      reason: `${provisional.reason} · CLIMB PROTECTION accepted LIVE ${gainSeconds}s earlier than takeoff baseline`,
+    }
+  }
+  if (provisionalMs != null) {
+    const lateSeconds = Math.max(0, Math.round((provisionalMs - baselineMs) / 1000))
+    return {
+      ...baseline,
+      reason: `${baseline.reason} · CLIMB PROTECTION held takeoff baseline; provisional LIVE was ${lateSeconds}s later`,
+    }
+  }
+  return {
+    ...baseline,
+    reason: `${baseline.reason} · CLIMB PROTECTION held takeoff baseline; provisional LIVE unavailable`,
+  }
+}
+
 /**
  * Progressive ETA source priority for the Approach AMAN:
- * position/route after FL300 or filed cruise -> actual departure + EET -> tracked takeoff + EET -> filed EOBT + EET.
- * Cruise uses a two-minute live GS trend. Once descent is confirmed, the remaining route is integrated in short
- * segments using the SimBrief descent schedule, current vertical trend and a live GS correction that carries wind.
+ * takeoff + EET - STAR establishes the initial ETA-FF baseline. During climb below the
+ * position-model trigger (normally about FL300), route/GS may move ETA earlier but a low
+ * climb GS cannot make the displayed ETA later than that takeoff baseline. At the trigger
+ * or once descent is detected, LIVE_ROUTE becomes unrestricted in both directions.
  */
 export function estimateIawpArrival(
   flight: IvaoArrivalTrafficFlight,
@@ -526,21 +611,20 @@ export function estimateIawpArrival(
 ): ArrivalEtaEstimate {
   const trend = recordTrackTrend(flight, fetchedAt)
   const resolvedPerformance = performance ?? cachedPerformance(flight)
+  const referenceIso = flight.connectedAt || fetchedAt
+  const takeoffBaseline = takeoffBaselineEstimate(flight, nominalStarSeconds, referenceIso)
+
+  if (geometry && climbProtectionActive(flight, trend) && takeoffBaseline) {
+    const provisional = provisionalClimbLiveEstimate(flight, geometry, refFix, fetchedAt, trend)
+    return protectedClimbEstimate(takeoffBaseline, provisional)
+  }
 
   if (geometry) {
     const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance, trend)
     if (live) return live
   }
 
-  const referenceIso = flight.connectedAt || fetchedAt
-  const actualDepartureIso = flight.actualDepartureTimeSeconds != null && flight.onGround !== true
-    ? secondsOfDayToNearestUtc(flight.actualDepartureTimeSeconds, referenceIso)
-    : null
-  const actual = eetEstimate('ACTUAL_DEPARTURE_EET', actualDepartureIso, flight.filedEetSeconds, nominalStarSeconds)
-  if (actual) return actual
-
-  const tracked = eetEstimate('TRACKED_TAKEOFF_EET', flight.trackedTakeoffAt, flight.filedEetSeconds, nominalStarSeconds)
-  if (tracked) return tracked
+  if (takeoffBaseline) return takeoffBaseline
 
   const filedDepartureIso = flight.filedDepartureTimeSeconds != null
     ? secondsOfDayToNearestUtc(flight.filedDepartureTimeSeconds, referenceIso)
