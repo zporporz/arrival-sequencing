@@ -34,7 +34,8 @@
   height: 18px !important;
   display: grid !important;
   grid-template-columns: 17px 1fr;
-  align-items: center;
+  align-items: baseline;
+  align-content: center;
   gap: 1px;
   padding: 0 3px !important;
   box-sizing: border-box;
@@ -49,7 +50,7 @@
 }
 
 .aman-axis-time-hour {
-  align-self: center;
+  align-self: baseline;
   color: #9aaec2;
   font: 800 8px/1 "SFMono-Regular", Consolas, monospace;
   text-align: right;
@@ -63,7 +64,7 @@
 }
 
 .aman-axis-time-minute {
-  align-self: center;
+  align-self: baseline;
   color: #f0f6fc;
   font: 950 13px/1 "SFMono-Regular", Consolas, monospace;
   text-align: left;
