@@ -1,0 +1,201 @@
+/* Real-MAESTRO-inspired centre time scale and protected label gutter.
+   The time box lives to the LEFT of the centreline, so left-side flight strips
+   permanently reserve that corridor instead of stretching underneath it. */
+
+.aman-timeline-stage[data-scroll-timeline="true"] {
+  --aman-axis-left-gutter: 78px;
+  --aman-axis-right-gutter: 28px;
+}
+
+/* Boxed major time label: small hour + dominant minute, matching the reference HMI. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
+  left: calc(50% - 72px) !important;
+  top: -10px !important;
+  width: 58px !important;
+  height: 20px !important;
+  display: grid !important;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px !important;
+  border: 1px solid rgba(132, 154, 179, .72);
+  border-radius: 1px;
+  background: rgba(34, 49, 68, .96);
+  box-shadow: inset 0 0 0 1px rgba(198, 215, 232, .06), 0 1px 2px rgba(0, 0, 0, .38);
+  color: #dbe7f3 !important;
+  text-align: left !important;
+  line-height: 1 !important;
+  box-sizing: border-box;
+}
+
+.aman-axis-time-hour {
+  align-self: center;
+  color: #92a7bd;
+  font: 800 8px/1 "SFMono-Regular", Consolas, monospace;
+  text-align: right;
+  letter-spacing: -.05em;
+}
+
+.aman-axis-time-minute {
+  align-self: center;
+  color: #eef5fb;
+  font: 950 14px/1 "SFMono-Regular", Consolas, monospace;
+  text-align: left;
+  letter-spacing: -.04em;
+}
+
+/* Right-side strips only need the tick corridor. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+  left: calc(50% + var(--aman-axis-right-gutter)) !important;
+  right: auto !important;
+  width: min(660px, calc(50% - var(--aman-axis-right-gutter) - 10px)) !important;
+}
+
+/* Left-side strips must never enter the boxed-time corridor. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+  left: auto !important;
+  right: calc(50% + var(--aman-axis-left-gutter)) !important;
+  width: min(620px, calc(50% - var(--aman-axis-left-gutter) - 10px)) !important;
+}
+
+/* Mid-size displays: reduce the data grid before it can overflow its strip. */
+@media (max-width: 1500px) {
+  .aman-timeline-stage[data-scroll-timeline="true"] {
+    --aman-axis-left-gutter: 74px;
+    --aman-axis-right-gutter: 26px;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+    grid-template-columns: 46px minmax(78px, 1fr) 40px 22px 44px 32px 46px !important;
+    gap: 4px !important;
+    padding: 0 4px !important;
+    font-size: 10.5px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+    grid-template-columns: 46px 32px 44px 22px 40px minmax(78px, 1fr) 46px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
+  .aman-monitored-flight-row strong {
+    font-size: 12px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+    font-size: 10.5px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+    width: 46px !important;
+    min-width: 46px !important;
+    padding: 0 2px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before {
+    font-size: 11px !important;
+  }
+}
+
+@media (max-width: 1250px) {
+  .aman-timeline-stage[data-scroll-timeline="true"] {
+    --aman-axis-left-gutter: 68px;
+    --aman-axis-right-gutter: 22px;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
+    left: calc(50% - 64px) !important;
+    width: 52px !important;
+    grid-template-columns: 16px 1fr;
+  }
+
+  .aman-axis-time-hour { font-size: 7px; }
+  .aman-axis-time-minute { font-size: 12px; }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+    grid-template-columns: 40px minmax(60px, 1fr) 32px 18px 36px 28px 40px !important;
+    gap: 2px !important;
+    padding: 0 2px !important;
+    font-size: 9px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+    grid-template-columns: 40px 28px 36px 18px 32px minmax(60px, 1fr) 40px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
+  .aman-monitored-flight-row strong { font-size: 10.5px !important; }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+    font-size: 9px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+    width: 40px !important;
+    min-width: 40px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before { font-size: 9.5px !important; }
+}
+
+@media (max-width: 1100px) {
+  .aman-timeline-stage[data-scroll-timeline="true"] {
+    --aman-axis-left-gutter: 64px;
+    --aman-axis-right-gutter: 20px;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+    grid-template-columns: 36px minmax(54px, 1fr) 28px 16px 32px 24px 36px !important;
+    font-size: 8px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+    grid-template-columns: 36px 24px 32px 16px 28px minmax(54px, 1fr) 36px !important;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
+  .aman-monitored-flight-row strong { font-size: 9.5px !important; }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select { font-size: 8px !important; }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
+    width: 36px !important;
+    min-width: 36px !important;
+  }
+}
