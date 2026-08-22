@@ -42,6 +42,7 @@ export function installAirportScopeRuntime() {
   let wrapper: HTMLDivElement | null = null
   let optionSignature = ''
   let syncing = false
+  let initialScopeApplied = false
   const displaySides = loadDisplaySides()
 
   const selectedValues = () => {
@@ -253,6 +254,23 @@ export function installAirportScopeRuntime() {
     }
 
     if (!wrapper || syncing) return
+
+    // The operational AMAN opens with both Bangkok airports active. This is applied
+    // once per page load; after that, controller selection remains fully manual.
+    if (!initialScopeApplied) {
+      initialScopeApplied = true
+      const both = allButton(nextHost)
+      if (both && !both.classList.contains('is-active')) {
+        syncing = true
+        try {
+          both.click()
+        } finally {
+          syncing = false
+        }
+        window.requestAnimationFrame(attach)
+        return
+      }
+    }
 
     const active = scopeButtons(nextHost).find((button) => button.classList.contains('is-active'))
     const activeValue = active ? buttonValue(active) : ''
