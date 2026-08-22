@@ -1,70 +1,93 @@
-/* Real-MAESTRO-inspired centre time scale.
-   Keep flight typography readable; solve compact-screen collisions with geometry,
-   not by shrinking the operational text. */
+/* Dedicated MAESTRO centre time rail.
+   The time scale owns one fixed middle column; left/right flight strips stop outside
+   that column instead of the time plaques borrowing space from the left side. */
 
 .aman-timeline-stage[data-scroll-timeline="true"] {
-  --aman-axis-left-gutter: 74px;
-  --aman-axis-right-gutter: 28px;
+  --aman-time-rail-width: 58px;
+  --aman-time-rail-half: 29px;
+  --aman-axis-gap: 6px;
+  --aman-axis-left-gutter: calc(var(--aman-time-rail-half) + var(--aman-axis-gap));
+  --aman-axis-right-gutter: calc(var(--aman-time-rail-half) + var(--aman-axis-gap));
 }
 
-/* Shorter but slightly taller time plaque. The box stays close to the centreline,
-   leaving a real safety gap between it and the left-side TLDT cell. */
+/* Continuous framed centre channel, similar to the real MAESTRO time strip. */
+.aman-timeline-stage[data-scroll-timeline="true"]::before {
+  content: '';
+  position: absolute;
+  left: calc(50% - var(--aman-time-rail-half));
+  top: 0;
+  width: var(--aman-time-rail-width);
+  height: var(--timeline-content-height, 5000px);
+  box-sizing: border-box;
+  border-left: 1px solid rgba(116, 143, 172, .34);
+  border-right: 1px solid rgba(116, 143, 172, .34);
+  background: rgba(24, 37, 53, .28);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Each major time is a compact framed plaque centred INSIDE the rail. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
-  left: calc(50% - 60px) !important;
+  left: calc(50% - 24px) !important;
   top: -9px !important;
-  width: 52px !important;
+  width: 48px !important;
   height: 18px !important;
   display: grid !important;
-  grid-template-columns: 15px 1fr;
+  grid-template-columns: 17px 1fr;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   padding: 0 3px !important;
-  border: 1px solid rgba(132, 154, 179, .72);
+  box-sizing: border-box;
+  border: 1px solid rgba(143, 166, 190, .78);
   border-radius: 0;
-  background: rgba(33, 48, 66, .97);
-  box-shadow: inset 0 0 0 1px rgba(198, 215, 232, .05), 0 1px 2px rgba(0, 0, 0, .34);
+  background: #26394e;
+  box-shadow: inset 0 0 0 1px rgba(216, 229, 242, .05);
   color: #dbe7f3 !important;
   text-align: left !important;
   line-height: 1 !important;
-  box-sizing: border-box;
+  z-index: 3;
 }
 
 .aman-axis-time-hour {
   align-self: center;
-  color: #8fa4bb;
+  color: #9aaec2;
   font: 800 8px/1 "SFMono-Regular", Consolas, monospace;
   text-align: right;
-  letter-spacing: -.04em;
+  letter-spacing: -.05em;
+}
+
+.aman-axis-time-hour::after {
+  content: ':';
+  margin-left: 1px;
+  color: #8197ad;
 }
 
 .aman-axis-time-minute {
   align-self: center;
-  color: #eef5fb;
-  font: 950 14px/1 "SFMono-Regular", Consolas, monospace;
+  color: #f0f6fc;
+  font: 950 13px/1 "SFMono-Regular", Consolas, monospace;
   text-align: left;
   letter-spacing: -.04em;
 }
 
-/* Right side only clears the centre tick marks. */
+/* Both sides reserve exactly the same centre rail. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
   left: calc(50% + var(--aman-axis-right-gutter)) !important;
   right: auto !important;
-  width: min(660px, calc(50% - var(--aman-axis-right-gutter) - 10px)) !important;
+  width: min(660px, calc(50% - var(--aman-axis-right-gutter) - 8px)) !important;
 }
 
-/* Left side ends before the time plaque. With the plaque starting 60 px left of
-   centre and the row ending 74 px left of centre, there is a 14 px clear gap. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
   left: auto !important;
   right: calc(50% + var(--aman-axis-left-gutter)) !important;
-  width: min(620px, calc(50% - var(--aman-axis-left-gutter) - 8px)) !important;
+  width: min(660px, calc(50% - var(--aman-axis-left-gutter) - 8px)) !important;
 }
 
-/* Never allow a child cell to leak outside its strip into the centre scale. */
+/* No operational cell may paint into the centre rail. Typography stays unchanged. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row {
   overflow: hidden !important;
@@ -75,8 +98,7 @@
   min-width: 0;
 }
 
-/* Compact layouts keep the original readable font sizes from timelineScrollable.css.
-   Only the column widths/gaps become tighter. */
+/* On narrower timeline panes, tighten columns only; do not shrink operational fonts. */
 @media (max-width: 1500px) {
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
@@ -103,8 +125,15 @@
 
 @media (max-width: 1250px) {
   .aman-timeline-stage[data-scroll-timeline="true"] {
-    --aman-axis-left-gutter: 72px;
-    --aman-axis-right-gutter: 24px;
+    --aman-time-rail-width: 54px;
+    --aman-time-rail-half: 27px;
+    --aman-axis-gap: 5px;
+  }
+
+  .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
+    left: calc(50% - 22px) !important;
+    width: 44px !important;
+    grid-template-columns: 16px 1fr;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
@@ -130,11 +159,6 @@
 }
 
 @media (max-width: 1100px) {
-  .aman-timeline-stage[data-scroll-timeline="true"] {
-    --aman-axis-left-gutter: 70px;
-    --aman-axis-right-gutter: 22px;
-  }
-
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
