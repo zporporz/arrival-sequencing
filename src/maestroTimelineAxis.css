@@ -33,11 +33,11 @@
   width: 48px !important;
   height: 18px !important;
   display: grid !important;
-  grid-template-columns: 17px 1fr;
+  grid-template-columns: 16px 1fr;
   align-items: baseline;
   align-content: center;
-  gap: 1px;
-  padding: 0 3px !important;
+  gap: 2px;
+  padding: 0 4px !important;
   box-sizing: border-box;
   border: 1px solid rgba(143, 166, 190, .78);
   border-radius: 0;
@@ -54,13 +54,12 @@
   color: #9aaec2;
   font: 800 8px/1 "SFMono-Regular", Consolas, monospace;
   text-align: right;
-  letter-spacing: -.05em;
+  letter-spacing: 0;
+  padding-right: 0;
 }
 
 .aman-axis-time-hour::after {
-  content: ':';
-  margin-left: 1px;
-  color: #8197ad;
+  content: '';
 }
 
 .aman-axis-time-minute {
@@ -68,7 +67,8 @@
   color: #f0f6fc;
   font: 950 13px/1 "SFMono-Regular", Consolas, monospace;
   text-align: left;
-  letter-spacing: -.04em;
+  letter-spacing: 0;
+  padding-left: 0;
 }
 
 /* Both sides reserve exactly the same centre rail. */
@@ -134,7 +134,9 @@
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
     left: calc(50% - 22px) !important;
     width: 44px !important;
-    grid-template-columns: 16px 1fr;
+    grid-template-columns: 15px 1fr;
+    gap: 2px;
+    padding: 0 3px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
