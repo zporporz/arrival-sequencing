@@ -2,7 +2,10 @@ const MAX_SELECTED_AIRPORTS = 2
 
 type DisplaySide = 'LEFT' | 'RIGHT'
 
-const STORAGE_KEY = 'aman-airport-display-sides-v1'
+// v2 intentionally resets the original VTBD-left / VTBS-right preference once so the
+// new operational default is VTBS on the left and VTBD on the right. User changes are
+// then persisted under this key as before.
+const STORAGE_KEY = 'aman-airport-display-sides-v2'
 
 function buttonValue(button: HTMLButtonElement) {
   return (button.textContent || '').trim().toUpperCase()
@@ -23,7 +26,7 @@ function allButton(host: HTMLElement) {
 }
 
 function loadDisplaySides() {
-  const fallback: Record<string, DisplaySide> = { VTBD: 'LEFT', VTBS: 'RIGHT' }
+  const fallback: Record<string, DisplaySide> = { VTBS: 'LEFT', VTBD: 'RIGHT' }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return fallback
