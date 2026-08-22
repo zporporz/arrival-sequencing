@@ -1,27 +1,28 @@
-/* Real-MAESTRO-inspired centre time scale and protected label gutter.
-   Keep a hard no-flight-label corridor around the centre axis so compact / half-screen
-   layouts cannot push a strip underneath the time scale. */
+/* Real-MAESTRO-inspired centre time scale.
+   Keep flight typography readable; solve compact-screen collisions with geometry,
+   not by shrinking the operational text. */
 
 .aman-timeline-stage[data-scroll-timeline="true"] {
-  --aman-axis-left-gutter: 98px;
+  --aman-axis-left-gutter: 74px;
   --aman-axis-right-gutter: 28px;
 }
 
-/* Long, shallow time plaque: hour is intentionally subordinate to the minute. */
+/* Shorter but slightly taller time plaque. The box stays close to the centreline,
+   leaving a real safety gap between it and the left-side TLDT cell. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
-  left: calc(50% - 88px) !important;
-  top: -7px !important;
-  width: 76px !important;
-  height: 14px !important;
+  left: calc(50% - 60px) !important;
+  top: -9px !important;
+  width: 52px !important;
+  height: 18px !important;
   display: grid !important;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 15px 1fr;
   align-items: center;
-  gap: 4px;
-  padding: 0 5px !important;
-  border: 1px solid rgba(132, 154, 179, .68);
+  gap: 2px;
+  padding: 0 3px !important;
+  border: 1px solid rgba(132, 154, 179, .72);
   border-radius: 0;
-  background: rgba(33, 48, 66, .96);
-  box-shadow: inset 0 0 0 1px rgba(198, 215, 232, .04), 0 1px 2px rgba(0, 0, 0, .34);
+  background: rgba(33, 48, 66, .97);
+  box-shadow: inset 0 0 0 1px rgba(198, 215, 232, .05), 0 1px 2px rgba(0, 0, 0, .34);
   color: #dbe7f3 !important;
   text-align: left !important;
   line-height: 1 !important;
@@ -31,7 +32,7 @@
 .aman-axis-time-hour {
   align-self: center;
   color: #8fa4bb;
-  font: 800 6.5px/1 "SFMono-Regular", Consolas, monospace;
+  font: 800 8px/1 "SFMono-Regular", Consolas, monospace;
   text-align: right;
   letter-spacing: -.04em;
 }
@@ -39,12 +40,12 @@
 .aman-axis-time-minute {
   align-self: center;
   color: #eef5fb;
-  font: 950 10.5px/1 "SFMono-Regular", Consolas, monospace;
+  font: 950 14px/1 "SFMono-Regular", Consolas, monospace;
   text-align: left;
-  letter-spacing: -.03em;
+  letter-spacing: -.04em;
 }
 
-/* Right-side strips only need the centre tick corridor. */
+/* Right side only clears the centre tick marks. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
@@ -53,134 +54,85 @@
   width: min(660px, calc(50% - var(--aman-axis-right-gutter) - 10px)) !important;
 }
 
-/* Left-side strips end BEFORE the entire time plaque plus a safety gap. */
+/* Left side ends before the time plaque. With the plaque starting 60 px left of
+   centre and the row ending 74 px left of centre, there is a 14 px clear gap. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
   left: auto !important;
   right: calc(50% + var(--aman-axis-left-gutter)) !important;
-  width: min(610px, calc(50% - var(--aman-axis-left-gutter) - 8px)) !important;
+  width: min(620px, calc(50% - var(--aman-axis-left-gutter) - 8px)) !important;
 }
 
-/* Mid-size displays: shrink the data grid before it can overflow its strip. */
-@media (max-width: 1500px) {
-  .aman-timeline-stage[data-scroll-timeline="true"] {
-    --aman-axis-left-gutter: 96px;
-    --aman-axis-right-gutter: 26px;
-  }
+/* Never allow a child cell to leak outside its strip into the centre scale. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row {
+  overflow: hidden !important;
+}
 
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > *,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row > * {
+  min-width: 0;
+}
+
+/* Compact layouts keep the original readable font sizes from timelineScrollable.css.
+   Only the column widths/gaps become tighter. */
+@media (max-width: 1500px) {
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
-    grid-template-columns: 46px minmax(72px, 1fr) 40px 22px 42px 30px 44px !important;
+    grid-template-columns: 44px minmax(76px, 1fr) 38px 20px 40px 30px 42px !important;
     gap: 3px !important;
     padding: 0 3px !important;
-    font-size: 10px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
-    grid-template-columns: 44px 30px 42px 22px 40px minmax(72px, 1fr) 46px !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
-  .aman-monitored-flight-row strong {
-    font-size: 11.5px !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-    font-size: 10px !important;
+    grid-template-columns: 42px 30px 40px 20px 38px minmax(76px, 1fr) 44px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-    width: 44px !important;
-    min-width: 44px !important;
-    padding: 0 1px !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before {
-    font-size: 10.5px !important;
+    width: 42px !important;
+    min-width: 42px !important;
+    padding: 0 2px !important;
   }
 }
 
 @media (max-width: 1250px) {
   .aman-timeline-stage[data-scroll-timeline="true"] {
-    --aman-axis-left-gutter: 92px;
-    --aman-axis-right-gutter: 22px;
+    --aman-axis-left-gutter: 72px;
+    --aman-axis-right-gutter: 24px;
   }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
-    left: calc(50% - 84px) !important;
-    width: 72px !important;
-    height: 13px !important;
-    top: -6.5px !important;
-    grid-template-columns: 20px 1fr;
-    padding: 0 4px !important;
-  }
-
-  .aman-axis-time-hour { font-size: 6px; }
-  .aman-axis-time-minute { font-size: 10px; }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
-    grid-template-columns: 38px minmax(54px, 1fr) 30px 16px 34px 25px 36px !important;
+    grid-template-columns: 40px minmax(64px, 1fr) 34px 18px 36px 27px 40px !important;
     gap: 2px !important;
     padding: 0 2px !important;
-    font-size: 8.5px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
-    grid-template-columns: 36px 25px 34px 16px 30px minmax(54px, 1fr) 38px !important;
-  }
-
-  /* Hard clip the actual row box on compact layouts: no text can leak into axis space. */
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row {
-    overflow: hidden !important;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
-  .aman-monitored-flight-row strong { font-size: 10px !important; }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-    font-size: 8.5px !important;
+    grid-template-columns: 40px 27px 36px 18px 34px minmax(64px, 1fr) 40px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-    width: 36px !important;
-    min-width: 36px !important;
+    width: 40px !important;
+    min-width: 40px !important;
   }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-delay-stack::before { font-size: 9px !important; }
 }
 
 @media (max-width: 1100px) {
   .aman-timeline-stage[data-scroll-timeline="true"] {
-    --aman-axis-left-gutter: 90px;
-    --aman-axis-right-gutter: 20px;
-  }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick span.aman-axis-time-box {
-    left: calc(50% - 82px) !important;
-    width: 70px !important;
+    --aman-axis-left-gutter: 70px;
+    --aman-axis-right-gutter: 22px;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row,
@@ -188,30 +140,19 @@
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
-    grid-template-columns: 34px minmax(48px, 1fr) 26px 14px 30px 22px 32px !important;
-    gap: 1px !important;
-    padding: 0 1px !important;
-    font-size: 7.5px !important;
+    grid-template-columns: 38px minmax(56px, 1fr) 32px 17px 34px 25px 38px !important;
+    gap: 2px !important;
+    padding: 0 2px !important;
   }
 
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
-    grid-template-columns: 32px 22px 30px 14px 26px minmax(48px, 1fr) 34px !important;
+    grid-template-columns: 38px 25px 34px 17px 32px minmax(56px, 1fr) 38px !important;
   }
 
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > strong,
-  .aman-monitored-flight-row strong { font-size: 9px !important; }
-
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .tldt,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(3),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row > span:nth-child(5),
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .fix-code,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment,
-  .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select { font-size: 7.5px !important; }
-
   .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row .runway-assignment select {
-    width: 32px !important;
-    min-width: 32px !important;
+    width: 38px !important;
+    min-width: 38px !important;
   }
 }
