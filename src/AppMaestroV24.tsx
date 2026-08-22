@@ -209,7 +209,8 @@ function formatHm(value: string | null) {
   if (!value) return '--:--'
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return '--:--'
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
+  const roundedDate = new Date(date.getTime() + 30_000)
+  return `${String(roundedDate.getUTCHours()).padStart(2, '0')}:${String(roundedDate.getUTCMinutes()).padStart(2, '0')}`
 }
 
 function formatHms(value: string | null) {
