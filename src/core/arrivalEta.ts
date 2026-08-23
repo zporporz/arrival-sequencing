@@ -135,22 +135,26 @@ function groundStageEstimate(
 
   let etotMs: number
   let stageLabel: string
+  const currentlyDeparting = isDeparting(flight)
+  const departingLatched = currentlyDeparting || state.offBlockMs != null
 
-  if (isDeparting(flight)) {
+  if (departingLatched) {
     if (state.offBlockMs == null) {
       state.offBlockMs = safeTime(flight.trackTimestamp) ?? nowMs
     }
     const plannedEtotMs = state.offBlockMs + taxiMs
+    // Once IVAO has reported Departing for this flight, offBlockMs becomes a one-way
+    // ground-stage latch. A later temporary Boarding label must not return the ETA model
+    // to EOBT/NOW; keep using the original observed AOBT until the flight becomes airborne.
     // Once the standard taxi time has expired and the aircraft is still on the ground,
     // keep ETOT current so real taxi delay propagates into ELDT/ETO instead of freezing.
     etotMs = Math.max(plannedEtotMs, nowMs)
-    stageLabel = `DEPARTING AOBT+STT ${sttMinutes}MIN${nowMs > plannedEtotMs ? ' · TAXI OVERRUN→NOW' : ''}`
+    stageLabel = `DEPARTING${currentlyDeparting ? '' : ' LATCHED'} AOBT+STT ${sttMinutes}MIN${nowMs > plannedEtotMs ? ' · TAXI OVERRUN→NOW' : ''}`
   } else {
     // Boarding: if filed EOBT is already overdue, NOW is the best current off-block
     // estimate. This avoids carrying an already-expired EOBT through the entire model.
     const estimatedOffBlockMs = Math.max(filedEobtMs ?? nowMs, nowMs)
     etotMs = estimatedOffBlockMs + taxiMs
-    state.offBlockMs = null
     stageLabel = `BOARDING ${filedEobtMs != null && filedEobtMs >= nowMs ? 'EOBT' : 'NOW'}+STT ${sttMinutes}MIN`
   }
 
@@ -162,7 +166,7 @@ function groundStageEstimate(
   return {
     source: 'FILED_EOBT_EET',
     predictedIawpAt: new Date(etoMs).toISOString(),
-    confidence: isDeparting(flight) ? 'MEDIUM' : 'LOW',
+    confidence: departingLatched ? 'MEDIUM' : 'LOW',
     remainingNm: null,
     offRouteNm: null,
     groundSpeedKt: null,
@@ -178,6 +182,7 @@ function groundStageEstimate(
  * Ground:
  *   BOARDING  -> max(EOBT, NOW) + STT + EET - STAR
  *   DEPARTING -> AOBT(first observed IVAO Departing) + STT + EET - STAR;
+ *                once entered, DEPARTING is latched and cannot return to BOARDING;
  *                if still ground after that ETOT, NOW becomes ETOT so taxi delay propagates.
  *
  * Airborne:
