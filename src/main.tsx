@@ -57,7 +57,7 @@ import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 import { installStaffNavdataDiffSummaryRuntime } from './staffNavdataDiffSummaryRuntime'
 import { installStaffThailandNavdataImporterRuntime } from './staffThailandNavdataImporterRuntime'
-import { installMissedApproachReinsertRuntime } from './missedApproachReinsertRuntime'
+import { installMissedApproachDirectInsertRuntime } from './missedApproachDirectInsertRuntime'
 
 installReconnectTrafficFetch()
 
@@ -91,7 +91,7 @@ function AppWithRuntime() {
     const removeStaffNavdataLinkRuntime = installStaffNavdataLinkRuntime()
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
-    const removeMissedApproachReinsertRuntime = installMissedApproachReinsertRuntime()
+    const removeMissedApproachDirectInsertRuntime = installMissedApproachDirectInsertRuntime()
 
     return () => {
       removeMaestroV24CompatRuntime()
@@ -115,7 +115,7 @@ function AppWithRuntime() {
       removeStaffNavdataLinkRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()
-      removeMissedApproachReinsertRuntime()
+      removeMissedApproachDirectInsertRuntime()
       removeTestTrafficIsolationRuntime()
     }
   }, [])
