@@ -1,0 +1,27 @@
+/* MAESTRO centre-scale minor ticks: keep the centre line clear and draw a short
+   tick on each side instead of one solid mark through the middle. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i {
+  left: 50% !important;
+  top: -1px !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::before,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 1px;
+  background: #607995;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::before {
+  right: 3px;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::after {
+  left: 3px;
+}
