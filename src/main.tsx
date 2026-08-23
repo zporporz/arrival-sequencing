@@ -38,6 +38,7 @@ import StaffMasterDataAdmin from './StaffMasterDataAdmin'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installEtaFfLifecycleRuntime } from './etaFfLifecycleRuntime'
+import { installFinalTenNmRuntime } from './finalTenNmRuntime'
 import { installTestTrafficIsolationRuntime } from './testTrafficIsolationRuntime'
 import { installAirportScopeRuntime } from './airportScopeRuntime'
 import { installOnlinePresenceRuntime } from './onlinePresenceRuntime'
@@ -75,6 +76,7 @@ function AppWithRuntime() {
     const removeMaestroV24CompatRuntime = installMaestroV24CompatRuntime()
     const removeTimelineRuntime = installTimelineScrollableRuntime()
     const removeFlightStatusRuntime = installFlightStatusRuntime()
+    const removeFinalTenNmRuntime = installFinalTenNmRuntime()
     const removeEtaFfLifecycleRuntime = installEtaFfLifecycleRuntime()
     const removeAirportScopeRuntime = installAirportScopeRuntime()
     const removeReconnectUiRuntime = installReconnectUiRuntime()
@@ -99,6 +101,7 @@ function AppWithRuntime() {
       removeMaestroV24CompatRuntime()
       removeTimelineRuntime()
       removeFlightStatusRuntime()
+      removeFinalTenNmRuntime()
       removeEtaFfLifecycleRuntime()
       removeAirportScopeRuntime()
       removeReconnectUiRuntime()
