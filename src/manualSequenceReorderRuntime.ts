@@ -182,9 +182,16 @@ function reconcileGroupAfterRender(airport: string, runway: string) {
         publishOrderSnapshot()
         return
       }
-      const order = orderFromTargets(airport, runway)
-      if (order.length) groupOrders.set(key, order)
-      else groupOrders.delete(key)
+      const existing = groupOrders.get(key)
+      const currentRows = new Set(rowsForGroup(airport, runway).map((row) => rowIdentity(row)?.identity).filter(Boolean) as string[])
+      const retained = existing?.filter((identity) => currentRows.has(identity)) ?? []
+      if (retained.length === currentRows.size && retained.length > 0) {
+        groupOrders.set(key, retained)
+      } else {
+        const order = orderFromTargets(airport, runway)
+        if (order.length) groupOrders.set(key, order)
+        else groupOrders.delete(key)
+      }
       publishOrderSnapshot()
     })
   }, 80)
@@ -208,8 +215,6 @@ function insertionIndexFromPointer(state: DragOrderState, pointerY: number) {
   const otherOrder = state.startOrder.filter((identity) => identity !== state.identity)
   let index = 0
 
-  // Sequence time increases upward on this timeline. `startOrder` is earliest -> latest,
-  // so its visual centres run bottom -> top. Count the rows below the pointer.
   for (const identity of otherOrder) {
     const row = rowByIdentity(state.airport, state.runway, identity)
     if (!row) continue
@@ -234,9 +239,6 @@ function applyReorderedSlots(state: DragOrderState, nextOrder: string[]) {
   groupOrders.set(groupKey(state.airport, state.runway), nextOrder)
   publishOrderSnapshot()
 
-  // Reorder means swapping aircraft into the existing landing-time slots. Pointer travel
-  // itself never becomes a TLDT offset. After these slot targets are installed, the
-  // normal cascade recalculates only the separation required by the new pair order.
   nextOrder.forEach((identity, index) => {
     const row = rowByIdentity(state.airport, state.runway, identity)
     const target = state.slotTargets[index]
@@ -252,6 +254,7 @@ function applyReorderedSlots(state: DragOrderState, nextOrder: string[]) {
 function clearDropPreview(state = drag) {
   if (!state?.dropTarget) return
   delete state.dropTarget.dataset.sequenceReorderDropTarget
+  delete state.dropTarget.dataset.sequenceReorderPreviewOnly
   state.dropTarget = null
 }
 
@@ -287,21 +290,17 @@ function validDropTarget(state: DragOrderState, pointerX: number, pointerY: numb
 }
 
 function updateDropPreview(state: DragOrderState, event: PointerEvent) {
-  // Only an earlier-time drag (visually downward) may overtake/replace another aircraft.
-  // A later-time drag (visually upward) remains a normal TLDT move; the core separation
-  // cascade pushes all later followers upward without changing their sequence order.
-  if (!isDownwardDrag(state, event.clientY)) {
-    clearDropPreview(state)
-    return
-  }
-
   const target = validDropTarget(state, event.clientX, event.clientY)
   if (state.dropTarget !== target) {
     clearDropPreview(state)
     state.dropTarget = target
-    if (target) target.dataset.sequenceReorderDropTarget = 'true'
   }
-  if (target) state.targetIndex = insertionIndexFromPointer(state, event.clientY)
+  if (!target) return
+
+  target.dataset.sequenceReorderDropTarget = 'true'
+  if (!isDownwardDrag(state, event.clientY)) target.dataset.sequenceReorderPreviewOnly = 'true'
+  else delete target.dataset.sequenceReorderPreviewOnly
+  state.targetIndex = insertionIndexFromPointer(state, event.clientY)
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
@@ -330,6 +329,13 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
   })
 
   for (const [key, group] of groups) {
+    const identities = new Set(group.rows.map((row) => rowIdentity(row)?.identity).filter(Boolean) as string[])
+    const existing = groupOrders.get(key)?.filter((identity) => identities.has(identity)) ?? []
+
+    // Once a local/explicit sequence order has been latched, shared manual TLDT updates
+    // are timing changes only and must never silently re-rank the sequence.
+    if (existing.length === identities.size && existing.length > 0) continue
+
     const entries = group.rows.map((row, fallbackIndex) => {
       const identity = rowIdentity(row)!
       const shared = manualByIdentity.get(identity.identity)
@@ -369,6 +375,11 @@ export function installManualSequenceReorderRuntime() {
     const startIndex = startOrder.indexOf(identity.identity)
     if (startIndex < 0 || startOrder.length !== slotTargets.length) return
 
+    // Freeze the sequence order at drag start. Moving TLDT later must cascade followers,
+    // not cause a hidden order swap merely because target times cross.
+    groupOrders.set(groupKey(identity.airport, runway), [...startOrder])
+    publishOrderSnapshot()
+
     const forceReorder = event.pointerType === 'mouse' && event.shiftKey
     drag = {
       pointerId: event.pointerId,
@@ -389,9 +400,6 @@ export function installManualSequenceReorderRuntime() {
 
     row.dataset.sequenceReorderDragging = 'true'
     try { row.setPointerCapture?.(event.pointerId) } catch { /* no-op */ }
-
-    // Desktop Shift+Drag remains a force-reorder compatibility gesture, but the same
-    // directional rule applies: only a downward drag is allowed to replace/overtake.
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
@@ -402,20 +410,15 @@ export function installManualSequenceReorderRuntime() {
     if (Math.abs(event.clientY - drag.startY) >= MOVE_TOLERANCE_PX) drag.moved = true
 
     if (drag.forceReorder) {
-      if (isDownwardDrag(drag, event.clientY)) {
-        drag.targetIndex = insertionIndexFromPointer(drag, event.clientY)
-        drag.row.dataset.sequenceReorderTarget = String(drag.targetIndex + 1)
-      } else {
-        delete drag.row.dataset.sequenceReorderTarget
-      }
+      updateDropPreview(drag, event)
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
       return
     }
 
-    // Normal mouse/touch/pen movement remains React's TLDT drag. Yellow replace preview
-    // is only armed while moving down to an earlier slot.
+    // Yellow target is shown in both directions. Upward is preview-only; downward may
+    // become a replace/reorder when released directly over another aircraft.
     updateDropPreview(drag, event)
   }
 
@@ -423,9 +426,9 @@ export function installManualSequenceReorderRuntime() {
     if (!drag || drag.pointerId !== event.pointerId) return
     const finished = drag
 
-    if (!finished.forceReorder) updateDropPreview(finished, event)
+    updateDropPreview(finished, event)
     const downward = isDownwardDrag(finished, event.clientY)
-    const shouldReorder = finished.moved && downward && (finished.forceReorder || Boolean(finished.dropTarget))
+    const shouldReorder = finished.moved && downward && Boolean(finished.dropTarget)
 
     if (!shouldReorder) {
       clearDropPreview(finished)
@@ -434,13 +437,11 @@ export function installManualSequenceReorderRuntime() {
       drag = null
 
       if (!finished.forceReorder) {
-        // Upward/ordinary drag: let React finish the TLDT move. The normal cascade then
-        // pushes every later follower upward according to pairwise separation.
+        // Normal upward/empty drop: React persists TLDT only. sequenceIndex stays on the
+        // latched order and applyManualTargetsWithCascade pushes followers by pairwise SEP.
         return
       }
 
-      // Shift+Drag was intercepted at pointerdown, so explicitly release its capture on
-      // a non-reorder gesture instead of leaving a stale drag/pointer state behind.
       try {
         if (finished.row.hasPointerCapture?.(event.pointerId)) finished.row.releasePointerCapture?.(event.pointerId)
       } catch { /* no-op */ }
@@ -455,15 +456,12 @@ export function installManualSequenceReorderRuntime() {
       event.stopPropagation()
       event.stopImmediatePropagation()
     } else {
-      // Normal drop-to-reorder DID enter React's TLDT drag. Close that drag explicitly
-      // with the real row as currentTarget so the actual browser pointer capture is
-      // released. Do not stop native pointerup so sharedAmanRuntime also gets cleanup.
       reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
         fakePointer(event.clientY, event.pointerId, finished.row),
       )
     }
 
-    if (!finished.forceReorder) finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
+    finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
     const nextOrder = reorderedOrder(finished)
     clearDropPreview(finished)
     delete finished.row.dataset.sequenceReorderDragging
@@ -483,7 +481,6 @@ export function installManualSequenceReorderRuntime() {
     delete cancelled.row.dataset.sequenceReorderDragging
     delete cancelled.row.dataset.sequenceReorderTarget
     drag = null
-    // Non-force gestures are allowed to bubble to React's existing pointercancel.
     if (!cancelled.forceReorder) return
     try {
       if (cancelled.row.hasPointerCapture?.(event.pointerId)) cancelled.row.releasePointerCapture?.(event.pointerId)
