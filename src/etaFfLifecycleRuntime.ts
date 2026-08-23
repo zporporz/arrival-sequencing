@@ -1,58 +1,15 @@
-import { TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
-
 type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
-type FakePointerEvent = {
-  button: number
-  preventDefault: () => void
-  currentTarget: {
-    setPointerCapture: (pointerId: number) => void
-    hasPointerCapture: (pointerId: number) => boolean
-    releasePointerCapture: (pointerId: number) => void
-  }
-  pointerId: number
-  clientY: number
-}
-
-type ReactRowProps = {
-  onPointerDown?: (event: FakePointerEvent) => void
-  onPointerMove?: (event: FakePointerEvent) => void
-  onPointerUp?: (event: FakePointerEvent) => void
-}
-
 const REFRESH_MS = 250
-const POINTER_ID = 70423
 const STABLE_BEFORE_IAWP_MINUTES = 15
 const SUPERSTABLE_BEFORE_IAWP_MINUTES = 5
 const FROZEN_BEFORE_TLDT_MINUTES = 4
-const TARGET_TOLERANCE_MS = 2_000
-const LOCAL_DRAG_GRACE_MS = 1_200
 
+// ETA-FF/ETO locking is intentionally preserved. TLDT is never hard-locked by lifecycle
+// status: controllers may move it at any stage and the normal sequencing cascade remains
+// authoritative for downstream separation, including SUPERSTABLE/FROZEN followers.
 const lockedEtaFfByKey = new Map<string, number>()
-const superstableTldtByKey = new Map<string, number>()
-const frozenTldtByKey = new Map<string, number>()
-const sharedRevisionByKey = new Map<string, string>()
-const localDragUntilByKey = new Map<string, number>()
-
-function reactProps<T>(element: Element): T | null {
-  const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
-  if (!key) return null
-  return (element as unknown as Record<string, unknown>)[key] as T
-}
-
-function fakePointer(clientY: number): FakePointerEvent {
-  return {
-    button: 0,
-    preventDefault: () => {},
-    currentTarget: {
-      setPointerCapture: () => {},
-      hasPointerCapture: () => false,
-      releasePointerCapture: () => {},
-    },
-    pointerId: POINTER_ID,
-    clientY,
-  }
-}
+const frozenStatusByKey = new Set<string>()
 
 function parseClock(value: string) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
@@ -140,14 +97,14 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
-  if (frozenTldtByKey.has(key)) return 'FROZEN'
+  // FROZEN remains a lifecycle/status latch once entered, but it no longer stores or
+  // enforces any TLDT value.
+  if (frozenStatusByKey.has(key)) return 'FROZEN'
 
   const targetLanding = targetTldtMs(row, now)
   const finalTenNm = row.dataset.finalTenNm === 'true'
   if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
-    const frozen = targetLanding ?? superstableTldtByKey.get(key)
-    if (frozen != null) frozenTldtByKey.set(key, frozen)
-    superstableTldtByKey.delete(key)
+    frozenStatusByKey.add(key)
     return 'FROZEN'
   }
 
@@ -172,81 +129,12 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
   return 'UNSTABLE'
 }
 
-function applyTargetThroughReact(row: HTMLElement, targetMs: number, now: Date) {
-  const currentMs = targetTldtMs(row, now)
-  const props = reactProps<ReactRowProps>(row)
-  if (currentMs == null || !props?.onPointerDown || !props.onPointerMove || !props.onPointerUp) return false
-
-  const deltaMinutes = (targetMs - currentMs) / 60_000
-  props.onPointerDown(fakePointer(0))
-  props.onPointerMove(fakePointer(-deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE))
-  props.onPointerUp(fakePointer(-deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE))
-  return true
-}
-
-function sharedTargetChanged(row: HTMLElement, key: string) {
-  const revision = row.dataset.sharedRevision || ''
-  if (!revision) return false
-  const previous = sharedRevisionByKey.get(key)
-  sharedRevisionByKey.set(key, revision)
-  return previous != null && previous !== revision
-}
-
-function localDragActive(key: string) {
-  return (localDragUntilByKey.get(key) ?? 0) >= Date.now()
-}
-
-function enforceSuperstableTldt(row: HTMLElement, now: Date, key: string) {
-  if (!isManualTarget(row)) {
-    superstableTldtByKey.delete(key)
-    delete row.dataset.superstableTldt
-    return
-  }
-
-  const current = targetTldtMs(row, now)
-  if (current == null) return
-
-  let protectedTarget = superstableTldtByKey.get(key)
-  if (protectedTarget == null) {
-    protectedTarget = current
-    superstableTldtByKey.set(key, current)
-  }
-
-  if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
-    superstableTldtByKey.set(key, current)
-    row.dataset.superstableTldt = new Date(current).toISOString()
-    return
-  }
-
-  if (Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
-    applyTargetThroughReact(row, protectedTarget, now)
-  }
-
-  row.dataset.superstableTldt = new Date(protectedTarget).toISOString()
-}
-
-function enforceFrozenTldt(row: HTMLElement, now: Date, key: string) {
-  const protectedTarget = frozenTldtByKey.get(key)
-  const current = targetTldtMs(row, now)
-  if (protectedTarget == null || current == null) return
-
-  if (row.classList.contains('is-dragging') || localDragActive(key) || sharedTargetChanged(row, key)) {
-    frozenTldtByKey.set(key, current)
-    row.dataset.frozenTldt = new Date(current).toISOString()
-    return
-  }
-
-  if (!isManualTarget(row) || Math.abs(current - protectedTarget) > TARGET_TOLERANCE_MS) {
-    applyTargetThroughReact(row, protectedTarget, now)
-  }
-
-  row.dataset.frozenTldt = new Date(protectedTarget).toISOString()
-}
-
 function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStatus, key: string) {
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
 
+  // Preserve the existing ETA-FF/ETO lock semantics exactly. This change only removes
+  // TLDT protection; it does not change which lifecycle stage locks ETA-FF.
   if (status === 'UNSTABLE') {
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE' || status === 'SUPERSTABLE') {
@@ -281,14 +169,10 @@ function refreshRows() {
     const status = statusFromCurrentTarget(row, now, key)
     applyStatusClass(row, status)
 
-    if (status === 'SUPERSTABLE' && isManualTarget(row)) {
-      enforceSuperstableTldt(row, now, key)
-    } else if (status === 'FROZEN') {
-      enforceFrozenTldt(row, now, key)
-    } else {
-      superstableTldtByKey.delete(key)
-      delete row.dataset.superstableTldt
-    }
+    // Explicitly clear legacy TLDT-lock markers. Lifecycle status is visual/awareness;
+    // sequence target movement is always controlled by ATC + separation cascade.
+    delete row.dataset.superstableTldt
+    delete row.dataset.frozenTldt
 
     const callsign = rowCallsign(row)
     if (callsign) statusByCallsign.set(callsign, status)
@@ -321,66 +205,18 @@ function refreshRows() {
   for (const key of lockedEtaFfByKey.keys()) {
     if (!activeKeys.has(key)) lockedEtaFfByKey.delete(key)
   }
-  for (const key of superstableTldtByKey.keys()) {
-    if (!activeKeys.has(key)) superstableTldtByKey.delete(key)
+  for (const key of frozenStatusByKey) {
+    if (!activeKeys.has(key)) frozenStatusByKey.delete(key)
   }
-  for (const key of frozenTldtByKey.keys()) {
-    if (!activeKeys.has(key)) frozenTldtByKey.delete(key)
-  }
-  for (const key of sharedRevisionByKey.keys()) {
-    if (!activeKeys.has(key)) sharedRevisionByKey.delete(key)
-  }
-  for (const key of localDragUntilByKey.keys()) {
-    if (!activeKeys.has(key) || !localDragActive(key)) localDragUntilByKey.delete(key)
-  }
-}
-
-function markLocalDrag(event: PointerEvent) {
-  if (event.button !== 0 || !(event.target instanceof Element) || event.target.closest('select')) return
-  const row = event.target.closest<HTMLElement>('.aman-flight-row')
-  if (!row) return
-  const key = rowKey(row)
-  if (key) localDragUntilByKey.set(key, Date.now() + LOCAL_DRAG_GRACE_MS)
-}
-
-function finishLocalDrag(event: PointerEvent) {
-  if (!(event.target instanceof Element)) return
-  const row = event.target.closest<HTMLElement>('.aman-flight-row')
-  if (!row) return
-  const key = rowKey(row)
-  if (key) localDragUntilByKey.set(key, Date.now() + LOCAL_DRAG_GRACE_MS)
-}
-
-function blockFrozenNonDragEdit(event: Event) {
-  if (!(event.target instanceof Element)) return
-  const row = event.target.closest<HTMLElement>('.aman-flight-row')
-  if (!row || row.dataset.flightStatus !== 'FROZEN') return
-  event.preventDefault()
-  event.stopPropagation()
-  event.stopImmediatePropagation()
 }
 
 export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
 
-  document.addEventListener('pointerdown', markLocalDrag, true)
-  document.addEventListener('pointerup', finishLocalDrag, true)
-  document.addEventListener('pointercancel', finishLocalDrag, true)
-  document.addEventListener('dblclick', blockFrozenNonDragEdit, true)
-  document.addEventListener('change', blockFrozenNonDragEdit, true)
-
   return () => {
     window.clearInterval(timer)
-    document.removeEventListener('pointerdown', markLocalDrag, true)
-    document.removeEventListener('pointerup', finishLocalDrag, true)
-    document.removeEventListener('pointercancel', finishLocalDrag, true)
-    document.removeEventListener('dblclick', blockFrozenNonDragEdit, true)
-    document.removeEventListener('change', blockFrozenNonDragEdit, true)
     lockedEtaFfByKey.clear()
-    superstableTldtByKey.clear()
-    frozenTldtByKey.clear()
-    sharedRevisionByKey.clear()
-    localDragUntilByKey.clear()
+    frozenStatusByKey.clear()
   }
 }
