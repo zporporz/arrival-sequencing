@@ -226,26 +226,22 @@ function missedTargetMs(record: LandedRecord) {
   return (Number.isFinite(landedMs) ? landedMs : Date.now()) + MISSED_APPROACH_OFFSET_MS
 }
 
-async function writeMissedApproachTarget(record: LandedRecord) {
-  const runway = String(record.snapshot?.runway || '').trim().toUpperCase() || null
-  const targetMs = missedTargetMs(record)
+async function writeMissedApproach(record: LandedRecord) {
   const response = await fetch('/api/sequence/aman-state', {
     method: 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      action: 'setMissedApproachTarget',
+      action: 'setOperationalState',
       serviceDate: new Date().toISOString().slice(0, 10),
       airport: record.airport,
       callsign: record.callsign,
-      manualTldt: new Date(targetMs).toISOString(),
-      manualRunway: runway,
+      operationalState: 'MISSED_APPROACH',
     }),
   })
   const payload = await response.json() as { error?: string }
   if (!response.ok) throw new Error(payload.error || `AMAN API returned ${response.status}`)
-  return targetMs
 }
 
 async function dismissLiveLanded(record: LandedRecord) {
@@ -281,10 +277,10 @@ function handleGoAround(record: LandedRecord, liveRecords: LandedRecord[], setLi
 
   void (async () => {
     try {
-      const liveTargetMs = await writeMissedApproachTarget(record)
+      await writeMissedApproach(record)
       await dismissLiveLanded(record)
       setLiveRecords(liveRecords.filter((row) => !(row.airport === record.airport && row.callsign === record.callsign)))
-      showToast(`${record.callsign}: MISSED · target ${formatHm(new Date(liveTargetMs).toISOString())}Z (+10M)`)
+      showToast(`${record.callsign}: MISSED APPROACH · awaiting REINSERT`)
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error))
     }
@@ -307,10 +303,9 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   section.textContent = 'LANDED STAGE'
   menu.appendChild(section)
 
-  const target = new Date(missedTargetMs(record)).toISOString()
   const ga = document.createElement('button')
   ga.type = 'button'
-  ga.textContent = `GO AROUND / MISSED → ${formatHm(target)}Z (+10M)`
+  ga.textContent = 'GO AROUND / MISSED APPROACH'
   ga.addEventListener('click', (event) => {
     event.stopPropagation()
     handleGoAround(record, liveRecords, setLiveRecords)
@@ -318,7 +313,7 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   menu.appendChild(ga)
 
   const note = document.createElement('small')
-  note.textContent = 'GA removes LANDED and reserves a new manual TLDT exactly 10 minutes after ALDT.'
+  note.textContent = 'GA moves the flight to MISSED APPROACH. REINSERT then reserves a new TLDT at NOW +10 minutes.'
   menu.appendChild(note)
   document.body.appendChild(menu)
 }
