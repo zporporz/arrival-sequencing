@@ -188,11 +188,14 @@ export function installTimelineDisplayScaleRuntime() {
   let disposed = false
 
   const scheduleApply = () => {
-    if (disposed || scheduled || drag) return
+    if (disposed || scheduled) return
     scheduled = true
     window.requestAnimationFrame(() => {
       scheduled = false
-      if (!disposed && !drag) applyStoredVisualPositions()
+      if (disposed) return
+      // During a live drag, keep the dragged strip under the pointer but immediately
+      // move every cascaded follower to its newly constrained TLDT position.
+      applyStoredVisualPositions(drag?.row ?? null)
     })
   }
 
