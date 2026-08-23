@@ -28,12 +28,12 @@ export default function StaffAdminTools() {
           <small>Little Navmap SQLite · STAR · ALT/SPD · AIRAC history</small>
         </a>
 
-        <article className="stafftools-card">
-          <div className="stafftools-card-head"><span>MASTER DATA</span><b>BACKEND</b></div>
+        <a className="stafftools-card is-ready" href="/?admin=master">
+          <div className="stafftools-card-head"><span>MASTER DATA</span><b>READY</b></div>
           <h2>Airport / Runway / Timing</h2>
-          <p>The staff backend already supports airports, runway configurations, STAR catalog entries, nominal fix timings and configuration history. A dedicated editor UI can be added here.</p>
-          <small>Existing admin API · UI not exposed yet</small>
-        </article>
+          <p>Edit airport records, runway-flow configuration and nominal fix-to-landing timings through the existing staff-only admin API.</p>
+          <small>Airport · Runway flow · Fix timing · Supabase audit</small>
+        </a>
 
         <article className="stafftools-card">
           <div className="stafftools-card-head"><span>CAAT</span><b>BACKEND</b></div>
