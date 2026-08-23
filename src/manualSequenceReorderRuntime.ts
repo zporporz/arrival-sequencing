@@ -255,6 +255,10 @@ function clearDropPreview(state = drag) {
   state.dropTarget = null
 }
 
+function isDownwardDrag(state: DragOrderState, pointerY: number) {
+  return pointerY - state.startY >= MOVE_TOLERANCE_PX
+}
+
 function validDropTarget(state: DragOrderState, pointerX: number, pointerY: number) {
   const allowed = rowsForGroup(state.airport, state.runway).filter((row) => row !== state.row)
   if (!allowed.length) return null
@@ -283,6 +287,14 @@ function validDropTarget(state: DragOrderState, pointerX: number, pointerY: numb
 }
 
 function updateDropPreview(state: DragOrderState, event: PointerEvent) {
+  // Only an earlier-time drag (visually downward) may overtake/replace another aircraft.
+  // A later-time drag (visually upward) remains a normal TLDT move; the core separation
+  // cascade pushes all later followers upward without changing their sequence order.
+  if (!isDownwardDrag(state, event.clientY)) {
+    clearDropPreview(state)
+    return
+  }
+
   const target = validDropTarget(state, event.clientX, event.clientY)
   if (state.dropTarget !== target) {
     clearDropPreview(state)
@@ -378,7 +390,8 @@ export function installManualSequenceReorderRuntime() {
     row.dataset.sequenceReorderDragging = 'true'
     try { row.setPointerCapture?.(event.pointerId) } catch { /* no-op */ }
 
-    // Desktop Shift+Drag remains a force-reorder gesture and never becomes a TLDT drag.
+    // Desktop Shift+Drag remains a force-reorder compatibility gesture, but the same
+    // directional rule applies: only a downward drag is allowed to replace/overtake.
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
@@ -389,17 +402,20 @@ export function installManualSequenceReorderRuntime() {
     if (Math.abs(event.clientY - drag.startY) >= MOVE_TOLERANCE_PX) drag.moved = true
 
     if (drag.forceReorder) {
-      drag.targetIndex = insertionIndexFromPointer(drag, event.clientY)
-      drag.row.dataset.sequenceReorderTarget = String(drag.targetIndex + 1)
+      if (isDownwardDrag(drag, event.clientY)) {
+        drag.targetIndex = insertionIndexFromPointer(drag, event.clientY)
+        drag.row.dataset.sequenceReorderTarget = String(drag.targetIndex + 1)
+      } else {
+        delete drag.row.dataset.sequenceReorderTarget
+      }
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
       return
     }
 
-    // Normal mouse/touch/pen drag is still React's existing TLDT drag while moving.
-    // We only arm REORDER if the pointer is actually over (or within 4px of) another
-    // aircraft on the SAME airport/runway. Nothing changes until the user releases.
+    // Normal mouse/touch/pen movement remains React's TLDT drag. Yellow replace preview
+    // is only armed while moving down to an earlier slot.
     updateDropPreview(drag, event)
   }
 
@@ -408,28 +424,40 @@ export function installManualSequenceReorderRuntime() {
     const finished = drag
 
     if (!finished.forceReorder) updateDropPreview(finished, event)
-    const shouldReorder = finished.forceReorder
-      ? finished.moved
-      : finished.moved && Boolean(finished.dropTarget)
+    const downward = isDownwardDrag(finished, event.clientY)
+    const shouldReorder = finished.moved && downward && (finished.forceReorder || Boolean(finished.dropTarget))
 
     if (!shouldReorder) {
       clearDropPreview(finished)
+      delete finished.row.dataset.sequenceReorderDragging
+      delete finished.row.dataset.sequenceReorderTarget
       drag = null
-      // Let the existing React pointerup + shared-state pointerup finish the normal TLDT drag.
+
+      if (!finished.forceReorder) {
+        // Upward/ordinary drag: let React finish the TLDT move. The normal cascade then
+        // pushes every later follower upward according to pairwise separation.
+        return
+      }
+
+      // Shift+Drag was intercepted at pointerdown, so explicitly release its capture on
+      // a non-reorder gesture instead of leaving a stale drag/pointer state behind.
+      try {
+        if (finished.row.hasPointerCapture?.(event.pointerId)) finished.row.releasePointerCapture?.(event.pointerId)
+      } catch { /* no-op */ }
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
       return
     }
 
     if (finished.forceReorder) {
-      // Shift+Drag never entered React's TLDT drag, so it remains a fully intercepted
-      // reorder gesture as before.
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
     } else {
       // Normal drop-to-reorder DID enter React's TLDT drag. Close that drag explicitly
       // with the real row as currentTarget so the actual browser pointer capture is
-      // released. Do not stop the native pointerup: React will see it again as a harmless
-      // no-op and sharedAmanRuntime gets its normal pointerup cleanup/save cycle.
+      // released. Do not stop native pointerup so sharedAmanRuntime also gets cleanup.
       reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
         fakePointer(event.clientY, event.pointerId, finished.row),
       )
@@ -457,6 +485,9 @@ export function installManualSequenceReorderRuntime() {
     drag = null
     // Non-force gestures are allowed to bubble to React's existing pointercancel.
     if (!cancelled.forceReorder) return
+    try {
+      if (cancelled.row.hasPointerCapture?.(event.pointerId)) cancelled.row.releasePointerCapture?.(event.pointerId)
+    } catch { /* no-op */ }
     event.preventDefault()
     event.stopPropagation()
     event.stopImmediatePropagation()
