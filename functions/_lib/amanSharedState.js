@@ -24,6 +24,7 @@ const AIRPORT_REFERENCE = {
 // fast enough that it will remain protected as a GHOST rather than being dropped.
 const LANDED_RELEASE_RADIUS_NM = 3.5;
 const LANDED_RELEASE_MAX_GS_KT = 90;
+const MISSED_REINSERT_RECENCY_MS = 2 * 60 * 1000;
 
 function finite(value) {
   const number = Number(value);
@@ -136,6 +137,23 @@ function looksLandedAtAirport(snapshot, airport) {
   const airportDistanceNm = distanceNm(reference.lat, reference.lon, latitude, longitude);
   return airportDistanceNm <= LANDED_RELEASE_RADIUS_NM
     && groundSpeed <= LANDED_RELEASE_MAX_GS_KT;
+}
+
+// A controller-triggered GA/MISSED direct insert writes a fresh MANUAL target at
+// NOW+10 while IVAO can still report the aircraft as LANDED for several samples.
+// Preserve that one case in the active sequence. The manual update must be recent
+// relative to the terminal observation so an ordinary pre-landing manual target
+// does not accidentally keep a genuinely landed aircraft in AMAN.
+function hasActiveMissedReinsert(record, snapshot, nowMs) {
+  if (String(record?.operational_state || 'NORMAL').trim().toUpperCase() !== 'NORMAL') return false;
+  if (String(record?.target_mode || 'AUTO').trim().toUpperCase() !== 'MANUAL') return false;
+
+  const targetMs = toMillis(record?.manual_tldt);
+  if (!Number.isFinite(targetMs) || targetMs <= nowMs) return false;
+
+  const updatedMs = toMillis(record?.manual_updated_at, 0);
+  const observedMs = snapshotTimeMs(snapshot, nowMs);
+  return updatedMs > 0 && updatedMs >= observedMs - MISSED_REINSERT_RECENCY_MS;
 }
 
 function sharedFields(record) {
@@ -268,10 +286,22 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
       expected_nm: expectedNm,
     };
     pendingRows.push(write);
+
+    const terminalNow = isTerminalSnapshot(snapshot);
+    const missedReinsert = terminalNow && hasActiveMissedReinsert(record, snapshot, fetchedMs);
+    if (terminalNow && !missedReinsert) continue;
+
+    // While IVAO is still stale at LANDED after a controller-triggered GA, expose a
+    // sequencing-only airborne view so the direct NOW+10 manual target can appear in
+    // the table immediately. The stored snapshot remains the untouched IVAO sample.
+    const sequencingSnapshot = missedReinsert
+      ? { ...snapshot, state: 'initial climb', onGround: false, operationalReinsert: true }
+      : snapshot;
+
     pendingOutput.push({
       callsign,
       flight: {
-        ...snapshot,
+        ...sequencingSnapshot,
         ...sharedFields(recordForOutput(record, {
           connection_phase: connectionPhase,
           reconnect_at: reconnectAt,
@@ -290,7 +320,8 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
     const ageMs = fetchedMs - lastSeenMs;
     const snapshot = record.snapshot && typeof record.snapshot === 'object' ? record.snapshot : {};
     const landed = looksLandedAtAirport(snapshot, airport);
-    const retain = ageMs <= AMAN_GHOST_RETENTION_MS && !landed;
+    const missedReinsert = hasActiveMissedReinsert(record, snapshot, fetchedMs);
+    const retain = ageMs <= AMAN_GHOST_RETENTION_MS && (!landed || missedReinsert);
 
     if (!retain) {
       pendingRows.push({
@@ -323,9 +354,10 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
         ...snapshot,
         sessionId: record.canonical_session_id,
         rawSessionId: record.raw_session_id || null,
-        state: 'DISCONNECTED',
+        state: missedReinsert ? 'initial climb' : 'DISCONNECTED',
         onGround: false,
-        heading: null,
+        heading: missedReinsert ? snapshot.heading ?? null : null,
+        operationalReinsert: missedReinsert || undefined,
         ...sharedFields({ ...record, connection_phase: 'GHOST', disconnected_at: disconnectedAt }),
       },
     });
