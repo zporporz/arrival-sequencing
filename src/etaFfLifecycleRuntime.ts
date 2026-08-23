@@ -10,6 +10,7 @@ const FROZEN_BEFORE_TLDT_MINUTES = 4
 // authoritative for downstream separation, including SUPERSTABLE/FROZEN followers.
 const lockedEtaFfByKey = new Map<string, number>()
 const frozenStatusByKey = new Set<string>()
+let immediateRefreshQueued = false
 
 function parseClock(value: string) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
@@ -97,8 +98,6 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
-  // FROZEN remains a lifecycle/status latch once entered, but it no longer stores or
-  // enforces any TLDT value.
   if (frozenStatusByKey.has(key)) return 'FROZEN'
 
   const finalTenNm = row.dataset.finalTenNm === 'true'
@@ -108,8 +107,6 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
     && targetLanding != null
     && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES
 
-  // Primary trigger: actual aircraft position reaches 10 NM final on its assigned runway.
-  // Only fall back to TLDT-4 minutes when final geometry/track data is unavailable.
   if (finalTenNm || fallbackFourMinutes) {
     frozenStatusByKey.add(key)
     row.dataset.frozenTrigger = finalTenNm ? '10NM_FINAL' : 'TLDT_4MIN_FALLBACK'
@@ -141,8 +138,7 @@ function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStat
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
 
-  // Preserve the existing ETA-FF/ETO lock semantics exactly. This change only changes
-  // the FROZEN trigger source; it does not change which lifecycle stage locks ETA-FF.
+  // Preserve the existing ETA-FF/ETO lock semantics exactly.
   if (status === 'UNSTABLE') {
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE' || status === 'SUPERSTABLE') {
@@ -216,12 +212,37 @@ function refreshRows() {
   }
 }
 
+function queueImmediateRefresh() {
+  if (immediateRefreshQueued) return
+  immediateRefreshQueued = true
+  queueMicrotask(() => {
+    immediateRefreshQueued = false
+    refreshRows()
+  })
+}
+
+function mutationTouchesFlightRow(mutation: MutationRecord) {
+  const element = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement
+  return element?.closest('.aman-flight-row') != null
+}
+
 export function installEtaFfLifecycleRuntime() {
   refreshRows()
   const timer = window.setInterval(refreshRows, REFRESH_MS)
 
+  // React can rewrite the timeline time cell while TLDT is being dragged. Restore an
+  // already-locked ETA-FF/ETO in the same browser turn, before the next paint, instead
+  // of waiting up to 250 ms for the lifecycle timer. This removes the visible
+  // move-then-snap-back flicker without changing any lock-stage logic.
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.some(mutationTouchesFlightRow)) queueImmediateRefresh()
+  })
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true })
+
   return () => {
     window.clearInterval(timer)
+    observer.disconnect()
+    immediateRefreshQueued = false
     lockedEtaFfByKey.clear()
     frozenStatusByKey.clear()
   }
