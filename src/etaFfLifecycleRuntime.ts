@@ -101,10 +101,18 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
   // enforces any TLDT value.
   if (frozenStatusByKey.has(key)) return 'FROZEN'
 
-  const targetLanding = targetTldtMs(row, now)
   const finalTenNm = row.dataset.finalTenNm === 'true'
-  if (finalTenNm || (targetLanding != null && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES)) {
+  const finalGeometryAvailable = row.dataset.finalGeometryAvailable === 'true'
+  const targetLanding = targetTldtMs(row, now)
+  const fallbackFourMinutes = !finalGeometryAvailable
+    && targetLanding != null
+    && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES
+
+  // Primary trigger: actual aircraft position reaches 10 NM final on its assigned runway.
+  // Only fall back to TLDT-4 minutes when final geometry/track data is unavailable.
+  if (finalTenNm || fallbackFourMinutes) {
     frozenStatusByKey.add(key)
+    row.dataset.frozenTrigger = finalTenNm ? '10NM_FINAL' : 'TLDT_4MIN_FALLBACK'
     return 'FROZEN'
   }
 
@@ -133,8 +141,8 @@ function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStat
   const liveEta = liveEtaFfMs(row, now)
   const manual = isManualTarget(row)
 
-  // Preserve the existing ETA-FF/ETO lock semantics exactly. This change only removes
-  // TLDT protection; it does not change which lifecycle stage locks ETA-FF.
+  // Preserve the existing ETA-FF/ETO lock semantics exactly. This change only changes
+  // the FROZEN trigger source; it does not change which lifecycle stage locks ETA-FF.
   if (status === 'UNSTABLE') {
     lockedEtaFfByKey.delete(key)
   } else if (status === 'STABLE' || status === 'SUPERSTABLE') {
@@ -169,8 +177,6 @@ function refreshRows() {
     const status = statusFromCurrentTarget(row, now, key)
     applyStatusClass(row, status)
 
-    // Explicitly clear legacy TLDT-lock markers. Lifecycle status is visual/awareness;
-    // sequence target movement is always controlled by ATC + separation cascade.
     delete row.dataset.superstableTldt
     delete row.dataset.frozenTldt
 
