@@ -59,11 +59,23 @@ function reactProps<T>(element: Element): T | null {
   return (element as unknown as Record<string, unknown>)[key] as T
 }
 
-function fakePointer(clientY: number, pointerId = POINTER_ID): FakePointerEvent {
+function fakePointer(clientY: number, pointerId = POINTER_ID, row: HTMLElement | null = null): FakePointerEvent {
   return {
     button: 0,
     preventDefault: () => {},
-    currentTarget: {
+    currentTarget: row ? {
+      setPointerCapture: (id) => {
+        try { row.setPointerCapture?.(id) } catch { /* no-op */ }
+      },
+      hasPointerCapture: (id) => {
+        try { return row.hasPointerCapture?.(id) ?? false } catch { return false }
+      },
+      releasePointerCapture: (id) => {
+        try {
+          if (row.hasPointerCapture?.(id)) row.releasePointerCapture?.(id)
+        } catch { /* no-op */ }
+      },
+    } : {
       setPointerCapture: () => {},
       hasPointerCapture: () => false,
       releasePointerCapture: () => {},
@@ -407,13 +419,21 @@ export function installManualSequenceReorderRuntime() {
       return
     }
 
-    // For drop-to-reorder, React has already followed the pointer as a normal TLDT drag.
-    // Stop its native pointerup from persisting that temporary position, close its drag
-    // state explicitly, then restore/reassign the ORIGINAL landing-time slots by order.
-    event.preventDefault()
-    event.stopPropagation()
-    event.stopImmediatePropagation()
-    reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(fakePointer(event.clientY, event.pointerId))
+    if (finished.forceReorder) {
+      // Shift+Drag never entered React's TLDT drag, so it remains a fully intercepted
+      // reorder gesture as before.
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    } else {
+      // Normal drop-to-reorder DID enter React's TLDT drag. Close that drag explicitly
+      // with the real row as currentTarget so the actual browser pointer capture is
+      // released. Do not stop the native pointerup: React will see it again as a harmless
+      // no-op and sharedAmanRuntime gets its normal pointerup cleanup/save cycle.
+      reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
+        fakePointer(event.clientY, event.pointerId, finished.row),
+      )
+    }
 
     if (!finished.forceReorder) finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
     const nextOrder = reorderedOrder(finished)
