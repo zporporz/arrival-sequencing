@@ -298,8 +298,6 @@ function updateDropPreview(state: DragOrderState, event: PointerEvent) {
   if (!target) return
 
   target.dataset.sequenceReorderDropTarget = 'true'
-  if (!isDownwardDrag(state, event.clientY)) target.dataset.sequenceReorderPreviewOnly = 'true'
-  else delete target.dataset.sequenceReorderPreviewOnly
   state.targetIndex = insertionIndexFromPointer(state, event.clientY)
 }
 
@@ -375,8 +373,8 @@ export function installManualSequenceReorderRuntime() {
     const startIndex = startOrder.indexOf(identity.identity)
     if (startIndex < 0 || startOrder.length !== slotTargets.length) return
 
-    // Freeze the sequence order at drag start. Moving TLDT later must cascade followers,
-    // not cause a hidden order swap merely because target times cross.
+    // Latch order before React starts changing TLDT. An upward drag is timing-only and
+    // the normal pairwise cascade therefore pushes every later follower in real time.
     groupOrders.set(groupKey(identity.airport, runway), [...startOrder])
     publishOrderSnapshot()
 
@@ -409,25 +407,38 @@ export function installManualSequenceReorderRuntime() {
     if (!drag || drag.pointerId !== event.pointerId) return
     if (Math.abs(event.clientY - drag.startY) >= MOVE_TOLERANCE_PX) drag.moved = true
 
+    const downward = isDownwardDrag(drag, event.clientY)
+
     if (drag.forceReorder) {
-      updateDropPreview(drag, event)
+      if (downward) updateDropPreview(drag, event)
+      else clearDropPreview(drag)
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
       return
     }
 
-    // Yellow target is shown in both directions. Upward is preview-only; downward may
-    // become a replace/reorder when released directly over another aircraft.
+    if (!downward) {
+      // Upward = pure live TLDT push. Do not run any drop/reorder targeting at all.
+      // Let React's pointermove update the dragged TLDT immediately; its cascade then
+      // moves all later followers at the same time according to the latched order + SEP.
+      clearDropPreview(drag)
+      return
+    }
+
+    // Downward keeps the existing explicit replace behaviour. Only this direction uses
+    // a yellow drop target and can commit a sequence reorder on release.
     updateDropPreview(drag, event)
   }
 
   const onPointerUp = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
     const finished = drag
-
-    updateDropPreview(finished, event)
     const downward = isDownwardDrag(finished, event.clientY)
+
+    if (downward) updateDropPreview(finished, event)
+    else clearDropPreview(finished)
+
     const shouldReorder = finished.moved && downward && Boolean(finished.dropTarget)
 
     if (!shouldReorder) {
@@ -437,8 +448,8 @@ export function installManualSequenceReorderRuntime() {
       drag = null
 
       if (!finished.forceReorder) {
-        // Normal upward/empty drop: React persists TLDT only. sequenceIndex stays on the
-        // latched order and applyManualTargetsWithCascade pushes followers by pairwise SEP.
+        // Upward/empty release only ends the already-live TLDT drag. No reorder or slot
+        // replacement happens here; followers have already moved through normal cascade.
         return
       }
 
