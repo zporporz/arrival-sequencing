@@ -29,10 +29,12 @@ import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
 import './staffNavdataAdmin.css'
 import './staffAdminTools.css'
+import './staffMasterDataAdmin.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
 import StaffNavdataAdmin from './StaffNavdataAdmin'
 import StaffAdminTools from './StaffAdminTools'
+import StaffMasterDataAdmin from './StaffMasterDataAdmin'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installEtaFfLifecycleRuntime } from './etaFfLifecycleRuntime'
@@ -139,6 +141,7 @@ function NavdataAdminWithRuntime() {
 function RootApp() {
   const route = adminRoute()
   if (route === 'navdata') return <NavdataAdminWithRuntime />
+  if (route === 'master') return <StaffMasterDataAdmin />
   if (route === 'tools') return <StaffAdminTools />
   return <AppWithRuntime />
 }
