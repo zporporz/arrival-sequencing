@@ -1,6 +1,9 @@
-/* MAESTRO centre-scale minor ticks: keep the centre line clear and draw a short
-   tick on each side instead of one solid mark through the middle. */
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i {
+/* MAESTRO centre-scale minute ticks.
+   Every generated minute gets a short mark at BOTH outer edges of the centre time rail.
+   The middle of the rail stays clear; 5-minute major ticks are only a little stronger. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i {
   left: 50% !important;
   top: -1px !important;
   width: 0 !important;
@@ -8,20 +11,32 @@
   background: transparent !important;
 }
 
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::before,
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::after {
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::before,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::after {
   content: '';
   position: absolute;
   top: 0;
-  width: 6px;
+  width: 7px;
   height: 1px;
   background: #607995;
+  opacity: .9;
 }
 
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::before {
-  right: 3px;
+/* Left tick sits immediately OUTSIDE the left rail border. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::before {
+  right: calc(var(--aman-time-rail-half) - 1px);
 }
 
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i::after {
-  left: 3px;
+/* Right tick sits immediately OUTSIDE the right rail border. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::after {
+  left: calc(var(--aman-time-rail-half) - 1px);
+}
+
+/* 5-minute marks still use the same left/right positions, just slightly stronger. */
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::before,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::after {
+  width: 9px;
+  height: 2px;
+  background: #a0b2c7;
+  opacity: 1;
 }
