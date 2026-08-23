@@ -1,5 +1,5 @@
 /* MAESTRO centre-scale minute ticks.
-   Every generated minute gets a short mark at BOTH outer edges of the centre time rail.
+   Every generated minute gets a short mark INSIDE both edges of the centre time rail.
    The middle of the rail stays clear; 5-minute major ticks are only a little stronger. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-minor i,
@@ -22,21 +22,29 @@
   opacity: .9;
 }
 
-/* Left tick sits immediately OUTSIDE the left rail border. */
+/* Left tick starts at the left rail border and extends inward. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::before {
-  right: calc(var(--aman-time-rail-half) - 1px);
+  right: calc(var(--aman-time-rail-half) - 7px);
 }
 
-/* Right tick sits immediately OUTSIDE the right rail border. */
+/* Right tick starts at the right rail border and extends inward. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick i::after {
-  left: calc(var(--aman-time-rail-half) - 1px);
+  left: calc(var(--aman-time-rail-half) - 7px);
 }
 
-/* 5-minute marks still use the same left/right positions, just slightly stronger. */
+/* 5-minute marks use the same inside-edge placement, just slightly stronger/longer. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::before,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::after {
   width: 9px;
   height: 2px;
   background: #a0b2c7;
   opacity: 1;
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::before {
+  right: calc(var(--aman-time-rail-half) - 9px);
+}
+
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-runtime-minute-tick.is-major i::after {
+  left: calc(var(--aman-time-rail-half) - 9px);
 }
