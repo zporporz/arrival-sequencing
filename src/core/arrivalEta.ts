@@ -30,6 +30,8 @@ type EtaStageState = {
 
 const stageStateByFlight = new Map<string, EtaStageState>()
 const MAX_STAGE_STATE_KEYS = 1000
+const STAGE_STORAGE_PREFIX = 'aman-eta-stage-v1:'
+const STAGE_STORAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -43,6 +45,39 @@ function safeTime(value: string | null | undefined) {
 
 function flightStateKey(flight: IvaoArrivalTrafficFlight) {
   return String(flight.sessionId || `${flight.callsign}:${flight.departure || ''}:${flight.arrival || ''}`).trim().toUpperCase()
+}
+
+function storageKey(key: string) {
+  return `${STAGE_STORAGE_PREFIX}${key}`
+}
+
+function loadPersistedStageState(key: string, nowMs: number): EtaStageState | null {
+  try {
+    const raw = window.localStorage.getItem(storageKey(key))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<EtaStageState>
+    if ((parsed.phase !== 'GROUND' && parsed.phase !== 'AIRBORNE') || !finite(parsed.touchedAtMs)) return null
+    if (nowMs - parsed.touchedAtMs > STAGE_STORAGE_MAX_AGE_MS) {
+      window.localStorage.removeItem(storageKey(key))
+      return null
+    }
+    return {
+      phase: parsed.phase,
+      displayedMs: finite(parsed.displayedMs) ? parsed.displayedMs : null,
+      offBlockMs: finite(parsed.offBlockMs) ? parsed.offBlockMs : null,
+      touchedAtMs: parsed.touchedAtMs,
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistStageState(key: string, state: EtaStageState) {
+  try {
+    window.localStorage.setItem(storageKey(key), JSON.stringify(state))
+  } catch {
+    // Persistence is a stability aid only. The in-memory stage model still works.
+  }
 }
 
 function trimStageState() {
@@ -162,18 +197,21 @@ export function estimateIawpArrival(
 ): ArrivalEtaEstimate {
   const key = flightStateKey(flight)
   const nowMs = safeTime(fetchedAt) ?? Date.now()
-  const existing = stageStateByFlight.get(key) ?? {
-    phase: 'GROUND' as const,
-    displayedMs: null,
-    offBlockMs: null,
-    touchedAtMs: nowMs,
-  }
+  const existing = stageStateByFlight.get(key)
+    ?? loadPersistedStageState(key, nowMs)
+    ?? {
+      phase: 'GROUND' as const,
+      displayedMs: null,
+      offBlockMs: null,
+      touchedAtMs: nowMs,
+    }
   existing.touchedAtMs = nowMs
   stageStateByFlight.set(key, existing)
   trimStageState()
 
   if (!isAirborne(flight)) {
     const ground = groundStageEstimate(flight, nominalStarSeconds, fetchedAt, existing)
+    persistStageState(key, existing)
     if (ground) return ground
     return estimateIawpArrivalLegacy(flight, geometry, refFix, nominalStarSeconds, fetchedAt, performance)
   }
@@ -197,6 +235,7 @@ export function estimateIawpArrival(
       ? candidateMs
       : Math.min(existing.displayedMs, candidateMs)
   }
+  persistStageState(key, existing)
 
   if (existing.displayedMs == null) return legacy
 
