@@ -1,127 +1,3 @@
-import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
-
-const FINAL_TRIGGER_RADIUS_NM = 10
-const FINAL_HEADING_TOLERANCE_DEGREES = 40
-const FINAL_BEARING_TOLERANCE_DEGREES = 35
-const LIVE_FINAL_REFRESH_MS = 30_000
-
-const AIRPORT_REFERENCE: Record<'VTBD' | 'VTBS', { lat: number; lon: number }> = {
-  VTBD: { lat: 13.9126, lon: 100.6068 },
-  VTBS: { lat: 13.6811, lon: 100.7473 },
-}
-
-const RUNWAY_FINAL_HEADING: Record<string, number> = {
-  'VTBD:21R': 210,
-  'VTBD:21L': 210,
-  'VTBS:19': 190,
-  'VTBS:20L': 200,
-  'VTBS:20R': 200,
-}
-
-type LiveFinalInfo = {
-  airport: 'VTBD' | 'VTBS'
-  callsign: string
-  distanceNm: number
-  bearingToAirport: number
-  state: string
-  heading: number | null
-  onGround: boolean | null
-}
-
-const liveFinalByKey = new Map<string, LiveFinalInfo>()
-
-function toRadians(value: number) {
-  return value * Math.PI / 180
-}
-
-function toDegrees(value: number) {
-  return value * 180 / Math.PI
-}
-
-function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const earthRadiusNm = 3440.065
-  const dLat = toRadians(lat2 - lat1)
-  const dLon = toRadians(lon2 - lon1)
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2
-  return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function bearingDegrees(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const phi1 = toRadians(lat1)
-  const phi2 = toRadians(lat2)
-  const dLon = toRadians(lon2 - lon1)
-  const y = Math.sin(dLon) * Math.cos(phi2)
-  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon)
-  return (toDegrees(Math.atan2(y, x)) + 360) % 360
-}
-
-function headingDifference(left: number, right: number) {
-  return Math.abs(((left - right + 540) % 360) - 180)
-}
-
-function rowAirport(row: HTMLElement): 'VTBD' | 'VTBS' | null {
-  const title = row.getAttribute('title') || ''
-  if (title.includes('VTBD RWY')) return 'VTBD'
-  if (title.includes('VTBS RWY')) return 'VTBS'
-  return null
-}
-
-function rowRunway(row: HTMLElement) {
-  const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
-  if (select?.value) return select.value.trim().toUpperCase()
-  const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || null
-}
-
-function rowCallsign(row: HTMLElement) {
-  return row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
-}
-
-function testTrafficEnabled() {
-  return document.querySelector('.aman-demo-toggle.is-active') != null
-}
-
-function clearFinalData(row: HTMLElement) {
-  delete row.dataset.finalDistanceNm
-  row.dataset.finalTenNm = 'false'
-}
-
-function applyLiveFinalData() {
-  document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-    if (row.classList.contains('is-demo') || testTrafficEnabled()) {
-      clearFinalData(row)
-      return
-    }
-
-    const airport = rowAirport(row)
-    const runway = rowRunway(row)
-    const callsign = rowCallsign(row)
-    if (!airport || !runway || !callsign) {
-      clearFinalData(row)
-      return
-    }
-
-    const info = liveFinalByKey.get(`${airport}:${callsign}`)
-    const expectedHeading = RUNWAY_FINAL_HEADING[`${airport}:${runway}`]
-    if (!info || info.onGround === true || !Number.isFinite(expectedHeading)) {
-      clearFinalData(row)
-      return
-    }
-
-    const stateLooksApproach = info.state === 'approach' || info.state === 'final'
-    const headingLooksFinal = info.heading != null
-      && headingDifference(info.heading, expectedHeading) <= FINAL_HEADING_TOLERANCE_DEGREES
-    const bearingLooksFinal = headingDifference(info.bearingToAirport, expectedHeading) <= FINAL_BEARING_TOLERANCE_DEGREES
-    const final = info.distanceNm <= FINAL_TRIGGER_RADIUS_NM
-      && bearingLooksFinal
-      && (stateLooksApproach || headingLooksFinal)
-
-    row.dataset.finalDistanceNm = info.distanceNm.toFixed(1)
-    row.dataset.finalTenNm = final ? 'true' : 'false'
-  })
-}
-
 function updateManualLabels() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row, .aman-inbound-row').forEach((element) => {
     const title = element.getAttribute('title')
@@ -142,67 +18,16 @@ function updateInteractionHint() {
   if (hint) hint.textContent = 'DRAG = SET TARGET / CLOSE GAP · SHIFT+DRAG = REORDER · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
 }
 
-function cleanLiveFlight(airport: 'VTBD' | 'VTBS', flight: IvaoArrivalTrafficFlight) {
-  if (!flight.callsign || !Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return null
-  const reference = AIRPORT_REFERENCE[airport]
-  const latitude = Number(flight.latitude)
-  const longitude = Number(flight.longitude)
-  return {
-    airport,
-    callsign: flight.callsign.trim().toUpperCase(),
-    distanceNm: distanceNm(reference.lat, reference.lon, latitude, longitude),
-    bearingToAirport: bearingDegrees(latitude, longitude, reference.lat, reference.lon),
-    state: String(flight.state || '').trim().toLowerCase(),
-    heading: Number.isFinite(flight.heading) ? Number(flight.heading) : null,
-    onGround: flight.onGround,
-  } satisfies LiveFinalInfo
-}
-
-async function refreshLiveFinalData() {
-  if (testTrafficEnabled()) {
-    liveFinalByKey.clear()
-    applyLiveFinalData()
-    return
-  }
-
-  try {
-    const results = await Promise.all((['VTBD', 'VTBS'] as const).map(async (airport) => {
-      try {
-        const payload = await readIvaoTraffic(airport)
-        return (payload.flights ?? [])
-          .map((flight) => cleanLiveFlight(airport, flight))
-          .filter((flight): flight is LiveFinalInfo => flight !== null)
-      } catch {
-        return []
-      }
-    }))
-
-    liveFinalByKey.clear()
-    for (const flight of results.flat()) {
-      liveFinalByKey.set(`${flight.airport}:${flight.callsign}`, flight)
-    }
-    applyLiveFinalData()
-  } catch {
-    // The shared lifecycle runtime still has the TLDT four-minute trigger.
-  }
-}
-
 export function installFlightStatusRuntime() {
   updateInteractionHint()
   updateManualLabels()
-  applyLiveFinalData()
-  void refreshLiveFinalData()
 
   const uiTimer = window.setInterval(() => {
     updateInteractionHint()
     updateManualLabels()
-    applyLiveFinalData()
   }, 1_000)
-  const liveFinalTimer = window.setInterval(() => void refreshLiveFinalData(), LIVE_FINAL_REFRESH_MS)
 
   return () => {
     window.clearInterval(uiTimer)
-    window.clearInterval(liveFinalTimer)
-    liveFinalByKey.clear()
   }
 }

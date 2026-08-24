@@ -90,15 +90,18 @@ function rowRunway(row: HTMLElement) {
 }
 
 function trackFresh(flight: LiveFlight) {
-  if (!flight.trackTimestamp) return true
+  if (!flight.trackTimestamp) return false
   const millis = new Date(flight.trackTimestamp).getTime()
-  return !Number.isFinite(millis) || Date.now() - millis <= TRACK_MAX_AGE_MS
+  return Number.isFinite(millis) && Math.abs(Date.now() - millis) <= TRACK_MAX_AGE_MS
 }
 
 function evaluateFinal(airport: string, runway: string, flight: LiveFlight | undefined) {
   const geometry = RUNWAYS[`${airport}:${runway}`]
-  if (!geometry || !flight || flight.onGround === true) return { available: false, final: false, along: null, cross: null }
-  if (!Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude) || !trackFresh(flight)) {
+  if (!geometry || !flight || flight.onGround !== false) return { available: false, final: false, along: null, cross: null }
+  if (!Number.isFinite(flight.latitude)
+    || !Number.isFinite(flight.longitude)
+    || !Number.isFinite(flight.heading)
+    || !trackFresh(flight)) {
     return { available: false, final: false, along: null, cross: null }
   }
 
@@ -109,8 +112,7 @@ function evaluateFinal(airport: string, runway: string, flight: LiveFlight | und
   const courseDelta = angularDifference(bearingToThreshold, geometry.course)
   const along = direct * Math.cos(toRad(courseDelta))
   const cross = Math.abs(direct * Math.sin(toRad(courseDelta)))
-  const headingOk = !Number.isFinite(flight.heading)
-    || Math.abs(angularDifference(Number(flight.heading), geometry.course)) <= FINAL_HEADING_TOLERANCE_DEG
+  const headingOk = Math.abs(angularDifference(Number(flight.heading), geometry.course)) <= FINAL_HEADING_TOLERANCE_DEG
 
   const final = along >= 0
     && along <= FINAL_ALONG_TRACK_NM
@@ -122,6 +124,16 @@ function evaluateFinal(airport: string, runway: string, flight: LiveFlight | und
 
 function applyToRows() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    // TEST TRAFFIC has no live positional sensor. Never let a synthetic callsign
+    // accidentally match an IVAO flight; its lifecycle uses the four-minute fallback.
+    if (row.classList.contains('is-demo')) {
+      row.dataset.finalGeometryAvailable = 'false'
+      row.dataset.finalTenNm = 'false'
+      delete row.dataset.finalAlongNm
+      delete row.dataset.finalCrossNm
+      return
+    }
+
     const airport = rowAirport(row)
     const runway = rowRunway(row)
     const callsign = rowCallsign(row)

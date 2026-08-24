@@ -25,6 +25,7 @@ type EtaStageState = {
   phase: 'GROUND' | 'AIRBORNE'
   displayedMs: number | null
   offBlockMs: number | null
+  dynamicAirborneLatched: boolean
   touchedAtMs: number
 }
 
@@ -32,6 +33,9 @@ const stageStateByFlight = new Map<string, EtaStageState>()
 const MAX_STAGE_STATE_KEYS = 1000
 const STAGE_STORAGE_PREFIX = 'aman-eta-stage-v1:'
 const STAGE_STORAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const AIRBORNE_DYNAMIC_FL300_FT = 30_000
+const AIRBORNE_CRUISE_CAPTURE_TOLERANCE_FT = 1_000
+const AIRBORNE_DYNAMIC_DEADBAND_MS = 30_000
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -65,6 +69,7 @@ function loadPersistedStageState(key: string, nowMs: number): EtaStageState | nu
       phase: parsed.phase,
       displayedMs: finite(parsed.displayedMs) ? parsed.displayedMs : null,
       offBlockMs: finite(parsed.offBlockMs) ? parsed.offBlockMs : null,
+      dynamicAirborneLatched: parsed.dynamicAirborneLatched === true,
       touchedAtMs: parsed.touchedAtMs,
     }
   } catch {
@@ -96,6 +101,17 @@ function isAirborne(flight: IvaoArrivalTrafficFlight) {
 
 function isDeparting(flight: IvaoArrivalTrafficFlight) {
   return String(flight.state || '').trim().toLowerCase() === 'departing'
+}
+
+function dynamicAirborneTriggerFt(flight: IvaoArrivalTrafficFlight) {
+  const filedCruiseFt = finite(flight.filedCruiseAltitudeFt) && flight.filedCruiseAltitudeFt > 0
+    ? flight.filedCruiseAltitudeFt
+    : null
+  if (filedCruiseFt == null) return AIRBORNE_DYNAMIC_FL300_FT
+  return Math.min(
+    AIRBORNE_DYNAMIC_FL300_FT,
+    Math.max(0, filedCruiseFt - AIRBORNE_CRUISE_CAPTURE_TOLERANCE_FT),
+  )
 }
 
 function estimateFromTakeoff(
@@ -187,10 +203,10 @@ function groundStageEstimate(
  *
  * Airborne:
  *   ATOT + EET - STAR establishes the stage baseline. The legacy LIVE model continues
- *   calculating every refresh, but the displayed ETA-FF is monotonic: it may stay the
- *   same or move earlier, never later. This prevents GS/track noise from making the time
- *   walk back and forth. A later operational reset mechanism can be added separately for
- *   hold/vector/deviation cases without changing the preserved legacy model.
+ *   calculating every refresh. Before the aircraft reaches FL300 or its filed cruise
+ *   altitude (with capture tolerance), the displayed ETA-FF retains monotonic-earlier
+ *   takeoff protection. Crossing that trigger latches dynamic mode for the rest of the
+ *   flight, allowing LIVE ETA to move earlier or later through climb, cruise and descent.
  */
 export function estimateIawpArrival(
   flight: IvaoArrivalTrafficFlight,
@@ -208,6 +224,7 @@ export function estimateIawpArrival(
       phase: 'GROUND' as const,
       displayedMs: null,
       offBlockMs: null,
+      dynamicAirborneLatched: false,
       touchedAtMs: nowMs,
     }
   existing.touchedAtMs = nowMs
@@ -225,16 +242,39 @@ export function estimateIawpArrival(
   const referenceIso = flight.connectedAt || fetchedAt
   const takeoffBaselineMs = estimateFromTakeoff(flight, nominalStarSeconds, referenceIso)
   const legacyMs = safeTime(legacy.predictedIawpAt)
+  const triggerFt = dynamicAirborneTriggerFt(flight)
+  const altitudeFt = finite(flight.altitude) && flight.altitude >= 0 ? flight.altitude : null
+  const wasDynamic = existing.dynamicAirborneLatched
+  if (!wasDynamic && altitudeFt != null && altitudeFt >= triggerFt) {
+    existing.dynamicAirborneLatched = true
+  }
+  const dynamicJustLatched = !wasDynamic && existing.dynamicAirborneLatched
 
   // The airborne stage starts fresh from actual takeoff information. If LIVE already
   // predicts an earlier ETO at the first airborne observation, accept that immediately.
   const candidates = [takeoffBaselineMs, legacyMs].filter((value): value is number => value != null)
   const candidateMs = candidates.length ? Math.min(...candidates) : null
+  let dynamicDeadbandHeld = false
 
   if (existing.phase !== 'AIRBORNE') {
     existing.phase = 'AIRBORNE'
     existing.offBlockMs = null
-    existing.displayedMs = candidateMs
+    existing.displayedMs = existing.dynamicAirborneLatched && legacyMs != null
+      ? legacyMs
+      : candidateMs
+  } else if (existing.dynamicAirborneLatched) {
+    if (legacyMs != null) {
+      const differenceMs = existing.displayedMs == null
+        ? Number.POSITIVE_INFINITY
+        : Math.abs(legacyMs - existing.displayedMs)
+      if (dynamicJustLatched || differenceMs >= AIRBORNE_DYNAMIC_DEADBAND_MS) {
+        existing.displayedMs = legacyMs
+      } else {
+        dynamicDeadbandHeld = true
+      }
+    } else if (existing.displayedMs == null) {
+      existing.displayedMs = takeoffBaselineMs
+    }
   } else if (candidateMs != null) {
     existing.displayedMs = existing.displayedMs == null
       ? candidateMs
@@ -248,10 +288,14 @@ export function estimateIawpArrival(
   const heldLaterLive = legacyMs != null && legacyMs > existing.displayedMs
   const acceptedEarlier = legacyMs != null && legacyMs <= existing.displayedMs
   const baselineLabel = takeoffBaselineMs != null ? new Date(takeoffBaselineMs).toISOString() : 'NA'
+  const altitudeLabel = altitudeFt == null ? 'NA' : `${Math.round(altitudeFt)}FT`
+  const etaStageLabel = existing.dynamicAirborneLatched
+    ? `AIRBORNE DYNAMIC LATCHED${dynamicDeadbandHeld ? ' · DEADBAND HELD' : ' · LIVE BOTH-DIRECTIONS'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
+    : `AIRBORNE MONOTONIC ${heldLaterLive ? 'HELD EARLIER DISPLAY' : acceptedEarlier ? 'ACCEPTED EARLIER/EQUAL LIVE' : 'TAKEOFF BASELINE'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
 
   return {
     ...legacy,
     predictedIawpAt: displayedIso,
-    reason: `${legacy.reason || 'ETA LIVE'} · AIRBORNE MONOTONIC ${heldLaterLive ? 'HELD EARLIER DISPLAY' : acceptedEarlier ? 'ACCEPTED EARLIER/EQUAL LIVE' : 'TAKEOFF BASELINE'} · ATOT BASE ${baselineLabel}`,
+    reason: `${legacy.reason || 'ETA LIVE'} · ${etaStageLabel} · ATOT BASE ${baselineLabel}`,
   }
 }

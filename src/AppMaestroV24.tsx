@@ -528,8 +528,10 @@ function applyManualTargetsWithCascade(
         autoShiftSeconds: Math.max(0, Math.round((targetMs - new Date(metrics.naturalLandingAt).getTime()) / 1000)),
       } satisfies AmanSequenceRow
     })
+    // Timeline chronology controls render order only. Keep sequenceIndex as the
+    // explicit operational rank used by same-runway cascade; a pure TLDT move may
+    // cross another timestamp without silently becoming a sequence reorder.
     .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime() || a.callsign.localeCompare(b.callsign))
-    .map((row, index) => ({ ...row, sequenceIndex: index + 1 }))
 }
 
 function configuredAirportCapacityPerHour(
