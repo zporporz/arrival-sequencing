@@ -11,7 +11,6 @@ export default defineConfig({
           if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
             return 'react-vendor'
           }
-          if (id.includes('/@supabase/')) return 'supabase-vendor'
           return 'vendor'
         },
       },

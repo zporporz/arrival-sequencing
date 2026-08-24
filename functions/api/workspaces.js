@@ -1,7 +1,10 @@
 import { supabaseAdminRequest } from "../_lib/supabaseAdmin.js";
+import { getRequestSession } from "../_lib/session.js";
 
 export async function onRequestGet(context) {
   try {
+    const session = await getRequestSession(context.request, context.env);
+    if (!session) return Response.json({ error: "Authentication required" }, { status: 401 });
     const airports = await supabaseAdminRequest(
       context.env,
       "airports?select=id,icao,name,city,fir,active,published&active=eq.true&published=eq.true&order=icao.asc",

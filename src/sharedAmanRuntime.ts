@@ -1,5 +1,4 @@
 import { getAuthenticatedIdentity } from './browserIdentity'
-import { supabase } from './lib/supabase'
 
 type WorkspaceState = {
   service_date: string
@@ -537,40 +536,15 @@ export function installSharedAmanRuntime() {
   setSharedHealth('CONNECTING')
   void refresh()
 
-  const channel = supabase.channel('aman:shared-state:v1')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'aman_workspace_states' }, (payload) => {
-      const state = payload.new as WorkspaceState
-      if (state?.service_date === serviceDate) {
-        mergeWorkspace(state)
-        window.setTimeout(() => applyWorkspace(state), 0)
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'aman_flight_states' }, (payload) => {
-      const state = payload.new as FlightState
-      if (state?.service_date === serviceDate && state.connection_phase !== 'EXPIRED') {
-        mergeFlight(state)
-        window.setTimeout(() => applyFlight(state), 0)
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'aman_sequence_orders' }, (payload) => {
-      const state = payload.new as SequenceOrder
-      if (state?.service_date === serviceDate && state.airport && state.runway) {
-        sequenceOrders.set(`${state.airport}:${state.runway}`, state)
-        emitState()
-      }
-    })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') setSharedHealth('LIVE')
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setSharedHealth('ERROR', status)
-    })
-
   const applyTimer = window.setInterval(() => {
     applyAll()
     for (const airport of AIRPORTS) {
       if (!workspaceStates.has(airport) && findConfigBlock(airport)) queueWorkspaceSave(airport)
     }
   }, 1_000)
-  const refreshTimer = window.setInterval(() => void refresh(), 15_000)
+  // Shared data is intentionally read only through the IVAO-session-protected API.
+  // A short poll replaces public Supabase Postgres Changes access.
+  const refreshTimer = window.setInterval(() => void refresh(), 5_000)
 
   return () => {
     disposed = true
@@ -585,6 +559,5 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('dblclick', onDoubleClick)
     window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
-    void supabase.removeChannel(channel)
   }
 }

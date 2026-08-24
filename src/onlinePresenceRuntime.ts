@@ -1,14 +1,4 @@
 import { getAuthenticatedIdentity, getBrowserIdentity } from './browserIdentity'
-import { supabase } from './lib/supabase'
-
-type PresenceMeta = {
-  displayName?: string
-  vid?: string
-  roleLabel?: string
-  staffPositions?: string[]
-  onlineAt?: string
-  airportView?: string
-}
 
 type OnlineController = {
   key: string
@@ -131,38 +121,21 @@ export function installOnlinePresenceRuntime() {
   const vid = authenticated?.vid || null
   const staffPositions = authenticated?.staffPositions ?? []
 
-  const channel = supabase.channel('aman:web-online:v1', {
-    config: { presence: { key: browser.id } },
-  })
-
   let disposed = false
   let lastScope = ''
 
-  const syncPresence = () => {
-    const state = channel.presenceState<PresenceMeta>()
-    const byController = new Map<string, OnlineController>()
-
-    for (const presence of Object.values(state).flat()) {
-      if (!presence.displayName) continue
-      const key = presence.vid?.trim() || presence.displayName.trim().toUpperCase()
-      const candidate: OnlineController = {
-        key,
-        displayName: presence.displayName,
-        vid: presence.vid?.trim() || null,
-        roleLabel: presence.roleLabel?.trim() || null,
-        staffPositions: Array.isArray(presence.staffPositions) ? presence.staffPositions.filter(Boolean) : [],
-        onlineAt: presence.onlineAt || null,
-        airportView: presence.airportView?.trim() || null,
-      }
-      const current = byController.get(key)
-      if (!current || (candidate.onlineAt && (!current.onlineAt || candidate.onlineAt < current.onlineAt))) {
-        byController.set(key, candidate)
-      }
-    }
-
-    const controllers = [...byController.values()].sort((left, right) => left.displayName.localeCompare(right.displayName))
-    if (!controllers.length) {
-      controllers.push({
+  const syncPresence = async () => {
+    if (disposed) return
+    try {
+      const response = await fetch('/api/sequence/presence', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      const payload = await response.json() as { controllers?: OnlineController[]; error?: string }
+      if (!response.ok) throw new Error(payload.error || `Presence API returned ${response.status}`)
+      const controllers = payload.controllers || []
+      if (!controllers.length) controllers.push({
         key: vid || browser.id,
         displayName,
         vid,
@@ -171,46 +144,64 @@ export function installOnlinePresenceRuntime() {
         onlineAt: startedAt,
         airportView: currentAirportView(),
       })
+      if (!disposed) renderPresence(controllers)
+    } catch {
+      if (!disposed) renderPresence([{
+        key: vid || browser.id,
+        displayName,
+        vid,
+        roleLabel,
+        staffPositions,
+        onlineAt: startedAt,
+        airportView: currentAirportView(),
+      }])
     }
-    renderPresence(controllers)
   }
 
   const track = async () => {
     if (disposed) return
     const airportView = currentAirportView()
     lastScope = airportView
-    await channel.track({
-      displayName,
-      vid: vid || undefined,
-      roleLabel,
-      staffPositions,
-      onlineAt: startedAt,
-      airportView,
+    const response = await fetch('/api/sequence/presence', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        action: 'track',
+        browserId: browser.id,
+        displayName,
+        onlineAt: startedAt,
+        airportView,
+      }),
     })
+    if (!response.ok) throw new Error(`Presence API returned ${response.status}`)
   }
-
-  channel
-    .on('presence', { event: 'sync' }, syncPresence)
-    .subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await track()
-        syncPresence()
-      }
-    })
 
   ensurePresenceMenu()
   renderPresence([{ key: vid || browser.id, displayName, vid, roleLabel, staffPositions, onlineAt: startedAt, airportView: currentAirportView() }])
+  void track().then(syncPresence).catch(() => void syncPresence())
 
   const scopeTimer = window.setInterval(() => {
     ensurePresenceMenu()
     const scope = currentAirportView()
-    if (scope !== lastScope) void track()
+    if (scope !== lastScope) void track().then(syncPresence).catch(() => {})
   }, 2_000)
+  const heartbeatTimer = window.setInterval(() => void track().catch(() => {}), 10_000)
+  const presenceTimer = window.setInterval(() => void syncPresence(), 5_000)
 
   return () => {
     disposed = true
     window.clearInterval(scopeTimer)
+    window.clearInterval(heartbeatTimer)
+    window.clearInterval(presenceTimer)
     document.querySelector('.aman-online-menu')?.remove()
-    void supabase.removeChannel(channel)
+    void fetch('/api/sequence/presence', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ action: 'leave', browserId: browser.id }),
+    }).catch(() => {})
   }
 }
