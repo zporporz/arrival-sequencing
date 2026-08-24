@@ -88,6 +88,11 @@ function controllerIdentity(user: AuthUser) {
   }
 }
 
+function clearDocumentAuth() {
+  delete document.documentElement.dataset.authRole
+  delete document.documentElement.dataset.authVid
+}
+
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
@@ -107,6 +112,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         })
         if (response.status === 401) {
           setAuthenticatedIdentity(null)
+          clearDocumentAuth()
           if (!disposed) setUser(null)
           return
         }
@@ -115,6 +121,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         const payload = await response.json() as AuthResponse
         if (!payload.authenticated || !payload.user) {
           setAuthenticatedIdentity(null)
+          clearDocumentAuth()
           if (!disposed) setUser(null)
           return
         }
@@ -133,6 +140,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         if (!disposed) setUser(payload.user)
       } catch (sessionError) {
         setAuthenticatedIdentity(null)
+        clearDocumentAuth()
         if (!disposed) {
           const timedOut = controller.signal.aborted
           setError(timedOut ? 'IVAO session check timed out. Reload the page or sign in again.' : sessionError instanceof Error ? sessionError.message : String(sessionError))

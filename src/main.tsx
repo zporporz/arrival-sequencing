@@ -27,7 +27,7 @@ import './maestroTimelineAxis.css'
 import './maestroTimelineTicks.css'
 import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
-import AuthGate from './AuthGate'
+import AuthGate, { useAuthUser } from './AuthGate'
 import App from './AppMaestroV24'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
@@ -65,6 +65,8 @@ function adminRoute() {
 }
 
 function AppWithRuntime() {
+  const user = useAuthUser()
+
   useEffect(() => {
     // Install isolation first so synthetic TEST TRAFFIC can exercise the same local
     // handlers without writing fake callsigns into production shared flight state.
@@ -88,7 +90,9 @@ function AppWithRuntime() {
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
     const removeVtbdCapacityRuntime = installVtbdCapacityRuntime()
-    const removeStaffNavdataLinkRuntime = installStaffNavdataLinkRuntime()
+    const removeStaffNavdataLinkRuntime = user.isThailandStaff
+      ? installStaffNavdataLinkRuntime()
+      : () => {}
     const removeOperationalAdvisoryRuntime = installOperationalAdvisoryRuntime()
     const removeTimelineReadableRuntime = installTimelineReadableRuntime()
     const removeMissedApproachDirectInsertRuntime = installMissedApproachDirectInsertRuntime()
@@ -119,7 +123,7 @@ function AppWithRuntime() {
       removeMissedApproachDirectInsertRuntime()
       removeTestTrafficIsolationRuntime()
     }
-  }, [])
+  }, [user.isThailandStaff])
 
   return <App />
 }
