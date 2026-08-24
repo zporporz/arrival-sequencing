@@ -1,0 +1,25 @@
+.stafftools-audit-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stafftools-audit-table td b.session-active {
+  color: #78e2d0;
+  border-color: #36776d;
+}
+
+.stafftools-audit-table td b.session-idle,
+.stafftools-audit-table td b.session-expired {
+  color: #f2bd70;
+  border-color: #755c38;
+}
+
+.stafftools-audit-table td b.session-sign_out {
+  color: #9eb4c8;
+  border-color: #415166;
+}
+
+@media (max-width: 760px) {
+  .stafftools-audit-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

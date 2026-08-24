@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthUser } from './AuthGate'
 import './staffAdminTools.css'
+import './sessionAudit.css'
 
 type LoginAuditEvent = {
   id: number
@@ -15,6 +16,11 @@ type LoginAuditEvent = {
   atc_rating: string | null
   pilot_rating: string | null
   logged_in_at: string
+  session_id: string | null
+  last_activity_at: string | null
+  expires_at: string | null
+  logged_out_at: string | null
+  end_reason: 'SIGN_OUT' | 'IDLE' | 'EXPIRED' | null
 }
 
 type LoginAuditPayload = {
@@ -22,6 +28,7 @@ type LoginAuditPayload = {
   limit: number
   eventCount: number
   uniqueVids: number
+  activeCount: number
   events: LoginAuditEvent[]
   error?: string
 }
@@ -44,6 +51,15 @@ function bangkokTimestamp(value: string) {
     second: '2-digit',
     hour12: false,
   }).format(date).replace(',', '')
+}
+
+function sessionStatus(event: LoginAuditEvent) {
+  if (event.end_reason) return event.end_reason
+  if (!event.session_id) return 'LEGACY'
+  const now = Date.now()
+  if (new Date(event.expires_at || '').getTime() <= now) return 'EXPIRED'
+  if (new Date(event.last_activity_at || event.logged_in_at).getTime() + 2 * 60 * 60 * 1000 <= now) return 'IDLE'
+  return 'ACTIVE'
 }
 
 export default function StaffAdminTools() {
@@ -117,14 +133,14 @@ export default function StaffAdminTools() {
         <a className="stafftools-card is-ready" href="#login-audit">
           <div className="stafftools-card-head"><span>AUDIT</span><b>LIVE</b></div>
           <h2>IVAO Login History</h2>
-          <p>Staff-only timestamp history of successful IVAO sign-ins, including VID, member/staff role and staff positions.</p>
-          <small>Server timestamp · IVAO identity · staff-only API</small>
+          <p>Staff-only history of successful IVAO sign-ins and how each session ended.</p>
+          <small>Login · activity · sign-out reason · IVAO identity</small>
         </a>
       </section>
 
       <section className="stafftools-audit" id="login-audit">
         <header>
-          <div><span>SECURITY AUDIT</span><h2>Successful IVAO Logins</h2><p>Times are shown in Bangkok local time and UTC. Failed or incomplete OAuth attempts are not recorded.</p></div>
+          <div><span>SECURITY AUDIT</span><h2>IVAO Session History</h2><p>Times are shown in Bangkok local time and UTC. Closing a browser tab alone does not end a session.</p></div>
           <div className="stafftools-audit-controls">
             <label><span>Range</span><select value={auditDays} onChange={(event) => setAuditDays(Number(event.target.value))}><option value={1}>24 HOURS</option><option value={7}>7 DAYS</option><option value={30}>30 DAYS</option><option value={90}>90 DAYS</option></select></label>
             <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>{auditLoading ? 'LOADING…' : 'REFRESH'}</button>
@@ -134,13 +150,14 @@ export default function StaffAdminTools() {
         <div className="stafftools-audit-summary">
           <div><span>LOGIN EVENTS</span><strong>{audit?.eventCount ?? '---'}</strong></div>
           <div><span>UNIQUE VIDS</span><strong>{audit?.uniqueVids ?? '---'}</strong></div>
+          <div><span>ACTIVE NOW</span><strong>{audit?.activeCount ?? '---'}</strong></div>
           <div><span>WINDOW</span><strong>{audit?.days ?? auditDays}D</strong></div>
         </div>
 
         {auditError && <div className="stafftools-audit-error">{auditError}</div>}
         <div className="stafftools-audit-table-wrap">
           <table className="stafftools-audit-table">
-            <thead><tr><th>BANGKOK (UTC+7)</th><th>UTC</th><th>NAME</th><th>VID</th><th>ROLE</th><th>POSITION / RATING</th></tr></thead>
+            <thead><tr><th>LOGIN BANGKOK (UTC+7)</th><th>LOGIN UTC</th><th>NAME</th><th>VID</th><th>ROLE</th><th>SESSION</th><th>ENDED BANGKOK</th><th>POSITION / RATING</th></tr></thead>
             <tbody>
               {(audit?.events || []).map((event) => <tr key={event.id}>
                 <td>{bangkokTimestamp(event.logged_in_at)}</td>
@@ -148,9 +165,11 @@ export default function StaffAdminTools() {
                 <td><strong>{event.name}</strong>{event.public_nickname && event.public_nickname !== event.name ? <small>{event.public_nickname}</small> : null}</td>
                 <td>{event.vid}</td>
                 <td><b className={event.is_thailand_staff ? 'is-staff' : ''}>{event.role}</b></td>
+                <td><b className={`session-${sessionStatus(event).toLowerCase()}`}>{sessionStatus(event)}</b></td>
+                <td>{event.logged_out_at ? bangkokTimestamp(event.logged_out_at) : '—'}</td>
                 <td>{event.staff_positions?.length ? event.staff_positions.join(' / ') : [event.atc_rating, event.pilot_rating].filter(Boolean).join(' / ') || '—'}</td>
               </tr>)}
-              {!auditLoading && audit && audit.events.length === 0 ? <tr><td colSpan={6} className="empty">No successful login events in this window.</td></tr> : null}
+              {!auditLoading && audit && audit.events.length === 0 ? <tr><td colSpan={8} className="empty">No successful login events in this window.</td></tr> : null}
             </tbody>
           </table>
         </div>

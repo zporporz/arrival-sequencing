@@ -16,15 +16,19 @@ export type AuthUser = {
   staffPositions: string[]
   staffPositionCodes?: string[]
   createdAt: string
+  lastActivityAt?: string
 }
 
 type AuthResponse = {
   authenticated: boolean
   user?: AuthUser
+  reason?: 'MISSING' | 'INVALID' | 'IDLE' | 'EXPIRED'
 }
 
 const AuthUserContext = createContext<AuthUser | null>(null)
 const AUTH_SESSION_TIMEOUT_MS = 10_000
+const AUTH_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000
+const AUTH_ACTIVITY_PING_INTERVAL_MS = 5 * 60 * 1000
 
 export function useAuthUser() {
   const user = useContext(AuthUserContext)
@@ -35,6 +39,8 @@ export function useAuthUser() {
 function loginMessage() {
   const reason = new URLSearchParams(window.location.search).get('login')
   if (!reason || reason === 'success') return null
+  if (reason === 'idle') return 'You were signed out after 2 hours without activity. Please sign in again.'
+  if (reason === 'expired') return 'Your IVAO session reached its time limit. Please sign in again.'
   if (reason === 'token_failed') return 'IVAO sign-in could not exchange the authorization code. Please try again.'
   if (reason === 'user_failed') return 'IVAO sign-in succeeded, but the profile could not be loaded. Please try again.'
   return 'IVAO sign-in was not completed. Please try again.'
@@ -111,9 +117,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           signal: controller.signal,
         })
         if (response.status === 401) {
+          const payload = await response.json().catch(() => null) as AuthResponse | null
           setAuthenticatedIdentity(null)
           clearDocumentAuth()
-          if (!disposed) setUser(null)
+          if (!disposed) {
+            if (payload?.reason === 'IDLE') setError('You were signed out after 2 hours without activity. Please sign in again.')
+            if (payload?.reason === 'EXPIRED') setError('Your IVAO session reached its time limit. Please sign in again.')
+            setUser(null)
+          }
           return
         }
         if (!response.ok) throw new Error(`Authentication service returned ${response.status}`)
@@ -159,6 +170,70 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       controller.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+
+    let disposed = false
+    let pingRunning = false
+    let idleTimer = 0
+    let lastPingAt = new Date(user.lastActivityAt || user.createdAt).getTime()
+    if (!Number.isFinite(lastPingAt)) lastPingAt = Date.now()
+
+    const scheduleIdleLogout = (lastActivityAt: number) => {
+      window.clearTimeout(idleTimer)
+      const delay = Math.max(0, lastActivityAt + AUTH_IDLE_TIMEOUT_MS - Date.now())
+      idleTimer = window.setTimeout(() => {
+        window.location.assign('/api/auth/logout?reason=IDLE')
+      }, delay)
+    }
+
+    const recordActivity = async () => {
+      const now = Date.now()
+      scheduleIdleLogout(now)
+      if (pingRunning || now - lastPingAt < AUTH_ACTIVITY_PING_INTERVAL_MS) return
+
+      pingRunning = true
+      try {
+        const response = await fetch('/api/auth/activity', {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        })
+        if (response.status === 401) {
+          const payload = await response.json().catch(() => null) as AuthResponse | null
+          const loginReason = payload?.reason === 'IDLE' ? 'idle' : 'expired'
+          window.location.assign(`/?login=${loginReason}`)
+          return
+        }
+        if (response.ok) lastPingAt = now
+      } catch {
+        // Keep the local idle timer running; the next interaction retries.
+      } finally {
+        if (!disposed) pingRunning = false
+      }
+    }
+
+    const onActivity = () => { void recordActivity() }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void recordActivity()
+    }
+
+    scheduleIdleLogout(lastPingAt)
+    window.addEventListener('pointerdown', onActivity, { passive: true })
+    window.addEventListener('keydown', onActivity)
+    window.addEventListener('touchstart', onActivity, { passive: true })
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      disposed = true
+      window.clearTimeout(idleTimer)
+      window.removeEventListener('pointerdown', onActivity)
+      window.removeEventListener('keydown', onActivity)
+      window.removeEventListener('touchstart', onActivity)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [user])
 
   if (loading) {
     return (

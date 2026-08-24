@@ -22,11 +22,19 @@ export async function onRequestGet(context) {
     );
     const events = Array.isArray(result.data) ? result.data : [];
     const uniqueVids = new Set(events.map((event) => String(event.vid))).size;
+    const now = Date.now();
+    const activeCount = events.filter((event) => {
+      if (!event.session_id || event.logged_out_at) return false;
+      const expiresAt = new Date(event.expires_at).getTime();
+      const lastActivityAt = new Date(event.last_activity_at || event.logged_in_at).getTime();
+      return expiresAt > now && lastActivityAt + 2 * 60 * 60 * 1000 > now;
+    }).length;
     return json({
       days,
       limit,
       eventCount: events.length,
       uniqueVids,
+      activeCount,
       events,
     });
   } catch (error) {
