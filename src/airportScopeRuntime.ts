@@ -97,7 +97,11 @@ export function installAirportScopeRuntime() {
     if (!guide) {
       guide = document.createElement('div')
       guide.className = 'aman-airport-side-guide'
-      guide.innerHTML = '<span class="left"></span><span class="right"></span>'
+      const left = document.createElement('span')
+      left.className = 'left'
+      const right = document.createElement('span')
+      right.className = 'right'
+      guide.append(left, right)
       stage.appendChild(guide)
     }
 

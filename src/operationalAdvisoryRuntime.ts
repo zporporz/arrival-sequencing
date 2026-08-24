@@ -166,7 +166,11 @@ function ensureSystemRow(className: string, label: string) {
   if (!row) {
     row = document.createElement('div')
     row.className = className
-    row.innerHTML = `<dt>${label}</dt><dd>0</dd>`
+    const term = document.createElement('dt')
+    term.textContent = label
+    const value = document.createElement('dd')
+    value.textContent = '0'
+    row.append(term, value)
     list.appendChild(row)
   }
   return row.querySelector<HTMLElement>('dd')

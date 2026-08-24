@@ -5,6 +5,7 @@ type DisplaySide = 'LEFT' | 'RIGHT'
 type LandedRecord = {
   airport: AirportCode
   callsign: string
+  raw_session_id?: string | null
   aircraft_type: string | null
   landed_at: string
   snapshot?: Record<string, unknown>
@@ -39,6 +40,7 @@ const POINTER_ID = 70425
 
 const testLandedByKey = new Map<string, LandedRecord>()
 const testMissedByKey = new Set<string>()
+const lastRunwayByKey = new Map<string, string>()
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -132,6 +134,15 @@ function testRowRunway(row: HTMLElement) {
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
   return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || null
+}
+
+function rememberActiveRunways() {
+  document.querySelectorAll<HTMLElement>('.aman-flight-row:not(.is-demo)').forEach((row) => {
+    const airport = testRowAirport(row)
+    const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
+    const runway = testRowRunway(row)
+    if (airport && callsign && runway) lastRunwayByKey.set(`${airport}:${callsign}`, runway)
+  })
 }
 
 function findTestFlightRow(record: LandedRecord) {
@@ -295,7 +306,11 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   menu.style.top = `${Math.min(y, window.innerHeight - 260)}px`
 
   const header = document.createElement('header')
-  header.innerHTML = `<strong>${record.callsign}</strong><span>${record.airport} · LANDED · ALDT ${formatHm(record.landed_at)}Z</span>`
+  const headerCallsign = document.createElement('strong')
+  headerCallsign.textContent = record.callsign
+  const headerStatus = document.createElement('span')
+  headerStatus.textContent = `${record.airport} · LANDED · ALDT ${formatHm(record.landed_at)}Z`
+  header.append(headerCallsign, headerStatus)
   menu.appendChild(header)
 
   const section = document.createElement('div')
@@ -313,7 +328,7 @@ function openLandedMenu(record: LandedRecord, x: number, y: number, liveRecords:
   menu.appendChild(ga)
 
   const note = document.createElement('small')
-  note.textContent = 'GA moves the flight to MISSED APPROACH. REINSERT then reserves a new TLDT at NOW +10 minutes.'
+  note.textContent = 'Live GA recovery requires the same IVAO session, a fresh airborne climb track and a known assigned runway.'
   menu.appendChild(note)
   document.body.appendChild(menu)
 }
@@ -323,9 +338,13 @@ function buildRow(record: LandedRecord, side: DisplaySide, nowMs: number, liveRe
   const row = document.createElement('div')
   row.className = 'aman-landed-history-row'
   row.dataset.landedKey = `${record.airport}:${record.callsign}:${record.landed_at}`
+  row.dataset.landedAirport = record.airport
+  row.dataset.landedAt = record.landed_at
   row.dataset.displaySide = side
   row.dataset.flightStatus = 'LANDED'
   row.dataset.landedSource = String(record.snapshot?.source || 'LIVE')
+  const rawSessionId = String(record.raw_session_id || record.snapshot?.sessionId || '').trim()
+  if (rawSessionId) row.dataset.landedSessionId = rawSessionId
   row.style.setProperty('--landed-offset-px', `${Math.round((nowMs - landedMs) / 60_000 * TIMELINE_DISPLAY_PX_PER_MINUTE * 100) / 100}px`)
   row.title = `LANDED · ${record.airport} · ${record.callsign} · ALDT ${formatHm(record.landed_at)}Z · click/right-click for actions`
 
@@ -344,7 +363,8 @@ function buildRow(record: LandedRecord, side: DisplaySide, nowMs: number, liveRe
   const state = document.createElement('b')
   state.textContent = 'ALDT'
   const runway = document.createElement('em')
-  runway.textContent = String(record.snapshot?.runway || (record.snapshot?.source === 'TEST_TRAFFIC' ? 'TEST' : 'LANDED'))
+  const rememberedRunway = lastRunwayByKey.get(`${record.airport}:${record.callsign}`)
+  runway.textContent = String(record.snapshot?.runway || rememberedRunway || (record.snapshot?.source === 'TEST_TRAFFIC' ? 'TEST' : 'LANDED'))
   row.append(aldt, callsign, aircraft, fix, actual, state, runway)
 
   const open = (event: MouseEvent) => {
@@ -371,6 +391,7 @@ export function installLandedHistoryRuntime() {
     if (disposed) return
     const testMode = testTrafficEnabled()
     const nowMs = Date.now()
+    rememberActiveRunways()
 
     if (testMode) {
       if (!previousTestMode) liveRecords = []
@@ -445,6 +466,7 @@ export function installLandedHistoryRuntime() {
     document.removeEventListener('pointerdown', closeOnOutside, true)
     closeLandedMenu()
     clearTestLandings()
+    lastRunwayByKey.clear()
     document.querySelectorAll('.aman-landed-history-row').forEach((row) => row.remove())
   }
 }

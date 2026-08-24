@@ -15,7 +15,15 @@ function ensureSystemSummary(panel: HTMLElement) {
   button.type = 'button'
   button.className = 'aman-system-summary'
   button.setAttribute('aria-expanded', 'false')
-  button.innerHTML = '<span class="title">SYSTEM</span><span class="health"></span><i aria-hidden="true">⌃</i>'
+  const title = document.createElement('span')
+  title.className = 'title'
+  title.textContent = 'SYSTEM'
+  const health = document.createElement('span')
+  health.className = 'health'
+  const caret = document.createElement('i')
+  caret.setAttribute('aria-hidden', 'true')
+  caret.textContent = '⌃'
+  button.append(title, health, caret)
   button.addEventListener('click', () => {
     const expanded = panel.classList.toggle('is-expanded')
     button?.setAttribute('aria-expanded', expanded ? 'true' : 'false')
@@ -45,16 +53,33 @@ function refreshSystemSummary() {
   const holdingActive = holding !== 'NONE' && holding !== '0' && holding !== '--'
   const speedActive = speed !== 'NONE' && speed !== '0' && speed !== '--'
 
-  health.innerHTML = [
-    `<b class="${dataMode === 'LIVE' ? 'ok' : ''}">${dataMode}</b>`,
-    `<span class="${sharedOk ? 'ok' : 'warn'}">SYNC ${shared}</span>`,
-    `<span>ETA ${eta}</span>`,
-    `<span class="${sep === 'OK' ? 'ok' : 'warn'}">SEP ${sep}</span>`,
-    holdingActive ? `<span class="warn">HLD ${holding}</span>` : '',
-    speedActive ? `<span>SPD ${speed}</span>` : '',
-    `<span class="${ghost !== '0' && ghost !== '--' ? 'warn' : ''}">GHOST ${ghost}</span>`,
-    reconnect && reconnect !== 'NONE' && reconnect !== '--' ? `<span class="warn">${reconnect}</span>` : '',
-  ].filter(Boolean).join('<em>·</em>')
+  const item = (tag: 'b' | 'span', text: string, className = '') => {
+    const node = document.createElement(tag)
+    node.textContent = text
+    if (className) node.className = className
+    return node
+  }
+  const items = [
+    item('b', dataMode, dataMode === 'LIVE' ? 'ok' : ''),
+    item('span', `SYNC ${shared}`, sharedOk ? 'ok' : 'warn'),
+    item('span', `ETA ${eta}`),
+    item('span', `SEP ${sep}`, sep === 'OK' ? 'ok' : 'warn'),
+    holdingActive ? item('span', `HLD ${holding}`, 'warn') : null,
+    speedActive ? item('span', `SPD ${speed}`) : null,
+    item('span', `GHOST ${ghost}`, ghost !== '0' && ghost !== '--' ? 'warn' : ''),
+    reconnect && reconnect !== 'NONE' && reconnect !== '--' ? item('span', reconnect, 'warn') : null,
+  ].filter((node): node is HTMLElement => node != null)
+
+  const content: Node[] = []
+  items.forEach((node, index) => {
+    if (index > 0) {
+      const separator = document.createElement('em')
+      separator.textContent = '·'
+      content.push(separator)
+    }
+    content.push(node)
+  })
+  health.replaceChildren(...content)
 }
 
 export function installSystemPanelRuntime() {

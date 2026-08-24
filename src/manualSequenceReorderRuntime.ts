@@ -12,7 +12,17 @@ type SharedFlightState = {
   manual_runway?: string | null
 }
 
-type SharedStateDetail = { flightStates?: SharedFlightState[] }
+type SharedSequenceOrder = {
+  airport: string
+  runway: string
+  ordered_callsigns: string[]
+  revision?: number
+}
+
+type SharedStateDetail = {
+  flightStates?: SharedFlightState[]
+  sequenceOrders?: SharedSequenceOrder[]
+}
 
 type FakePointerEvent = {
   button: number
@@ -51,6 +61,7 @@ const MOVE_TOLERANCE_PX = 4
 const DROP_PROXIMITY_PX = 4
 const POINTER_ID = 70424
 const groupOrders = new Map<string, string[]>()
+const sharedOrderRevisions = new Map<string, number>()
 let drag: DragOrderState | null = null
 
 function reactProps<T>(element: Element): T | null {
@@ -164,6 +175,45 @@ function publishOrderSnapshot() {
   setAmanManualSequenceOrderSnapshot(snapshot)
 }
 
+function callsignFromIdentity(identity: string) {
+  return identity.slice(identity.indexOf(':') + 1)
+}
+
+async function persistSequenceOrder(airport: string, runway: string, order: readonly string[]) {
+  const rows = rowsForGroup(airport, runway)
+  if (!rows.length || rows.every((row) => row.classList.contains('is-demo'))) return
+
+  try {
+    const response = await fetch('/api/sequence/aman-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        action: 'setSequenceOrder',
+        serviceDate: new Date().toISOString().slice(0, 10),
+        airport,
+        runway,
+        orderedCallsigns: order.map(callsignFromIdentity),
+      }),
+    })
+    const payload = await response.json() as { error?: string }
+    if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
+  } catch (error) {
+    window.dispatchEvent(new CustomEvent('aman:shared-state-health', {
+      detail: { status: 'ERROR', detail: error instanceof Error ? error.message : String(error) },
+    }))
+  }
+}
+
+function commitSharedOrder(airport: string, runway: string, order: readonly string[]) {
+  const key = groupKey(airport, runway)
+  groupOrders.set(key, [...order])
+  sharedOrderRevisions.set(key, (sharedOrderRevisions.get(key) ?? 0) + 1)
+  publishOrderSnapshot()
+  void persistSequenceOrder(airport, runway, order)
+}
+
 function sameOrder(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
@@ -236,8 +286,7 @@ function reorderedOrder(state: DragOrderState) {
 function applyReorderedSlots(state: DragOrderState, nextOrder: string[]) {
   if (nextOrder.length !== state.slotTargets.length) return false
 
-  groupOrders.set(groupKey(state.airport, state.runway), nextOrder)
-  publishOrderSnapshot()
+  commitSharedOrder(state.airport, state.runway, nextOrder)
 
   nextOrder.forEach((identity, index) => {
     const row = rowByIdentity(state.airport, state.runway, identity)
@@ -302,8 +351,34 @@ function updateDropPreview(state: DragOrderState, event: PointerEvent) {
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
+  const explicitGroups = new Set<string>()
+  for (const state of detail?.sequenceOrders || []) {
+    const airport = String(state.airport || '').trim().toUpperCase()
+    const runway = String(state.runway || '').trim().toUpperCase()
+    if (!airport || !runway || !Array.isArray(state.ordered_callsigns)) continue
+    const key = groupKey(airport, runway)
+    explicitGroups.add(key)
+
+    const revision = Number(state.revision) || 0
+    if (revision < (sharedOrderRevisions.get(key) ?? 0)) continue
+    sharedOrderRevisions.set(key, revision)
+
+    const visibleOrder = orderFromTargets(airport, runway)
+    const visible = new Set(visibleOrder)
+    const remote = state.ordered_callsigns
+      .map((callsign) => amanSequenceOrderIdentity(airport, callsign))
+      .filter((identity, index, values) => visible.has(identity) && values.indexOf(identity) === index)
+    const retained = new Set(remote)
+    const merged = [...remote, ...visibleOrder.filter((identity) => !retained.has(identity))]
+    if (merged.length) groupOrders.set(key, merged)
+    else groupOrders.delete(key)
+  }
+
   const states = detail?.flightStates || []
-  if (!states.length) return
+  if (!states.length) {
+    publishOrderSnapshot()
+    return
+  }
 
   const manualByIdentity = new Map<string, SharedFlightState>()
   for (const state of states) {
@@ -327,6 +402,7 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
   })
 
   for (const [key, group] of groups) {
+    if (explicitGroups.has(key)) continue
     const identities = new Set(group.rows.map((row) => rowIdentity(row)?.identity).filter(Boolean) as string[])
     const existing = groupOrders.get(key)?.filter((identity) => identities.has(identity)) ?? []
 
@@ -450,6 +526,9 @@ export function installManualSequenceReorderRuntime() {
       if (!finished.forceReorder) {
         // Upward/empty release only ends the already-live TLDT drag. No reorder or slot
         // replacement happens here; followers have already moved through normal cascade.
+        if (finished.moved) {
+          commitSharedOrder(finished.airport, finished.runway, finished.startOrder)
+        }
         return
       }
 
@@ -543,6 +622,7 @@ export function installManualSequenceReorderRuntime() {
     clearDropPreview()
     drag = null
     groupOrders.clear()
+    sharedOrderRevisions.clear()
     setAmanManualSequenceOrderSnapshot({})
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)

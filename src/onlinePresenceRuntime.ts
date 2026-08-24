@@ -20,14 +20,6 @@ type OnlineController = {
   airportView: string | null
 }
 
-const HTML_ESCAPE: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
 function currentAirportView() {
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.aman-airport-scope-picker input[type="checkbox"]:checked'))
     .map((input) => input.value.trim().toUpperCase())
@@ -46,10 +38,6 @@ function sinceLabel(value: string | null) {
   return `SINCE ${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}Z`
 }
 
-function safeText(value: string) {
-  return value.replace(/[&<>"']/g, (character) => HTML_ESCAPE[character] || character)
-}
-
 function ensurePresenceMenu() {
   const session = document.querySelector<HTMLElement>('.aman-session')
   if (!session) return null
@@ -59,14 +47,31 @@ function ensurePresenceMenu() {
 
   menu = document.createElement('details')
   menu.className = 'aman-online-menu'
-  menu.innerHTML = `
-    <summary><i></i><strong>1 ONLINE</strong></summary>
-    <div class="aman-online-popover">
-      <div class="aman-online-heading"><div><b>Controllers online</b><span>AMAN website</span></div><strong>1</strong></div>
-      <div class="aman-online-list"></div>
-      <small>Live presence from this Arrival Sequencing website.</small>
-    </div>
-  `
+  const summary = document.createElement('summary')
+  const indicator = document.createElement('i')
+  const summaryCount = document.createElement('strong')
+  summaryCount.textContent = '1 ONLINE'
+  summary.append(indicator, summaryCount)
+
+  const popover = document.createElement('div')
+  popover.className = 'aman-online-popover'
+  const heading = document.createElement('div')
+  heading.className = 'aman-online-heading'
+  const headingCopy = document.createElement('div')
+  const headingTitle = document.createElement('b')
+  headingTitle.textContent = 'Controllers online'
+  const headingSubtitle = document.createElement('span')
+  headingSubtitle.textContent = 'AMAN website'
+  headingCopy.append(headingTitle, headingSubtitle)
+  const headingCount = document.createElement('strong')
+  headingCount.textContent = '1'
+  heading.append(headingCopy, headingCount)
+  const list = document.createElement('div')
+  list.className = 'aman-online-list'
+  const note = document.createElement('small')
+  note.textContent = 'Live presence from this Arrival Sequencing website.'
+  popover.append(heading, list, note)
+  menu.append(summary, popover)
 
   const signout = session.querySelector('.aman-signout')
   if (signout) session.insertBefore(menu, signout)
@@ -86,7 +91,7 @@ function renderPresence(controllers: OnlineController[]) {
   if (headingCount) headingCount.textContent = String(count)
   if (!list) return
 
-  list.innerHTML = controllers.map((controller) => {
+  const items = controllers.map((controller) => {
     const initials = controller.displayName.slice(0, 2).toUpperCase()
     const meta = [
       controller.roleLabel,
@@ -94,14 +99,27 @@ function renderPresence(controllers: OnlineController[]) {
       controller.airportView,
     ].filter(Boolean).join(' · ')
     const staffDetail = controller.staffPositions.length ? controller.staffPositions.join(' / ') : ''
-    return `
-      <div class="aman-online-item">
-        <i>${safeText(initials)}</i>
-        <div><strong>${safeText(controller.displayName)}</strong><span>${safeText(meta)}</span>${staffDetail ? `<small>${safeText(staffDetail)}</small>` : ''}</div>
-        <em>${safeText(sinceLabel(controller.onlineAt))}</em>
-      </div>
-    `
-  }).join('')
+    const item = document.createElement('div')
+    item.className = 'aman-online-item'
+    const avatar = document.createElement('i')
+    avatar.textContent = initials
+    const copy = document.createElement('div')
+    const name = document.createElement('strong')
+    name.textContent = controller.displayName
+    const details = document.createElement('span')
+    details.textContent = meta
+    copy.append(name, details)
+    if (staffDetail) {
+      const staff = document.createElement('small')
+      staff.textContent = staffDetail
+      copy.appendChild(staff)
+    }
+    const since = document.createElement('em')
+    since.textContent = sinceLabel(controller.onlineAt)
+    item.append(avatar, copy, since)
+    return item
+  })
+  list.replaceChildren(...items)
 }
 
 export function installOnlinePresenceRuntime() {

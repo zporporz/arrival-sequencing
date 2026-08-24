@@ -163,14 +163,22 @@ function decorateRecoveryRows() {
   if (!ghostRow) {
     ghostRow = document.createElement('div')
     ghostRow.className = 'aman-runtime-ghost-status'
-    ghostRow.innerHTML = '<dt>Ghost reserve</dt><dd>0</dd>'
+    const ghostLabel = document.createElement('dt')
+    ghostLabel.textContent = 'Ghost reserve'
+    const ghostValue = document.createElement('dd')
+    ghostValue.textContent = '0'
+    ghostRow.append(ghostLabel, ghostValue)
     list.appendChild(ghostRow)
   }
   let reconnectRow = list.querySelector<HTMLElement>('.aman-runtime-reconnect-status')
   if (!reconnectRow) {
     reconnectRow = document.createElement('div')
     reconnectRow.className = 'aman-runtime-reconnect-status'
-    reconnectRow.innerHTML = '<dt>Reconnect</dt><dd>NONE</dd>'
+    const reconnectLabel = document.createElement('dt')
+    reconnectLabel.textContent = 'Reconnect'
+    const reconnectValue = document.createElement('dd')
+    reconnectValue.textContent = 'NONE'
+    reconnectRow.append(reconnectLabel, reconnectValue)
     list.appendChild(reconnectRow)
   }
 

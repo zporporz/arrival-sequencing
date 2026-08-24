@@ -33,10 +33,22 @@ type FlightState = {
   updated_at: string
 }
 
+type SequenceOrder = {
+  service_date: string
+  airport: string
+  runway: string
+  ordered_callsigns: string[]
+  revision: number
+  updated_by_vid: string | null
+  updated_by_name: string | null
+  updated_at: string
+}
+
 type SharedStatePayload = {
   serviceDate: string
   workspaceStates: WorkspaceState[]
   flightStates: FlightState[]
+  sequenceOrders?: SequenceOrder[]
   error?: string
 }
 
@@ -198,7 +210,11 @@ function setSharedHealth(status: 'CONNECTING' | 'LIVE' | 'ERROR', detail = '') {
   if (!row) {
     row = document.createElement('div')
     row.className = 'aman-runtime-shared-status'
-    row.innerHTML = '<dt>Shared AMAN</dt><dd>CONNECTING</dd>'
+    const label = document.createElement('dt')
+    label.textContent = 'Shared AMAN'
+    const value = document.createElement('dd')
+    value.textContent = 'CONNECTING'
+    row.append(label, value)
     list.appendChild(row)
   }
   const value = row.querySelector('dd')
@@ -237,6 +253,7 @@ export function installSharedAmanRuntime() {
   let serviceDate = utcServiceDate()
   const workspaceStates = new Map<string, WorkspaceState>()
   const flightStates = new Map<string, FlightState>()
+  const sequenceOrders = new Map<string, SequenceOrder>()
   const workspaceWriteTimers = new Map<string, number>()
   const flightWriteTimers = new Map<string, number>()
   const localInteractionStart = new WeakMap<HTMLElement, number>()
@@ -248,6 +265,7 @@ export function installSharedAmanRuntime() {
         serviceDate,
         workspaceStates: [...workspaceStates.values()],
         flightStates: [...flightStates.values()],
+        sequenceOrders: [...sequenceOrders.values()],
       },
     }))
   }
@@ -352,12 +370,15 @@ export function installSharedAmanRuntime() {
         serviceDate = nextServiceDate
         workspaceStates.clear()
         flightStates.clear()
+        sequenceOrders.clear()
       }
       const payload = await readSharedState(serviceDate)
       workspaceStates.clear()
       flightStates.clear()
+      sequenceOrders.clear()
       payload.workspaceStates.forEach((state) => workspaceStates.set(state.airport, state))
       payload.flightStates.forEach((state) => flightStates.set(flightKey(state.airport, state.callsign), state))
+      payload.sequenceOrders?.forEach((state) => sequenceOrders.set(`${state.airport}:${state.runway}`, state))
       emitState()
       applyAll()
       setSharedHealth('LIVE')
@@ -488,10 +509,30 @@ export function installSharedAmanRuntime() {
     window.setTimeout(() => void clearManualTarget(row), 40)
   }
 
+  const onSequenceReordered = (event: Event) => {
+    const detail = (event as CustomEvent<{ airport?: string; identities?: string[] }>).detail
+    const airport = String(detail?.airport || '').trim().toUpperCase()
+    const callsigns = new Set((detail?.identities || []).map((value) =>
+      String(value).slice(String(value).indexOf(':') + 1).trim().toUpperCase(),
+    ))
+    if (!airport || !callsigns.size) return
+
+    window.setTimeout(() => {
+      callsigns.forEach((callsign) => {
+        const row = findFlightRow(airport, callsign)
+        if (row) queueManualTargetSave(row, 0)
+      })
+    }, 120)
+  }
+
+  const onForceRefresh = () => void refresh()
+
   document.addEventListener('change', onChange)
   document.addEventListener('pointerdown', onPointerDown)
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
+  window.addEventListener('aman:sequence-reordered', onSequenceReordered)
+  window.addEventListener('aman:force-shared-refresh', onForceRefresh)
 
   setSharedHealth('CONNECTING')
   void refresh()
@@ -509,6 +550,13 @@ export function installSharedAmanRuntime() {
       if (state?.service_date === serviceDate && state.connection_phase !== 'EXPIRED') {
         mergeFlight(state)
         window.setTimeout(() => applyFlight(state), 0)
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'aman_sequence_orders' }, (payload) => {
+      const state = payload.new as SequenceOrder
+      if (state?.service_date === serviceDate && state.airport && state.runway) {
+        sequenceOrders.set(`${state.airport}:${state.runway}`, state)
+        emitState()
       }
     })
     .subscribe((status) => {
@@ -535,6 +583,8 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('pointerdown', onPointerDown)
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)
+    window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
+    window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
     void supabase.removeChannel(channel)
   }
 }

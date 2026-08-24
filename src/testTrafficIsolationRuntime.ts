@@ -139,6 +139,9 @@ export function installTestTrafficIsolationRuntime() {
         // TEST TRAFFIC must not overwrite the production shared workspace.
         return fakeSuccess({ workspaceState: null })
       }
+      if (action === 'setSequenceOrder') {
+        return fakeSuccess({ sequenceOrder: null })
+      }
 
       if (TEST_FLIGHT_ACTIONS.has(action) && demoIdentitySet().has(`${airport}:${callsign}`)) {
         // TEST TRAFFIC runs the same local sequencing/lifecycle handlers, but its

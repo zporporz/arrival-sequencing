@@ -50,6 +50,20 @@ function rowText(row: HTMLElement, index: number) {
   return row.children.item(index)?.textContent?.trim() || '----'
 }
 
+function textElement<K extends keyof HTMLElementTagNameMap>(tag: K, text: string, className = '') {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  node.textContent = text
+  return node
+}
+
+function infoItem(label: string, value: string, wide = false) {
+  const item = document.createElement('div')
+  if (wide) item.className = 'wide'
+  item.append(textElement('span', label), textElement('strong', value))
+  return item
+}
+
 function closeMenu() {
   document.querySelector(`.${MENU_CLASS}`)?.remove()
 }
@@ -144,10 +158,17 @@ async function showInformation(row: HTMLElement, identity: RowIdentity) {
   overlay.className = MODAL_CLASS
   const panel = document.createElement('div')
   panel.className = 'aman-runtime-info-panel'
-  panel.innerHTML = `
-    <header><div><span>${identity.demo ? 'TEST TRAFFIC' : 'LIVE TRAFFIC'}</span><strong>${identity.callsign}</strong></div><button type="button" aria-label="Close">×</button></header>
-    <div class="aman-runtime-info-loading">Loading flight information…</div>
-  `
+  const header = document.createElement('header')
+  const heading = document.createElement('div')
+  heading.append(
+    textElement('span', identity.demo ? 'TEST TRAFFIC' : 'LIVE TRAFFIC'),
+    textElement('strong', identity.callsign),
+  )
+  const close = textElement('button', '×')
+  close.type = 'button'
+  close.setAttribute('aria-label', 'Close')
+  header.append(heading, close)
+  panel.append(header, textElement('div', 'Loading flight information…', 'aman-runtime-info-loading'))
   overlay.appendChild(panel)
   document.body.appendChild(overlay)
 
@@ -168,21 +189,21 @@ async function showInformation(row: HTMLElement, identity: RowIdentity) {
   panel.querySelector('.aman-runtime-info-loading')?.remove()
   const body = document.createElement('div')
   body.className = 'aman-runtime-info-grid'
-  body.innerHTML = `
-    <div><span>Airport / Runway</span><strong>${identity.airport} / ${identity.runway}</strong></div>
-    <div><span>Aircraft</span><strong>${aircraft}</strong></div>
-    <div><span>IAWP</span><strong>${iAwp}</strong></div>
-    <div><span>ETA-FF</span><strong>${etaFf}Z</strong></div>
-    <div><span>STA / TLDT</span><strong>${tldt}Z</strong></div>
-    <div><span>STA-FF / TTO</span><strong>${tto}Z</strong></div>
-    <div><span>TDLY</span><strong>${tdly} min</strong></div>
-    <div><span>Status</span><strong>${identity.demo ? 'SIMULATED' : (live?.state || 'LIVE')}</strong></div>
-    <div><span>Altitude</span><strong>${formatNumber(live?.altitude, ' ft')}</strong></div>
-    <div><span>Ground Speed</span><strong>${formatNumber(live?.groundSpeed, ' kt')}</strong></div>
-    <div><span>Vertical Speed</span><strong>${formatNumber(live?.verticalSpeedFpm, ' fpm')}</strong></div>
-    <div><span>Filed Cruise</span><strong>${formatNumber(live?.filedCruiseAltitudeFt, ' ft')}</strong></div>
-    <div class="wide"><span>Route</span><strong>${live?.route || (identity.demo ? 'SIMULATED TEST ROUTE' : '----')}</strong></div>
-  `
+  body.append(
+    infoItem('Airport / Runway', `${identity.airport} / ${identity.runway}`),
+    infoItem('Aircraft', aircraft),
+    infoItem('IAWP', iAwp),
+    infoItem('ETA-FF', `${etaFf}Z`),
+    infoItem('STA / TLDT', `${tldt}Z`),
+    infoItem('STA-FF / TTO', `${tto}Z`),
+    infoItem('TDLY', `${tdly} min`),
+    infoItem('Status', identity.demo ? 'SIMULATED' : (live?.state || 'LIVE')),
+    infoItem('Altitude', formatNumber(live?.altitude, ' ft')),
+    infoItem('Ground Speed', formatNumber(live?.groundSpeed, ' kt')),
+    infoItem('Vertical Speed', formatNumber(live?.verticalSpeedFpm, ' fpm')),
+    infoItem('Filed Cruise', formatNumber(live?.filedCruiseAltitudeFt, ' ft')),
+    infoItem('Route', live?.route || (identity.demo ? 'SIMULATED TEST ROUTE' : '----'), true),
+  )
   panel.appendChild(body)
 }
 
@@ -215,7 +236,10 @@ function buildMenu(row: HTMLElement, identity: RowIdentity, x: number, y: number
   menu.style.top = `${Math.min(y, window.innerHeight - 560)}px`
 
   const header = document.createElement('header')
-  header.innerHTML = `<strong>${identity.callsign}</strong><span>${identity.airport} · RWY ${identity.runway}${identity.demo ? ' · TEST' : ''}</span>`
+  header.append(
+    textElement('strong', identity.callsign),
+    textElement('span', `${identity.airport} · RWY ${identity.runway}${identity.demo ? ' · TEST' : ''}`),
+  )
   menu.appendChild(header)
 
   menu.appendChild(section('FLIGHT'))

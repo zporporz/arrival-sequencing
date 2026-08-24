@@ -31,6 +31,25 @@ function cleanCallsign(value) {
   return callsign ? callsign.slice(0, 20) : null;
 }
 
+function cleanRunway(value) {
+  const runway = String(value ?? '').trim().toUpperCase();
+  return /^[A-Z0-9]{1,12}$/.test(runway) ? runway : null;
+}
+
+function cleanOrderedCallsigns(value) {
+  if (!Array.isArray(value)) throw new Error('orderedCallsigns must be an array');
+  if (value.length > 200) throw new Error('Sequence order is too large');
+  const result = [];
+  const seen = new Set();
+  for (const item of value) {
+    const callsign = cleanCallsign(item);
+    if (!callsign || seen.has(callsign)) throw new Error('Sequence callsigns must be valid and unique');
+    seen.add(callsign);
+    result.push(callsign);
+  }
+  return result;
+}
+
 function cleanServiceDate(value) {
   const text = String(value ?? '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : utcServiceDate();
@@ -116,7 +135,7 @@ export async function onRequestGet(context) {
     if (!airports.length) throw new Error('At least one airport is required');
 
     const airportFilter = airports.map((airport) => `\"${airport}\"`).join(',');
-    const [workspaceResult, flightResult] = await Promise.all([
+    const [workspaceResult, flightResult, sequenceResult] = await Promise.all([
       supabaseAdminRequest(
         context.env,
         `aman_workspace_states?select=*&service_date=eq.${encodeURIComponent(serviceDate)}&airport=in.(${encodeURIComponent(airportFilter)})`,
@@ -125,12 +144,17 @@ export async function onRequestGet(context) {
         context.env,
         `aman_flight_states?select=*&service_date=eq.${encodeURIComponent(serviceDate)}&airport=in.(${encodeURIComponent(airportFilter)})&connection_phase=neq.EXPIRED`,
       ),
+      supabaseAdminRequest(
+        context.env,
+        `aman_sequence_orders?select=*&service_date=eq.${encodeURIComponent(serviceDate)}&airport=in.(${encodeURIComponent(airportFilter)})`,
+      ),
     ]);
 
     return json({
       serviceDate,
       workspaceStates: workspaceResult.data || [],
       flightStates: flightResult.data || [],
+      sequenceOrders: sequenceResult.data || [],
     });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : String(error) }, 400);
@@ -174,6 +198,31 @@ export async function onRequestPost(context) {
         },
       );
       return json({ ok: true, workspaceState: result.data?.[0] || null });
+    }
+
+    if (action === 'setSequenceOrder') {
+      const airport = cleanAirport(payload.airport);
+      const runway = cleanRunway(payload.runway);
+      const orderedCallsigns = cleanOrderedCallsigns(payload.orderedCallsigns);
+      if (!airport || !runway) throw new Error('Valid airport and runway are required');
+
+      const result = await supabaseAdminRequest(
+        context.env,
+        'aman_sequence_orders?on_conflict=service_date,airport,runway&select=*',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify([{
+            service_date: serviceDate,
+            airport,
+            runway,
+            ordered_callsigns: orderedCallsigns,
+            updated_by_vid: auth.vid,
+            updated_by_name: auth.name,
+          }]),
+        },
+      );
+      return json({ ok: true, sequenceOrder: result.data?.[0] || null });
     }
 
     const airport = cleanAirport(payload.airport);

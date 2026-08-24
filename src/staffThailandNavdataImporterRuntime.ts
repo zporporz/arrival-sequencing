@@ -368,7 +368,19 @@ export function installStaffThailandNavdataImporterRuntime() {
     actions.appendChild(stageButton)
 
     const copy = document.querySelector<HTMLElement>('.navadmin-import p')
-    if (copy) copy.innerHTML = 'Use <code>little_navmap_navigraph.sqlite</code>. The raw SQLite stays in this browser; structured <strong>STAR data for all Thailand airports (VT**)</strong> is staged for staff review.'
+    if (copy) {
+      const filename = document.createElement('code')
+      filename.textContent = 'little_navmap_navigraph.sqlite'
+      const scope = document.createElement('strong')
+      scope.textContent = 'STAR data for all Thailand airports (VT**)'
+      copy.replaceChildren(
+        document.createTextNode('Use '),
+        filename,
+        document.createTextNode('. The raw SQLite stays in this browser; structured '),
+        scope,
+        document.createTextNode(' is staged for staff review.'),
+      )
+    }
     const sourceSmall = document.querySelector<HTMLElement>('.navadmin-summary-grid > article:nth-child(4) small')
     if (sourceSmall) sourceSmall.textContent = 'All Thailand VT** STAR procedures are stored'
     return true

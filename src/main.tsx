@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react'
+import { lazy, StrictMode, Suspense, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import './reset.css'
 import './live.css'
@@ -27,14 +27,8 @@ import './maestroTimelineAxis.css'
 import './maestroTimelineTicks.css'
 import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
-import './staffNavdataAdmin.css'
-import './staffAdminTools.css'
-import './staffMasterDataAdmin.css'
 import AuthGate from './AuthGate'
 import App from './AppMaestroV24'
-import StaffNavdataAdmin from './StaffNavdataAdmin'
-import StaffAdminTools from './StaffAdminTools'
-import StaffMasterDataAdmin from './StaffMasterDataAdmin'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
 import { installFlightStatusRuntime } from './flightStatusRuntime'
 import { installEtaFfLifecycleRuntime } from './etaFfLifecycleRuntime'
@@ -58,9 +52,11 @@ import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
-import { installStaffNavdataDiffSummaryRuntime } from './staffNavdataDiffSummaryRuntime'
-import { installStaffThailandNavdataImporterRuntime } from './staffThailandNavdataImporterRuntime'
 import { installMissedApproachDirectInsertRuntime } from './missedApproachDirectInsertRuntime'
+
+const StaffNavdataAdminPage = lazy(() => import('./StaffNavdataAdminPage'))
+const StaffMasterDataAdmin = lazy(() => import('./StaffMasterDataAdmin'))
+const StaffAdminTools = lazy(() => import('./StaffAdminTools'))
 
 installReconnectTrafficFetch()
 
@@ -128,22 +124,9 @@ function AppWithRuntime() {
   return <App />
 }
 
-function NavdataAdminWithRuntime() {
-  useEffect(() => {
-    const removeDiffSummary = installStaffNavdataDiffSummaryRuntime()
-    const removeThailandImporter = installStaffThailandNavdataImporterRuntime()
-    return () => {
-      removeDiffSummary()
-      removeThailandImporter()
-    }
-  }, [])
-
-  return <StaffNavdataAdmin />
-}
-
 function RootApp() {
   const route = adminRoute()
-  if (route === 'navdata') return <NavdataAdminWithRuntime />
+  if (route === 'navdata') return <StaffNavdataAdminPage />
   if (route === 'master') return <StaffMasterDataAdmin />
   if (route === 'tools') return <StaffAdminTools />
   return <AppWithRuntime />
@@ -152,7 +135,9 @@ function RootApp() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthGate>
-      <RootApp />
+      <Suspense fallback={<main className="auth-screen"><p>Loading module…</p></main>}>
+        <RootApp />
+      </Suspense>
     </AuthGate>
   </StrictMode>,
 )

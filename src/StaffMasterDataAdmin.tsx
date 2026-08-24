@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import './staffMasterDataAdmin.css'
 import { useAuthUser } from './AuthGate'
 
 type Airport = {
