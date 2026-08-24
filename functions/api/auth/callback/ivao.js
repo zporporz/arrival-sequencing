@@ -6,6 +6,7 @@ import {
   getSessionSecret,
   makeCookie,
 } from "../../../_lib/session.js";
+import { supabaseAdminRequest } from "../../../_lib/supabaseAdmin.js";
 
 const IVAO_TOKEN_URL = "https://api.ivao.aero/v2/oauth/token";
 const IVAO_USERINFO_URL = "https://api.ivao.aero/v2/users/me";
@@ -20,7 +21,31 @@ function redirectHome(request, reason = null) {
   return url.toString();
 }
 
-export async function onRequestGet({ request, env }) {
+async function recordSuccessfulLogin(env, session) {
+  const positions = Array.isArray(session.staffPositions)
+    ? session.staffPositions.map((value) => String(value).trim()).filter(Boolean).slice(0, 20)
+    : [];
+  await supabaseAdminRequest(env, "ivao_login_audit", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify([{
+      vid: String(session.vid),
+      name: String(session.name || session.vid),
+      public_nickname: session.publicNickname || null,
+      role: session.isThailandStaff ? "STAFF" : "MEMBER",
+      is_thailand_staff: Boolean(session.isThailandStaff),
+      staff_positions: positions,
+      division_id: session.divisionId || null,
+      country_id: session.countryId || null,
+      atc_rating: session.atcRating || null,
+      pilot_rating: session.pilotRating || null,
+      logged_in_at: new Date().toISOString(),
+    }]),
+  });
+}
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -72,6 +97,11 @@ export async function onRequestGet({ request, env }) {
   const user = await userResponse.json();
   const session = buildSessionFromIvaoUser(user);
   const sessionToken = await encodeSession(session, getSessionSecret(env));
+  const auditWrite = recordSuccessfulLogin(env, session).catch((error) => {
+    console.error("Unable to record IVAO login audit", error);
+  });
+  if (typeof context.waitUntil === "function") context.waitUntil(auditWrite);
+  else await auditWrite;
 
   const headers = new Headers({
     Location: redirectHome(request, "success"),

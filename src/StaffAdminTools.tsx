@@ -1,8 +1,79 @@
+import { useCallback, useEffect, useState } from 'react'
 import { useAuthUser } from './AuthGate'
 import './staffAdminTools.css'
 
+type LoginAuditEvent = {
+  id: number
+  vid: string
+  name: string
+  public_nickname: string | null
+  role: 'MEMBER' | 'STAFF'
+  is_thailand_staff: boolean
+  staff_positions: string[]
+  division_id: string | null
+  country_id: string | null
+  atc_rating: string | null
+  pilot_rating: string | null
+  logged_in_at: string
+}
+
+type LoginAuditPayload = {
+  days: number
+  limit: number
+  eventCount: number
+  uniqueVids: number
+  events: LoginAuditEvent[]
+  error?: string
+}
+
+function utcTimestamp(value: string) {
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? `${date.toISOString().slice(0, 19).replace('T', ' ')}Z` : 'INVALID'
+}
+
+function bangkokTimestamp(value: string) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return 'INVALID'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date).replace(',', '')
+}
+
 export default function StaffAdminTools() {
   const user = useAuthUser()
+  const [auditDays, setAuditDays] = useState(7)
+  const [audit, setAudit] = useState<LoginAuditPayload | null>(null)
+  const [auditError, setAuditError] = useState('')
+  const [auditLoading, setAuditLoading] = useState(false)
+
+  const loadAudit = useCallback(async () => {
+    if (!user.isThailandStaff) return
+    setAuditLoading(true)
+    setAuditError('')
+    try {
+      const response = await fetch(`/api/admin/login-audit?days=${auditDays}&limit=500`, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      const payload = await response.json() as LoginAuditPayload
+      if (!response.ok) throw new Error(payload.error || `Login audit API returned ${response.status}`)
+      setAudit(payload)
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setAuditLoading(false)
+    }
+  }, [auditDays, user.isThailandStaff])
+
+  useEffect(() => { void loadAudit() }, [loadAudit])
 
   if (!user.isThailandStaff) {
     return <main className="stafftools-denied"><strong>STAFF ACCESS REQUIRED</strong><span>Thailand Division staff only.</span><a href="/">Return to AMAN</a></main>
@@ -43,12 +114,47 @@ export default function StaffAdminTools() {
           <small>CAAT eAIP scanner · review workflow pending</small>
         </article>
 
-        <article className="stafftools-card">
-          <div className="stafftools-card-head"><span>AUDIT</span><b>PLANNED</b></div>
-          <h2>System / Change History</h2>
-          <p>Consolidated staff audit for AIRAC activation, configuration edits, rollback activity and system health.</p>
-          <small>Will combine existing history sources</small>
-        </article>
+        <a className="stafftools-card is-ready" href="#login-audit">
+          <div className="stafftools-card-head"><span>AUDIT</span><b>LIVE</b></div>
+          <h2>IVAO Login History</h2>
+          <p>Staff-only timestamp history of successful IVAO sign-ins, including VID, member/staff role and staff positions.</p>
+          <small>Server timestamp · IVAO identity · staff-only API</small>
+        </a>
+      </section>
+
+      <section className="stafftools-audit" id="login-audit">
+        <header>
+          <div><span>SECURITY AUDIT</span><h2>Successful IVAO Logins</h2><p>Times are shown in Bangkok local time and UTC. Failed or incomplete OAuth attempts are not recorded.</p></div>
+          <div className="stafftools-audit-controls">
+            <label><span>Range</span><select value={auditDays} onChange={(event) => setAuditDays(Number(event.target.value))}><option value={1}>24 HOURS</option><option value={7}>7 DAYS</option><option value={30}>30 DAYS</option><option value={90}>90 DAYS</option></select></label>
+            <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>{auditLoading ? 'LOADING…' : 'REFRESH'}</button>
+          </div>
+        </header>
+
+        <div className="stafftools-audit-summary">
+          <div><span>LOGIN EVENTS</span><strong>{audit?.eventCount ?? '---'}</strong></div>
+          <div><span>UNIQUE VIDS</span><strong>{audit?.uniqueVids ?? '---'}</strong></div>
+          <div><span>WINDOW</span><strong>{audit?.days ?? auditDays}D</strong></div>
+        </div>
+
+        {auditError && <div className="stafftools-audit-error">{auditError}</div>}
+        <div className="stafftools-audit-table-wrap">
+          <table className="stafftools-audit-table">
+            <thead><tr><th>BANGKOK (UTC+7)</th><th>UTC</th><th>NAME</th><th>VID</th><th>ROLE</th><th>POSITION / RATING</th></tr></thead>
+            <tbody>
+              {(audit?.events || []).map((event) => <tr key={event.id}>
+                <td>{bangkokTimestamp(event.logged_in_at)}</td>
+                <td>{utcTimestamp(event.logged_in_at)}</td>
+                <td><strong>{event.name}</strong>{event.public_nickname && event.public_nickname !== event.name ? <small>{event.public_nickname}</small> : null}</td>
+                <td>{event.vid}</td>
+                <td><b className={event.is_thailand_staff ? 'is-staff' : ''}>{event.role}</b></td>
+                <td>{event.staff_positions?.length ? event.staff_positions.join(' / ') : [event.atc_rating, event.pilot_rating].filter(Boolean).join(' / ') || '—'}</td>
+              </tr>)}
+              {!auditLoading && audit && audit.events.length === 0 ? <tr><td colSpan={6} className="empty">No successful login events in this window.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+        {audit && audit.eventCount === audit.limit ? <small className="stafftools-audit-limit">Showing the newest {audit.limit} events. Select a shorter range for a complete view.</small> : null}
       </section>
     </main>
   </div>
