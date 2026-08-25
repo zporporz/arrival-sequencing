@@ -49,9 +49,12 @@ type DragOrderState = {
   airport: string
   runway: string
   startOrder: string[]
+  currentOrder: string[]
   targetIndex: number
+  orderChanged: boolean
   moved: boolean
   startY: number
+  lastY: number
   dropTarget: HTMLElement | null
 }
 
@@ -333,11 +336,15 @@ export function sequenceTargetChangesOrder(
   return !sameOrder(startOrder, sequenceOrderForTarget(startOrder, draggedIdentity, targetIdentity))
 }
 
-function reorderedOrder(state: DragOrderState) {
-  const otherOrder = state.startOrder.filter((identity) => identity !== state.identity)
-  const next = [...otherOrder]
-  next.splice(state.targetIndex, 0, state.identity)
-  return next
+export function sequenceOrderAfterCrossedTargets(
+  currentOrder: readonly string[],
+  draggedIdentity: string,
+  crossedTargetIdentities: readonly string[],
+) {
+  return crossedTargetIdentities.reduce<string[]>((order, targetIdentity) => {
+    if (targetIdentity === draggedIdentity || !order.includes(targetIdentity)) return order
+    return sequenceOrderForTarget(order, draggedIdentity, targetIdentity)
+  }, [...currentOrder])
 }
 
 function commitReorderedSequence(state: DragOrderState, nextOrder: string[]) {
@@ -432,6 +439,56 @@ function updateDropPreview(state: DragOrderState, event: PointerEvent) {
 
   effectiveTarget.dataset.sequenceReorderDropTarget = 'true'
   state.targetIndex = sequenceInsertionIndexForTarget(state.startOrder, state.identity, targetIdentity)
+}
+
+function crossedTargets(state: DragOrderState, event: PointerEvent) {
+  if (event.clientY <= state.lastY) return []
+
+  return rowsForGroup(state.airport, state.runway)
+    .filter((row) => row !== state.row)
+    .map((row) => {
+      const rect = row.getBoundingClientRect()
+      const identity = rowIdentity(row)?.identity || ''
+      return { row, identity, rect, centerY: rect.top + rect.height / 2 }
+    })
+    .filter(({ identity, rect, centerY }) => identity
+      && event.clientX >= rect.left
+      && event.clientX <= rect.right
+      && centerY > state.lastY
+      && centerY <= event.clientY)
+    .sort((a, b) => a.centerY - b.centerY)
+}
+
+function updateLiveDownwardOrder(state: DragOrderState, event: PointerEvent) {
+  const crossed = crossedTargets(state, event)
+  state.lastY = event.clientY
+  if (!crossed.length) {
+    updateDropPreview(state, event)
+    return
+  }
+
+  const nextOrder = sequenceOrderAfterCrossedTargets(
+    state.currentOrder,
+    state.identity,
+    crossed.map(({ identity }) => identity),
+  )
+  if (sameOrder(state.currentOrder, nextOrder)) return
+
+  clearDropPreview(state)
+  const latest = crossed.at(-1)!
+  state.dropTarget = latest.row
+  latest.row.dataset.sequenceReorderDropTarget = 'true'
+  state.currentOrder = nextOrder
+  state.targetIndex = nextOrder.indexOf(state.identity)
+  state.orderChanged = !sameOrder(state.startOrder, nextOrder)
+
+  // Re-rank locally as soon as the pointer crosses a callsign. Persistence waits for
+  // pointerup so a single drag never floods the shared AMAN API with intermediate ranks.
+  groupOrders.set(groupKey(state.airport, state.runway), [...nextOrder])
+  publishOrderSnapshot()
+  window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
+    detail: { identities: nextOrder, airport: state.airport, runway: state.runway, preview: true },
+  }))
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
@@ -553,9 +610,12 @@ export function installManualSequenceReorderRuntime() {
       airport: identity.airport,
       runway: scopeRunway,
       startOrder,
+      currentOrder: [...startOrder],
       targetIndex: startIndex,
+      orderChanged: false,
       moved: false,
       startY: event.clientY,
+      lastY: event.clientY,
       dropTarget: null,
     }
   }
@@ -576,7 +636,7 @@ export function installManualSequenceReorderRuntime() {
 
     // Downward keeps the existing explicit replace behaviour. Only this direction uses
     // a yellow drop target and can commit a sequence reorder on release.
-    updateDropPreview(drag, event)
+    updateLiveDownwardOrder(drag, event)
   }
 
   const onPointerUp = (event: PointerEvent) => {
@@ -584,15 +644,10 @@ export function installManualSequenceReorderRuntime() {
     const finished = drag
     const downward = isDownwardDrag(finished, event.clientY)
 
-    if (downward) updateDropPreview(finished, event)
+    if (downward) updateLiveDownwardOrder(finished, event)
     else clearDropPreview(finished)
 
-    const shouldReorder = shouldCommitSequenceReorder({
-      startY: finished.startY,
-      pointerY: event.clientY,
-      moved: finished.moved,
-      hasDropTarget: Boolean(finished.dropTarget),
-    })
+    const shouldReorder = downward && finished.orderChanged
 
     if (!shouldReorder) {
       clearDropPreview(finished)
@@ -608,12 +663,8 @@ export function installManualSequenceReorderRuntime() {
       return
     }
 
-    const targetIdentity = finished.dropTarget ? rowIdentity(finished.dropTarget)?.identity : null
-    if (targetIdentity) {
-      finished.targetIndex = sequenceInsertionIndexForTarget(finished.startOrder, finished.identity, targetIdentity)
-    }
-    const nextOrder = reorderedOrder(finished)
-    const orderChanged = !sameOrder(finished.startOrder, nextOrder)
+    const nextOrder = [...finished.currentOrder]
+    const orderChanged = finished.orderChanged
     // Publish the new rank before React finalises the manual TLDT. The render caused
     // by onPointerUp will then cascade from the shortcut time using the new order.
     if (orderChanged) commitReorderedSequence(finished, nextOrder)

@@ -14,6 +14,7 @@ import {
   isWithinSequenceDropZone,
   mergeVisibleSequenceOrder,
   sequenceInsertionIndexForTarget,
+  sequenceOrderAfterCrossedTargets,
   sequenceOrderForTarget,
   sequenceOrderRetryDelayMs,
   sequenceTargetChangesOrder,
@@ -119,11 +120,55 @@ describe('manual drag sequencing', () => {
     )
   })
 
-  it('dragging downward reorders only when released on the yellow target', () => {
+  it('recognises a downward sequence drag', () => {
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: false })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: true })).toBe(true)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 80, moved: true, hasDropTarget: true })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: false, hasDropTarget: true })).toBe(false)
+  })
+
+  it('reorders immediately as a downward drag crosses callsigns', () => {
+    expect(sequenceOrderAfterCrossedTargets(
+      ['THA1', 'THA2', 'THA3', 'THA4'],
+      'THA4',
+      ['THA3', 'THA2'],
+    )).toEqual(['THA1', 'THA4', 'THA2', 'THA3'])
+
+    expect(sequenceOrderAfterCrossedTargets(
+      ['THA1', 'THA2', 'THA3'],
+      'THA3',
+      ['THA2'],
+    )).toEqual(['THA1', 'THA3', 'THA2'])
+  })
+
+  it('publishes the crossed callsign rank before pointerup', () => {
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: 0" title="VTBD RWY 21R"><strong>THA1</strong><span class="runway-assignment"><select><option selected>21R</option></select></span></div>
+      <div class="aman-flight-row" style="--offset-px: -20px" title="VTBD RWY 21R"><strong>THA2</strong><span class="runway-assignment"><select><option selected>21R</option></select></span></div>
+    `
+    const [tha1Row, tha2Row] = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
+    Object.defineProperty(tha1Row, 'getBoundingClientRect', {
+      value: () => ({ left: 100, right: 500, top: 110, bottom: 130, width: 400, height: 20, x: 100, y: 110, toJSON: () => ({}) }),
+      configurable: true,
+    })
+    Object.defineProperty(tha2Row, 'getBoundingClientRect', {
+      value: () => ({ left: 100, right: 500, top: 80, bottom: 100, width: 400, height: 20, x: 100, y: 80, toJSON: () => ({}) }),
+      configurable: true,
+    })
+
+    const removeRuntime = installManualSequenceReorderRuntime()
+    tha2Row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 200, clientY: 90 }))
+    tha2Row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientX: 200, clientY: 125 }))
+
+    const result = autoSequenceUnstableArrivals([
+      prediction('THA1', 'C', '2026-08-25T10:00:00Z', '21R'),
+      prediction('THA2', 'C', '2026-08-25T10:03:00Z', '21R'),
+    ].map((arrival) => ({ ...arrival, id: arrival.id.replace('VTBS', 'VTBD') })), {
+      runwaySpacingSeconds: { '21R': 120 },
+    })
+
+    expect(Object.fromEntries(result.map((row) => [row.callsign, row.sequenceIndex]))).toEqual({ THA1: 2, THA2: 1 })
+    removeRuntime()
   })
 
   it('activates the yellow target before flight boxes physically overlap', () => {
