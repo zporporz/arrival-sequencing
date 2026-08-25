@@ -53,12 +53,11 @@ type DragOrderState = {
   targetIndex: number
   moved: boolean
   startY: number
-  forceReorder: boolean
   dropTarget: HTMLElement | null
 }
 
 const MOVE_TOLERANCE_PX = 4
-const DROP_PROXIMITY_PX = 4
+const DROP_PROXIMITY_PX = 20
 const POINTER_ID = 70424
 const groupOrders = new Map<string, string[]>()
 const sharedOrderRevisions = new Map<string, number>()
@@ -326,6 +325,20 @@ function isDownwardDrag(state: DragOrderState, pointerY: number) {
   return isDownwardSequenceDrag(state.startY, pointerY)
 }
 
+export function isWithinSequenceDropZone(
+  rect: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>,
+  pointerX: number,
+  pointerY: number,
+) {
+  if (pointerX < rect.left || pointerX > rect.right) return false
+  const distance = pointerY < rect.top
+    ? rect.top - pointerY
+    : pointerY > rect.bottom
+      ? pointerY - rect.bottom
+      : 0
+  return distance <= DROP_PROXIMITY_PX
+}
+
 function validDropTarget(state: DragOrderState, pointerX: number, pointerY: number) {
   const allowed = rowsForGroup(state.airport, state.runway).filter((row) => row !== state.row)
   if (!allowed.length) return null
@@ -339,13 +352,13 @@ function validDropTarget(state: DragOrderState, pointerX: number, pointerY: numb
   let nearestDistance = Number.POSITIVE_INFINITY
   for (const row of allowed) {
     const rect = row.getBoundingClientRect()
-    if (pointerX < rect.left || pointerX > rect.right) continue
+    if (!isWithinSequenceDropZone(rect, pointerX, pointerY)) continue
     const distance = pointerY < rect.top
       ? rect.top - pointerY
       : pointerY > rect.bottom
         ? pointerY - rect.bottom
         : 0
-    if (distance <= DROP_PROXIMITY_PX && distance < nearestDistance) {
+    if (distance < nearestDistance) {
       nearest = row
       nearestDistance = distance
     }
@@ -469,7 +482,6 @@ export function installManualSequenceReorderRuntime() {
     groupOrders.set(groupKey(identity.airport, runway), [...startOrder])
     publishOrderSnapshot()
 
-    const forceReorder = event.pointerType === 'mouse' && event.shiftKey
     drag = {
       pointerId: event.pointerId,
       row,
@@ -481,17 +493,8 @@ export function installManualSequenceReorderRuntime() {
       targetIndex: startIndex,
       moved: false,
       startY: event.clientY,
-      forceReorder,
       dropTarget: null,
     }
-
-    if (!forceReorder) return
-
-    row.dataset.sequenceReorderDragging = 'true'
-    try { row.setPointerCapture?.(event.pointerId) } catch { /* no-op */ }
-    event.preventDefault()
-    event.stopPropagation()
-    event.stopImmediatePropagation()
   }
 
   const onPointerMove = (event: PointerEvent) => {
@@ -499,15 +502,6 @@ export function installManualSequenceReorderRuntime() {
     if (Math.abs(event.clientY - drag.startY) >= MOVE_TOLERANCE_PX) drag.moved = true
 
     const downward = isDownwardDrag(drag, event.clientY)
-
-    if (drag.forceReorder) {
-      if (downward) updateDropPreview(drag, event)
-      else clearDropPreview(drag)
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      return
-    }
 
     if (!downward) {
       // Upward = pure live TLDT push. Do not run any drop/reorder targeting at all.
@@ -543,33 +537,17 @@ export function installManualSequenceReorderRuntime() {
       delete finished.row.dataset.sequenceReorderTarget
       drag = null
 
-      if (!finished.forceReorder) {
-        // Upward/empty release only ends the already-live TLDT drag. No reorder or slot
-        // replacement happens here; followers have already moved through normal cascade.
-        if (finished.moved) {
-          commitSharedOrder(finished.airport, finished.runway, finished.startOrder)
-        }
-        return
+      // Upward/empty release only ends the already-live TLDT drag. No reorder or slot
+      // replacement happens here; followers have already moved through normal cascade.
+      if (finished.moved) {
+        commitSharedOrder(finished.airport, finished.runway, finished.startOrder)
       }
-
-      try {
-        if (finished.row.hasPointerCapture?.(event.pointerId)) finished.row.releasePointerCapture?.(event.pointerId)
-      } catch { /* no-op */ }
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
       return
     }
 
-    if (finished.forceReorder) {
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-    } else {
-      reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
-        fakePointer(event.clientY, event.pointerId, finished.row),
-      )
-    }
+    reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
+      fakePointer(event.clientY, event.pointerId, finished.row),
+    )
 
     finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
     const nextOrder = reorderedOrder(finished)
@@ -591,13 +569,6 @@ export function installManualSequenceReorderRuntime() {
     delete cancelled.row.dataset.sequenceReorderDragging
     delete cancelled.row.dataset.sequenceReorderTarget
     drag = null
-    if (!cancelled.forceReorder) return
-    try {
-      if (cancelled.row.hasPointerCapture?.(event.pointerId)) cancelled.row.releasePointerCapture?.(event.pointerId)
-    } catch { /* no-op */ }
-    event.preventDefault()
-    event.stopPropagation()
-    event.stopImmediatePropagation()
   }
 
   const onDoubleClick = (event: MouseEvent) => {

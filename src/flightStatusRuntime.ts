@@ -15,7 +15,7 @@ function updateManualLabels() {
 
 function updateInteractionHint() {
   const hint = document.querySelector<HTMLElement>('.is-drag-enabled')
-  if (hint) hint.textContent = 'DRAG = SET TARGET / CLOSE GAP · SHIFT+DRAG = REORDER · DBL CLICK = RETURN TO AUTO · RIGHT CLICK = OPS'
+  if (hint) hint.textContent = 'DRAG UP = PUSH / CASCADE · DRAG DOWN TO YELLOW = REORDER · DBL CLICK = AUTO · RIGHT CLICK = OPS'
 }
 
 export function installFlightStatusRuntime() {

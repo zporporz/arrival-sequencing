@@ -10,6 +10,7 @@ import {
 import {
   installManualSequenceReorderRuntime,
   isDownwardSequenceDrag,
+  isWithinSequenceDropZone,
   shouldCommitSequenceReorder,
 } from '../src/manualSequenceReorderRuntime'
 import type { AircraftPerformanceCategory } from '../src/core/api'
@@ -105,6 +106,13 @@ describe('manual drag sequencing', () => {
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: true })).toBe(true)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 80, moved: true, hasDropTarget: true })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: false, hasDropTarget: true })).toBe(false)
+  })
+
+  it('activates the yellow target before flight boxes physically overlap', () => {
+    const rect = { left: 100, right: 500, top: 200, bottom: 228 }
+    expect(isWithinSequenceDropZone(rect, 250, 185)).toBe(true)
+    expect(isWithinSequenceDropZone(rect, 250, 179)).toBe(false)
+    expect(isWithinSequenceDropZone(rect, 99, 210)).toBe(false)
   })
 
   it('keeps explicit sequence ranks when TLDT chronology crosses', () => {
