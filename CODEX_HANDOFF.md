@@ -49,7 +49,14 @@ Current stage concepts:
 2. DEPARTING: first observed IVAO Departing time acts as AOBT; stage is latched and must not revert to BOARDING.
 3. AIRBORNE: takeoff baseline plus live ETA candidate.
 
-Important historical issue: airborne display has monotonic-earlier protection, so a stale early ETA can remain held even when live ETA later becomes later. Debug this separately if feeder-fix ETA appears too early.
+Airborne ETA behaviour now has two stages:
+
+- During the initial climb, monotonic-earlier protection prevents unstable live samples from moving ETA-FF later.
+- At FL300, or within 1,000 ft of the filed cruise altitude when that is lower, dynamic mode latches for the rest of the flight.
+- In dynamic mode, live ETA may move both earlier and later, so hold/vector/slowdown delay propagates into ETA-FF and the automatic sequence.
+- Changes smaller than 30 seconds remain inside the display deadband to avoid flicker.
+
+The automated regression test `allows ETA to move later after a hold/vector slowdown at cruise altitude` covers the later-moving case. Do not restore permanent monotonic-earlier behaviour after the dynamic trigger.
 
 IVAO `departureTime` is currently used as the EOBT proxy.
 
