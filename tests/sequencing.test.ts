@@ -8,6 +8,7 @@ import {
   type AmanSequenceRow,
 } from '../src/core/arrivalSequencing'
 import {
+  amanSequenceScopeRunway,
   installManualSequenceReorderRuntime,
   isDownwardSequenceDrag,
   isWithinSequenceDropZone,
@@ -79,6 +80,13 @@ describe('pairwise separation', () => {
 })
 
 describe('manual drag sequencing', () => {
+  it('uses one airport-wide order for VTBD but runway orders for VTBS', () => {
+    expect(amanSequenceScopeRunway('VTBD', '21R')).toBe('ALL')
+    expect(amanSequenceScopeRunway('VTBD', '21L')).toBe('ALL')
+    expect(amanSequenceScopeRunway('VTBS', '19')).toBe('19')
+    expect(amanSequenceScopeRunway('VTBS', '20R')).toBe('20R')
+  })
+
   it('dragging upward pushes followers later without changing sequence rank', () => {
     const rows = rowsAt(['2026-08-25T10:00:00Z', '2026-08-25T10:03:00Z'])
     const leader = rows.find((row) => row.callsign === 'TST1')!
@@ -191,5 +199,36 @@ describe('shared sequence reload', () => {
 
     expect(controllerARanks).toEqual({ THA101: 2, THA202: 1 })
     expect(reloadedRanks).toEqual(controllerARanks)
+  })
+
+  it('rehydrates one VTBD order across 21R and 21L', () => {
+    const arrivals = [
+      prediction('THA101', 'C', '2026-08-25T10:00:00Z', '21R'),
+      prediction('RTAF202', 'C', '2026-08-25T10:03:00Z', '21L'),
+    ].map((arrival) => ({ ...arrival, id: arrival.id.replace('VTBS', 'VTBD') }))
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: 0" title="VTBD RWY 21R"><strong>THA101</strong><span class="runway-assignment"><select><option selected>21R</option></select></span></div>
+      <div class="aman-flight-row" style="--offset-px: -20" title="VTBD RWY 21L"><strong>RTAF202</strong><span class="runway-assignment"><select><option selected>21L</option></select></span></div>
+    `
+    const removeRuntime = installManualSequenceReorderRuntime()
+    window.dispatchEvent(new CustomEvent('aman:shared-state', { detail: {
+      sequenceOrders: [{
+        airport: 'VTBD',
+        runway: 'ALL',
+        ordered_callsigns: ['RTAF202', 'THA101'],
+        revision: 1,
+      }],
+    } }))
+
+    const result = autoSequenceUnstableArrivals(arrivals, {
+      runwaySpacingSeconds: { '21R': 120, '21L': 120 },
+    })
+    const ranks = Object.fromEntries(result.map((row) => [row.callsign, row.sequenceIndex]))
+    removeRuntime()
+
+    expect(ranks).toEqual({
+      THA101: 2,
+      RTAF202: 1,
+    })
   })
 })

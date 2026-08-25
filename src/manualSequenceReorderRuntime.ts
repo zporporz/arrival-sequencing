@@ -58,6 +58,7 @@ type DragOrderState = {
 const MOVE_TOLERANCE_PX = 4
 const DROP_PROXIMITY_PX = 20
 const POINTER_ID = 70424
+const VTBD_AIRPORT_SEQUENCE_SCOPE = 'ALL'
 const groupOrders = new Map<string, string[]>()
 const sharedOrderRevisions = new Map<string, number>()
 let drag: DragOrderState | null = null
@@ -125,12 +126,22 @@ function rowTargetMs(row: HTMLElement) {
   return candidate.getTime()
 }
 
-function groupKey(airport: string, runway: string) { return `${airport}:${runway}` }
+export function amanSequenceScopeRunway(airport: string, runway: string) {
+  return airport.trim().toUpperCase() === 'VTBD'
+    ? VTBD_AIRPORT_SEQUENCE_SCOPE
+    : runway.trim().toUpperCase()
+}
+
+function groupKey(airport: string, runway: string) {
+  return `${airport}:${amanSequenceScopeRunway(airport, runway)}`
+}
 
 function rowsForGroup(airport: string, runway: string) {
+  const scopeRunway = amanSequenceScopeRunway(airport, runway)
   return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).filter((row) => {
     const identity = rowIdentity(row)
-    return identity?.airport === airport && rowRunway(row) === runway
+    if (identity?.airport !== airport) return false
+    return scopeRunway === VTBD_AIRPORT_SEQUENCE_SCOPE || rowRunway(row) === scopeRunway
   })
 }
 
@@ -184,7 +195,7 @@ async function persistSequenceOrder(airport: string, runway: string, order: read
         action: 'setSequenceOrder',
         serviceDate: new Date().toISOString().slice(0, 10),
         airport,
-        runway,
+        runway: amanSequenceScopeRunway(airport, runway),
         orderedCallsigns: order.map(callsignFromIdentity),
       }),
     })
@@ -353,6 +364,9 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
     const airport = String(state.airport || '').trim().toUpperCase()
     const runway = String(state.runway || '').trim().toUpperCase()
     if (!airport || !runway || !Array.isArray(state.ordered_callsigns)) continue
+    // VTBD 21R/21L are one airport-wide stream. Ignore legacy per-runway rows;
+    // the first reorder on the new runtime persists one authoritative ALL row.
+    if (airport === 'VTBD' && runway !== VTBD_AIRPORT_SEQUENCE_SCOPE) continue
     const key = groupKey(airport, runway)
     explicitGroups.add(key)
 
@@ -392,8 +406,9 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
       ? shared.manual_runway.toUpperCase()
       : rowRunway(row)
     if (!runway) return
-    const key = groupKey(identity.airport, runway)
-    const group = groups.get(key) ?? { airport: identity.airport, runway, rows: [] }
+    const scopeRunway = amanSequenceScopeRunway(identity.airport, runway)
+    const key = groupKey(identity.airport, scopeRunway)
+    const group = groups.get(key) ?? { airport: identity.airport, runway: scopeRunway, rows: [] }
     group.rows.push(row)
     groups.set(key, group)
   })
@@ -440,14 +455,15 @@ export function installManualSequenceReorderRuntime() {
     const identity = rowIdentity(row)
     const runway = rowRunway(row)
     if (!identity || !runway) return
+    const scopeRunway = amanSequenceScopeRunway(identity.airport, runway)
 
-    const startOrder = currentGroupOrder(identity.airport, runway)
+    const startOrder = currentGroupOrder(identity.airport, scopeRunway)
     const startIndex = startOrder.indexOf(identity.identity)
     if (startIndex < 0) return
 
     // Latch order before React starts changing TLDT. An upward drag is timing-only and
     // the normal pairwise cascade therefore pushes every later follower in real time.
-    groupOrders.set(groupKey(identity.airport, runway), [...startOrder])
+    groupOrders.set(groupKey(identity.airport, scopeRunway), [...startOrder])
     publishOrderSnapshot()
 
     drag = {
@@ -455,7 +471,7 @@ export function installManualSequenceReorderRuntime() {
       row,
       identity: identity.identity,
       airport: identity.airport,
-      runway,
+      runway: scopeRunway,
       startOrder,
       targetIndex: startIndex,
       moved: false,
@@ -567,7 +583,8 @@ export function installManualSequenceReorderRuntime() {
           .map(rowRunway)
           .filter(Boolean),
       )
-      runways.forEach((runway) => reconcileGroupAfterRender(identity.airport, runway))
+      const scopes = new Set(Array.from(runways, (runway) => amanSequenceScopeRunway(identity.airport, runway)))
+      scopes.forEach((runway) => reconcileGroupAfterRender(identity.airport, runway))
     }, 0)
   }
 
