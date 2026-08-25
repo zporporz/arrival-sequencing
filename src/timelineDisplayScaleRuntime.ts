@@ -27,6 +27,7 @@ type DragState = {
   startDisplayOffsetPx: number
   lastDisplayOffsetPx: number
   lastPhysicalDeltaPx: number
+  sequenceReordered: boolean
 }
 
 type ReorderDetail = {
@@ -220,6 +221,7 @@ export function installTimelineDisplayScaleRuntime() {
       startDisplayOffsetPx: displayed,
       lastDisplayOffsetPx: displayed,
       lastPhysicalDeltaPx: 0,
+      sequenceReordered: false,
     }
   }
 
@@ -260,6 +262,16 @@ export function installTimelineDisplayScaleRuntime() {
         const ideal = rowIdealDisplayOffset(row)
         if (ideal == null) return
 
+        // The reorder runtime has already committed a new rank and cleared the old
+        // neighbour offsets. Do not let this later pointerup task recreate a visual
+        // close-gap residual from the pre-reorder neighbours.
+        if (finished.sequenceReordered) {
+          visualResidualByKey.delete(finished.key)
+          setDisplayOffset(row, ideal, ideal)
+          applyStoredVisualPositions(row)
+          return
+        }
+
         const desired = clampToAdjacentBlock(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
         const residual = desired - ideal
         if (Math.abs(residual) <= RESIDUAL_TOLERANCE_PX) visualResidualByKey.delete(finished.key)
@@ -290,6 +302,7 @@ export function installTimelineDisplayScaleRuntime() {
 
   const onSequenceReordered = (event: Event) => {
     const identities = (event as CustomEvent<ReorderDetail>).detail?.identities ?? []
+    if (drag && identities.includes(drag.key)) drag.sequenceReordered = true
     for (const key of identities) visualResidualByKey.delete(key)
 
     // Old close-gap offsets belong to the old sequence neighbours. Throw them away

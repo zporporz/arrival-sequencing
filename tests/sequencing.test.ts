@@ -15,6 +15,7 @@ import {
   sequenceInsertionIndexForTarget,
   shouldCommitSequenceReorder,
 } from '../src/manualSequenceReorderRuntime'
+import { installTimelineDisplayScaleRuntime } from '../src/timelineDisplayScaleRuntime'
 import type { AircraftPerformanceCategory } from '../src/core/api'
 
 const BASE_SECONDS = 150
@@ -143,6 +144,36 @@ describe('manual drag sequencing', () => {
 
     expect(result.find((row) => row.id === tha1.id)?.tldt).toBe('2026-08-25T15:20:00.000Z')
     expect(result.find((row) => row.id === tha2.id)?.tldt).toBe('2026-08-25T15:25:00.000Z')
+  })
+
+  it('does not restore a pre-reorder visual offset after pointerup', async () => {
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: -100px" title="VTBD RWY 21R"><strong>THA1</strong></div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    Object.defineProperty(row, '__reactProps$test', {
+      value: { onPointerMove: () => {} },
+      configurable: true,
+      enumerable: true,
+    })
+    Object.defineProperty(row, 'getBoundingClientRect', {
+      value: () => ({ left: 500, right: 900, top: 100, bottom: 120, width: 400, height: 20, x: 500, y: 100, toJSON: () => ({}) }),
+      configurable: true,
+    })
+
+    const removeRuntime = installTimelineDisplayScaleRuntime()
+    row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 100 }))
+    row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientY: 140 }))
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50px')
+
+    window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
+      detail: { identities: ['VTBD:THA1'] },
+    }))
+    row.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientY: 140 }))
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-90px')
+    removeRuntime()
   })
 
   it('keeps explicit sequence ranks when TLDT chronology crosses', () => {
