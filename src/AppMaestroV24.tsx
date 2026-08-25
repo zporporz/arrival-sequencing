@@ -455,9 +455,15 @@ export function applyManualTargetsWithCascade(
   manualTldt: Record<string, string>,
   runwaySpacingSeconds: Record<string, number>,
   gapAfterSeconds: Record<string, number>,
+  autoReturnFloorTldt: Record<string, string> = {},
 ) {
   const targetById = new Map<string, number>()
-  rows.forEach((row) => targetById.set(row.id, new Date(manualTldt[row.id] ?? row.tldt).getTime()))
+  rows.forEach((row) => {
+    const manualTarget = manualTldt[row.id]
+    const baseTargetMs = new Date(manualTarget ?? row.tldt).getTime()
+    const autoFloorMs = manualTarget ? NaN : new Date(autoReturnFloorTldt[row.id] ?? '').getTime()
+    targetById.set(row.id, Number.isFinite(autoFloorMs) ? Math.max(baseTargetMs, autoFloorMs) : baseTargetMs)
+  })
 
   const maxPasses = Math.max(4, rows.length * 4)
   for (let pass = 0; pass < maxPasses; pass += 1) {
@@ -579,6 +585,7 @@ export default function App() {
   const [manualTldt, setManualTldt] = useState<Record<string, string>>({})
   const [manualRunways, setManualRunways] = useState<Record<string, string>>({})
   const [stableIds, setStableIds] = useState<Record<string, true>>({})
+  const [autoReturnFloorTldt, setAutoReturnFloorTldt] = useState<Record<string, string>>({})
   const [latePendingIds, setLatePendingIds] = useState<Record<string, true>>({})
   const [operationalStateByKey, setOperationalStateByKey] = useState<Record<string, OperationalState>>({})
   const [reservedGapSecondsByKey, setReservedGapSecondsByKey] = useState<Record<string, number>>({})
@@ -689,12 +696,12 @@ export default function App() {
   }, [airports, demoAnchor, demoMode, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoSequence = useMemo(
-    () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}),
-    [demoBaseSequence, manualTldt, runwaySpacingSeconds],
+    () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}, autoReturnFloorTldt),
+    [autoReturnFloorTldt, demoBaseSequence, manualTldt, runwaySpacingSeconds],
   )
   const liveSequence = useMemo(
-    () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds, gapAfterSecondsById),
-    [gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds],
+    () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds, gapAfterSecondsById, autoReturnFloorTldt),
+    [autoReturnFloorTldt, gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds],
   )
   liveSequenceRef.current = liveSequence
 
@@ -820,6 +827,7 @@ export default function App() {
     setManualTldt({})
     setManualRunways({})
     setStableIds({})
+    setAutoReturnFloorTldt({})
     setDraggingId(null)
     dragRef.current = null
   }
@@ -994,6 +1002,12 @@ export default function App() {
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>, row: AmanSequenceRow) => {
     if (event.button !== 0) return
     event.preventDefault()
+    setAutoReturnFloorTldt((current) => {
+      if (!current[row.id]) return current
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
       id: row.id,
@@ -1025,12 +1039,28 @@ export default function App() {
   const setFlightRunway = (row: AmanSequenceRow, runway: string) => {
     const airport = rowAirport(row.id)
     if (!activeRunwaysForAirport(airport, runwayModes).includes(runway)) return
+    setAutoReturnFloorTldt((current) => {
+      if (!current[row.id]) return current
+      const next = { ...current }
+      delete next[row.id]
+      return next
+    })
     setManualRunways((current) => ({ ...current, [row.id]: runway }))
     setManualTldt((current) => current[row.id] ? current : ({ ...current, [row.id]: row.tldt }))
     setStableIds((current) => ({ ...current, [row.id]: true }))
   }
 
-  const resetRow = (row: AmanSequenceRow) => {
+  const resetRow = (row: AmanSequenceRow, floorAtCurrentTime = true) => {
+    setAutoReturnFloorTldt((current) => {
+      const next = { ...current }
+      if (floorAtCurrentTime) {
+        const floorMs = Math.ceil(Date.now() / DRAG_SNAP_MS) * DRAG_SNAP_MS
+        next[row.id] = new Date(floorMs).toISOString()
+      } else {
+        delete next[row.id]
+      }
+      return next
+    })
     setManualTldt((current) => {
       const next = { ...current }
       delete next[row.id]
@@ -1050,7 +1080,7 @@ export default function App() {
 
   const applyOperationalStateToRow = (row: AmanSequenceRow, state: OperationalState) => {
     const airport = rowAirport(row.id)
-    if (state !== 'NORMAL') resetRow(row)
+    if (state !== 'NORMAL') resetRow(row, false)
     setOperationalState(airport, row.callsign, state)
     setOpsMenu(null)
   }

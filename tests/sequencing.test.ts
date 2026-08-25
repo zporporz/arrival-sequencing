@@ -120,6 +120,51 @@ describe('manual drag sequencing', () => {
     )
   })
 
+  it('returns AUTO to the latest feasible time instead of a past target', () => {
+    const rows = rowsAt(['2026-08-25T10:00:00Z', '2026-08-25T10:03:00Z'])
+    const leader = rows.find((row) => row.callsign === 'TST1')!
+    const follower = rows.find((row) => row.callsign === 'TST2')!
+
+    const result = applyManualTargetsWithCascade(
+      rows,
+      {},
+      { '19': 120 },
+      {},
+      { [leader.id]: '2026-08-25T10:25:00.000Z' },
+    )
+
+    expect(result.find((row) => row.id === leader.id)?.tldt).toBe('2026-08-25T10:25:00.000Z')
+    expect(result.find((row) => row.id === follower.id)?.tldt).toBe('2026-08-25T10:27:00.000Z')
+  })
+
+  it('uses a newer calculated AUTO target when it is later than the return floor', () => {
+    const rows = rowsAt(['2026-08-25T10:08:00Z'])
+    const row = rows[0]
+    const result = applyManualTargetsWithCascade(
+      rows,
+      {},
+      { '19': 120 },
+      {},
+      { [row.id]: '2026-08-25T10:25:00.000Z' },
+    )
+
+    expect(result[0].tldt).toBe('2026-08-25T10:28:00.000Z')
+  })
+
+  it('allows a new manual target to override an old AUTO return floor', () => {
+    const rows = rowsAt(['2026-08-25T10:00:00Z'])
+    const row = rows[0]
+    const result = applyManualTargetsWithCascade(
+      rows,
+      { [row.id]: '2026-08-25T09:58:00.000Z' },
+      { '19': 120 },
+      {},
+      { [row.id]: '2026-08-25T10:05:00.000Z' },
+    )
+
+    expect(result[0].tldt).toBe('2026-08-25T09:58:00.000Z')
+  })
+
   it('recognises a downward sequence drag', () => {
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: false })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: true })).toBe(true)
