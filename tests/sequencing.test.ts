@@ -119,6 +119,32 @@ describe('manual drag sequencing', () => {
     expect(result.map((row) => [row.id, row.sequenceIndex])).toEqual(
       result.map((row) => [row.id, originalRanks.get(row.id)]),
     )
+    expect(movedLeader.delayMinutes).toBe(5)
+    expect(movedFollower.delayMinutes).toBe(4)
+  })
+
+  it('does not report delay when AUTO ETA moves without a controller target', () => {
+    const [row] = rowsAt(['2026-08-25T10:00:00Z'])
+    const autoUpdated = {
+      ...row,
+      predictedIawpAt: '2026-08-25T10:05:00.000Z',
+      naturalLandingAt: '2026-08-25T10:25:00.000Z',
+      tldt: '2026-08-25T10:25:00.000Z',
+      tto: '2026-08-25T10:05:00.000Z',
+      delaySeconds: 300,
+      delayMinutes: 5,
+    }
+
+    const result = applyManualTargetsWithCascade(
+      [autoUpdated],
+      {},
+      { '19': 120 },
+      {},
+    )
+
+    expect(result[0].tldt).toBe('2026-08-25T10:25:00.000Z')
+    expect(result[0].delaySeconds).toBe(0)
+    expect(result[0].delayMinutes).toBe(0)
   })
 
   it('returns AUTO to the latest feasible time instead of a past target', () => {

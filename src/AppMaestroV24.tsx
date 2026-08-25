@@ -29,6 +29,7 @@ import {
   autoSequenceUnstableArrivals,
   averageDelayMinutes,
   calculateArrivalMetrics,
+  clearArrivalControllerDelayBaseline,
   resolveAmanPairwiseSeparationSeconds,
   type AmanArrivalPrediction,
   type AmanSequenceRow,
@@ -487,8 +488,10 @@ export function applyManualTargetsWithCascade(
   autoReturnFloorTldt: Record<string, string> = {},
 ) {
   const targetById = new Map<string, number>()
+  const controllerAffectedIds = new Set<string>()
   rows.forEach((row) => {
     const manualTarget = manualTldt[row.id]
+    if (manualTarget) controllerAffectedIds.add(row.id)
     const baseTargetMs = new Date(manualTarget ?? row.tldt).getTime()
     const autoFloorMs = manualTarget ? NaN : new Date(autoReturnFloorTldt[row.id] ?? '').getTime()
     targetById.set(row.id, Number.isFinite(autoFloorMs) ? Math.max(baseTargetMs, autoFloorMs) : baseTargetMs)
@@ -520,6 +523,9 @@ export function applyManualTargetsWithCascade(
           if (targetMs < earliest) {
             targetMs = earliest
             targetById.set(row.id, targetMs)
+            if (controllerAffectedIds.has(previousRow.id) || (gapAfterSeconds[previousRow.id] ?? 0) > 0) {
+              controllerAffectedIds.add(row.id)
+            }
             changed = true
           }
         }
@@ -546,6 +552,9 @@ export function applyManualTargetsWithCascade(
         const earliest = leaderTarget + requiredSeconds * 1000
         if (followerTarget < earliest) {
           targetById.set(follower.id, earliest)
+          if (controllerAffectedIds.has(leader.id) || (gapAfterSeconds[leader.id] ?? 0) > 0) {
+            controllerAffectedIds.add(follower.id)
+          }
           changed = true
         }
       }
@@ -557,7 +566,10 @@ export function applyManualTargetsWithCascade(
   return rows
     .map((row) => {
       const targetMs = targetById.get(row.id) ?? new Date(row.tldt).getTime()
-      const metrics = calculateArrivalMetrics(row, new Date(targetMs).toISOString())
+      const targetIso = new Date(targetMs).toISOString()
+      const controllerAffected = controllerAffectedIds.has(row.id)
+      if (!controllerAffected) clearArrivalControllerDelayBaseline(row.id)
+      const metrics = calculateArrivalMetrics(row, targetIso, controllerAffected ? undefined : targetIso)
       return {
         ...metrics,
         sequenceIndex: row.sequenceIndex,

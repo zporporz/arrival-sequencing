@@ -61,6 +61,10 @@ const DEMO_FROZEN_LANDING_OFFSET_MINUTES = 3
 const manualSequenceOrder = new Map<string, number>()
 const controllerDelayBaselineById = new Map<string, number>()
 
+export function clearArrivalControllerDelayBaseline(id: string) {
+  controllerDelayBaselineById.delete(id)
+}
+
 export function amanSequenceOrderIdentity(airport: string, callsign: string) {
   return `${airport.trim().toUpperCase()}:${callsign.trim().toUpperCase()}`
 }
