@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "atc-sequence",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-08-25",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AMAN_REALTIME",
+        "class_name": "AmanRealtimeRoom",
+        "script_name": "aman-realtime"
+      }
+    ]
+  }
+}

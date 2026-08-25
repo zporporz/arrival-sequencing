@@ -244,7 +244,7 @@ async function persistSequenceOrder(
           orderedCallsigns: pending.order.map(callsignFromIdentity),
         }),
       })
-      const payload = await response.json() as { error?: string; sequenceOrder?: { revision?: number } }
+      const payload = await response.json() as { error?: string; sequenceOrder?: SharedSequenceOrder }
       if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
       if (pendingOrderWrites.get(key) === pending) {
         pendingOrderWrites.delete(key)
@@ -252,6 +252,11 @@ async function persistSequenceOrder(
         if (Number.isFinite(revision)) sharedOrderRevisions.set(key, Math.max(sharedOrderRevisions.get(key) ?? 0, revision))
       }
       window.dispatchEvent(new Event('aman:force-shared-refresh'))
+      if (payload.sequenceOrder) {
+        window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+          detail: { airport, sequenceOrder: payload.sequenceOrder },
+        }))
+      }
       return
     } catch (error) {
       lastError = error

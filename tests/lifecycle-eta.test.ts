@@ -105,6 +105,35 @@ describe('FROZEN detection', () => {
 })
 
 describe('dynamic ETA', () => {
+  it('puts a late-joining controller directly into dynamic ETA during descent', () => {
+    const descendingFlight = flight({
+      sessionId: 'late-controller-descent',
+      state: 'en route',
+      altitude: 20_000,
+      verticalSpeedFpm: -1_200,
+      groundSpeed: 100,
+      actualDepartureTimeSeconds: 7 * 60 * 60,
+      filedEetSeconds: 3 * 60 * 60,
+    })
+
+    // The takeoff/EET baseline is 10:00Z, while the current low-speed route
+    // projection is later. A fresh browser must accept the descent LIVE estimate
+    // immediately instead of holding the earlier browser-local climb baseline.
+    const estimate = estimateIawpArrival(
+      descendingFlight,
+      geometry,
+      'NORTA',
+      0,
+      new Date(now).toISOString(),
+    )
+
+    expect(estimate.source).toBe('LIVE_ROUTE')
+    expect(estimate.modelPhase).toBe('DESCENT')
+    expect(new Date(estimate.predictedIawpAt!).getTime()).toBeGreaterThan(now)
+    expect(estimate.reason).toContain('DESCENT OBSERVED')
+    expect(estimate.reason).toContain('LIVE BOTH-DIRECTIONS')
+  })
+
   it('allows ETA to move later after a hold/vector slowdown at cruise altitude', () => {
     const first = estimateIawpArrival(flight({ groundSpeed: 600 }), geometry, 'NORTA', 0, new Date(now).toISOString())
     const laterSampleTime = now + 60_000

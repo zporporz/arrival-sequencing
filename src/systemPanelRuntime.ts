@@ -44,6 +44,7 @@ function refreshSystemSummary() {
   const eta = statusValue(panel, 'Live route ETA')
   const sep = statusValue(panel, 'SEP invariant')
   const shared = statusValue(panel, 'Shared AMAN')
+  const realtime = statusValue(panel, 'Realtime sync')
   const holding = statusValue(panel, 'Holding / TTLHF')
   const speed = statusValue(panel, 'Speed advisory')
   const ghost = statusValue(panel, 'Ghost reserve')
@@ -62,6 +63,7 @@ function refreshSystemSummary() {
   const items = [
     item('b', dataMode, dataMode === 'LIVE' ? 'ok' : ''),
     item('span', `SYNC ${shared}`, sharedOk ? 'ok' : 'warn'),
+    item('span', `RT ${realtime}`, realtime === 'LIVE' ? 'ok' : 'warn'),
     item('span', `ETA ${eta}`),
     item('span', `SEP ${sep}`, sep === 'OK' ? 'ok' : 'warn'),
     holdingActive ? item('span', `HLD ${holding}`, 'warn') : null,

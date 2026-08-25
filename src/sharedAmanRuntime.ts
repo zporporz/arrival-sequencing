@@ -271,13 +271,27 @@ export function installSharedAmanRuntime() {
 
   const mergeWorkspace = (state: WorkspaceState | null | undefined) => {
     if (!state || state.service_date !== serviceDate || !state.airport) return
+    const current = workspaceStates.get(state.airport)
+    if (current && Number(state.revision) < Number(current.revision)) return
     workspaceStates.set(state.airport, state)
     emitState()
   }
 
   const mergeFlight = (state: FlightState | null | undefined) => {
     if (!state || state.service_date !== serviceDate || !state.airport || !state.callsign) return
-    flightStates.set(flightKey(state.airport, state.callsign), state)
+    const key = flightKey(state.airport, state.callsign)
+    const current = flightStates.get(key)
+    if (current && Number(state.revision) < Number(current.revision)) return
+    flightStates.set(key, state)
+    emitState()
+  }
+
+  const mergeSequenceOrder = (state: SequenceOrder | null | undefined) => {
+    if (!state || state.service_date !== serviceDate || !state.airport || !state.runway) return
+    const key = `${state.airport}:${state.runway}`
+    const current = sequenceOrders.get(key)
+    if (current && Number(state.revision) < Number(current.revision)) return
+    sequenceOrders.set(key, state)
     emitState()
   }
 
@@ -433,6 +447,9 @@ export function installSharedAmanRuntime() {
         manualRunway: runway,
       })
       mergeFlight(result.flightState)
+      window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+        detail: { airport: rowInfo.airport, flightState: result.flightState },
+      }))
       setSharedHealth('LIVE')
     } catch (error) {
       setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
@@ -465,7 +482,12 @@ export function installSharedAmanRuntime() {
         airport: rowInfo.airport,
         callsign: rowInfo.callsign,
       })
-      if (result.flightState) mergeFlight(result.flightState)
+      if (result.flightState) {
+        mergeFlight(result.flightState)
+        window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+          detail: { airport: rowInfo.airport, flightState: result.flightState },
+        }))
+      }
       setSharedHealth('LIVE')
     } catch (error) {
       setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
@@ -533,6 +555,8 @@ export function installSharedAmanRuntime() {
   }
 
   const onForceRefresh = () => void refresh()
+  const onRealtimeFlightState = (event: Event) => mergeFlight((event as CustomEvent<FlightState>).detail)
+  const onRealtimeSequenceOrder = (event: Event) => mergeSequenceOrder((event as CustomEvent<SequenceOrder>).detail)
 
   document.addEventListener('change', onChange)
   document.addEventListener('pointerdown', onPointerDown)
@@ -540,6 +564,8 @@ export function installSharedAmanRuntime() {
   document.addEventListener('dblclick', onDoubleClick)
   window.addEventListener('aman:sequence-reordered', onSequenceReordered)
   window.addEventListener('aman:force-shared-refresh', onForceRefresh)
+  window.addEventListener('aman:realtime-flight-state', onRealtimeFlightState)
+  window.addEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
 
   setSharedHealth('CONNECTING')
   void refresh()
@@ -567,5 +593,7 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('dblclick', onDoubleClick)
     window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
+    window.removeEventListener('aman:realtime-flight-state', onRealtimeFlightState)
+    window.removeEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
   }
 }

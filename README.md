@@ -1,5 +1,10 @@
 # Bangkok FIR Arrival Sequencing
 
+Realtime multi-controller coordination uses a Cloudflare Durable Object WebSocket
+room with Supabase as durable shared-state storage. See
+[`docs/REALTIME_DEPLOYMENT.md`](docs/REALTIME_DEPLOYMENT.md) for the required
+one-time Worker deployment and Pages binding.
+
 AMAN / MAESTRO-style arrival sequencing prototype for IVAO Thailand.
 
 **Production:** https://atc-sequence.pages.dev  

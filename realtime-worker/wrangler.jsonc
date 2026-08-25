@@ -1,0 +1,15 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "aman-realtime",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-25",
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "AMAN_ROOMS", "class_name": "AmanRealtimeRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AmanRealtimeRoom"] }
+  ]
+}

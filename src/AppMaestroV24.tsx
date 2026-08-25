@@ -607,6 +607,7 @@ export default function App() {
   const [historyMinutes, setHistoryMinutes] = useState(AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES)
   const [inbound, setInbound] = useState<InboundPreview[]>([])
   const [livePredictions, setLivePredictions] = useState<AmanArrivalPrediction[]>([])
+  const [canonicalEtaById, setCanonicalEtaById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [trafficError, setTrafficError] = useState<string | null>(null)
   const [operationalConfig, setOperationalConfig] = useState<OperationalConfigPayload | null>(null)
@@ -643,6 +644,43 @@ export default function App() {
     }
     return result
   }, [spacingNm])
+
+  useEffect(() => {
+    const onCanonicalSnapshot = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        airport?: string
+        arrivals?: Array<{ id?: string; predictedIawpAt?: string }>
+      }>).detail
+      const airport = String(detail?.airport || '').trim().toUpperCase()
+      const arrivals = detail?.arrivals
+      if (!airport || !Array.isArray(arrivals)) return
+      setCanonicalEtaById((current) => {
+        const next = Object.fromEntries(Object.entries(current).filter(([id]) => !id.startsWith(`${airport}:`)))
+        for (const item of arrivals) {
+          const id = String(item.id || '')
+          const eta = String(item.predictedIawpAt || '')
+          if (id.startsWith(`${airport}:`) && Number.isFinite(new Date(eta).getTime())) next[id] = eta
+        }
+        return next
+      })
+    }
+    window.addEventListener('aman:canonical-auto-snapshot', onCanonicalSnapshot)
+    return () => window.removeEventListener('aman:canonical-auto-snapshot', onCanonicalSnapshot)
+  }, [])
+
+  useEffect(() => {
+    const publish = () => window.dispatchEvent(new CustomEvent('aman:local-auto-snapshot', {
+      detail: { predictions: livePredictions.map(({ id, predictedIawpAt }) => ({ id, predictedIawpAt })) },
+    }))
+    publish()
+    window.addEventListener('aman:realtime-health', publish)
+    return () => window.removeEventListener('aman:realtime-health', publish)
+  }, [livePredictions])
+
+  const effectiveLivePredictions = useMemo(() => livePredictions.map((prediction) => {
+    const canonical = canonicalEtaById[prediction.id]
+    return canonical ? { ...prediction, predictedIawpAt: canonical } : prediction
+  }), [canonicalEtaById, livePredictions])
 
   useEffect(() => {
     const onSharedState = (event: Event) => {
@@ -684,21 +722,21 @@ export default function App() {
     activeRunwaysForAirport(airport, runwayModes).map((runway) => ({ airport, runway })),
   ), [airports, runwayModes])
 
-  const liveSequencedPredictions = useMemo(() => livePredictions.filter((prediction) => {
+  const liveSequencedPredictions = useMemo(() => effectiveLivePredictions.filter((prediction) => {
     const state = operationalStateByKey[predictionFlightKey(prediction)] ?? 'NORMAL'
     return state === 'NORMAL'
       && isWithinProcessingRadius(prediction, processingNowMs)
       && !latePendingIds[prediction.id]
-  }), [latePendingIds, livePredictions, operationalStateByKey, processingNowMs])
+  }), [effectiveLivePredictions, latePendingIds, operationalStateByKey, processingNowMs])
 
   const gapAfterSecondsById = useMemo(() => {
     const result: Record<string, number> = {}
-    for (const prediction of livePredictions) {
+    for (const prediction of effectiveLivePredictions) {
       const seconds = reservedGapSecondsByKey[predictionFlightKey(prediction)]
       if (Number.isFinite(seconds) && seconds > 0) result[prediction.id] = seconds
     }
     return result
-  }, [livePredictions, reservedGapSecondsByKey])
+  }, [effectiveLivePredictions, reservedGapSecondsByKey])
 
   const liveBaseSequence = useMemo(() => {
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
@@ -810,7 +848,7 @@ export default function App() {
     return conflicts
   }, [activeSequence, gapAfterSecondsById, runwaySpacingSeconds])
 
-  const livePredictionById = useMemo(() => new Map(livePredictions.map((prediction) => [prediction.id, prediction])), [livePredictions])
+  const livePredictionById = useMemo(() => new Map(effectiveLivePredictions.map((prediction) => [prediction.id, prediction])), [effectiveLivePredictions])
   const displayInboundRows = useMemo<DisplayInboundRow[]>(() => demoMode
     ? demoSequence.map((row) => ({
         id: row.id,

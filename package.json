@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "build": "npm run test && npm run build:app",
     "build:app": "tsc -b && vite build",
+    "check:realtime": "wrangler deploy --dry-run --config realtime-worker/wrangler.jsonc",
+    "deploy:realtime": "wrangler deploy --config realtime-worker/wrangler.jsonc",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -26,6 +28,7 @@
     "jsdom": "^30.0.1",
     "typescript": "latest",
     "vite": "^8.1.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.125.0"
   }
 }

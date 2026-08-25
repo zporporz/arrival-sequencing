@@ -249,7 +249,14 @@ export function estimateIawpArrival(
   const triggerFt = dynamicAirborneTriggerFt(flight)
   const altitudeFt = finite(flight.altitude) && flight.altitude >= 0 ? flight.altitude : null
   const wasDynamic = existing.dynamicAirborneLatched
-  if (!wasDynamic && altitudeFt != null && altitudeFt >= triggerFt) {
+  // A controller/browser can join after the aircraft has already left cruise and
+  // descended below the altitude trigger. In that case it never observed the
+  // FL300/cruise crossing, so an altitude-only latch leaves different clients in
+  // different ETA stages for the same live flight. Descent is conclusive evidence
+  // that the flight has reached the post-climb dynamic phase; latch it immediately
+  // so late-joining clients accept the same bidirectional LIVE ETA.
+  const descentStageObserved = legacy.modelPhase === 'DESCENT'
+  if (!wasDynamic && ((altitudeFt != null && altitudeFt >= triggerFt) || descentStageObserved)) {
     existing.dynamicAirborneLatched = true
   }
   const dynamicJustLatched = !wasDynamic && existing.dynamicAirborneLatched
@@ -294,7 +301,7 @@ export function estimateIawpArrival(
   const baselineLabel = takeoffBaselineMs != null ? new Date(takeoffBaselineMs).toISOString() : 'NA'
   const altitudeLabel = altitudeFt == null ? 'NA' : `${Math.round(altitudeFt)}FT`
   const etaStageLabel = existing.dynamicAirborneLatched
-    ? `AIRBORNE DYNAMIC LATCHED${dynamicDeadbandHeld ? ' · DEADBAND HELD' : ' · LIVE BOTH-DIRECTIONS'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
+    ? `AIRBORNE DYNAMIC LATCHED${descentStageObserved ? ' · DESCENT OBSERVED' : ''}${dynamicDeadbandHeld ? ' · DEADBAND HELD' : ' · LIVE BOTH-DIRECTIONS'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
     : `AIRBORNE MONOTONIC ${heldLaterLive ? 'HELD EARLIER DISPLAY' : acceptedEarlier ? 'ACCEPTED EARLIER/EQUAL LIVE' : 'TAKEOFF BASELINE'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
 
   return {

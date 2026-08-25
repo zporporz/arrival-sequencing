@@ -54,6 +54,7 @@ import { installLandedHistoryRuntime } from './landedHistoryRuntime'
 import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 import { installMissedApproachDirectInsertRuntime } from './missedApproachDirectInsertRuntime'
+import { installRealtimeAmanRuntime } from './realtimeAmanRuntime'
 
 const StaffNavdataAdminPage = lazy(() => import('./StaffNavdataAdminPage'))
 const StaffMasterDataAdmin = lazy(() => import('./StaffMasterDataAdmin'))
@@ -84,6 +85,7 @@ function AppWithRuntime() {
     const removeSystemPanelRuntime = installSystemPanelRuntime()
     const removeInteractionGuardRuntime = installInteractionGuardRuntime()
     const removeSharedAmanRuntime = installSharedAmanRuntime()
+    const removeRealtimeAmanRuntime = installRealtimeAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
     const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
@@ -111,6 +113,7 @@ function AppWithRuntime() {
       removeSystemPanelRuntime()
       removeInteractionGuardRuntime()
       removeSharedAmanRuntime()
+      removeRealtimeAmanRuntime()
       removeManualSequenceReorderRuntime()
       removeTimelineDisplayScaleRuntime()
       removeManualTargetSyncCompatRuntime()
