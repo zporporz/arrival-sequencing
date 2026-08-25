@@ -115,6 +115,22 @@ describe('manual drag sequencing', () => {
     expect(isWithinSequenceDropZone(rect, 99, 210)).toBe(false)
   })
 
+  it('keeps the dragged shortcut TLDT instead of replacing it with the old slot', () => {
+    const base = rowsAt(['2026-08-25T15:05:00Z', '2026-08-25T15:15:00Z'])
+    const tha2 = { ...base[0], id: 'live:VTBS:THA2', callsign: 'THA2', tldt: '2026-08-25T15:25:00.000Z', sequenceIndex: 2 }
+    const tha1 = { ...base[1], id: 'live:VTBS:THA1', callsign: 'THA1', tldt: '2026-08-25T15:35:00.000Z', sequenceIndex: 1 }
+
+    const result = applyManualTargetsWithCascade(
+      [tha2, tha1],
+      { [tha1.id]: '2026-08-25T15:20:00.000Z' },
+      { '19': 120 },
+      {},
+    )
+
+    expect(result.find((row) => row.id === tha1.id)?.tldt).toBe('2026-08-25T15:20:00.000Z')
+    expect(result.find((row) => row.id === tha2.id)?.tldt).toBe('2026-08-25T15:25:00.000Z')
+  })
+
   it('keeps explicit sequence ranks when TLDT chronology crosses', () => {
     const rows = rowsAt(
       ['2026-08-25T10:00:00Z', '2026-08-25T10:06:00Z'],

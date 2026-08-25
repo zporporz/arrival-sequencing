@@ -49,7 +49,6 @@ type DragOrderState = {
   airport: string
   runway: string
   startOrder: string[]
-  slotTargets: number[]
   targetIndex: number
   moved: boolean
   startY: number
@@ -159,13 +158,6 @@ function currentGroupOrder(airport: string, runway: string) {
   return orderFromTargets(airport, runway)
 }
 
-function currentSlotTargets(airport: string, runway: string) {
-  return rowsForGroup(airport, runway)
-    .map(rowTargetMs)
-    .filter((value): value is number => value != null && Number.isFinite(value))
-    .sort((a, b) => a - b)
-}
-
 function publishOrderSnapshot() {
   const snapshot: Record<string, number> = {}
   for (const order of groupOrders.values()) {
@@ -246,20 +238,6 @@ function reconcileGroupAfterRender(airport: string, runway: string) {
   }, 80)
 }
 
-function applyTarget(row: HTMLElement, targetMs: number) {
-  const currentMs = rowTargetMs(row)
-  const props = reactProps<ReactRowProps>(row)
-  if (currentMs == null || !props?.onPointerDown || !props.onPointerMove || !props.onPointerUp) return false
-  if (Math.abs(currentMs - targetMs) <= 2_000) return true
-
-  const deltaMinutes = (targetMs - currentMs) / 60_000
-  const clientY = -deltaMinutes * TIMELINE_LOGICAL_PX_PER_MINUTE
-  props.onPointerDown(fakePointer(0))
-  props.onPointerMove(fakePointer(clientY))
-  props.onPointerUp(fakePointer(clientY))
-  return true
-}
-
 function insertionIndexFromPointer(state: DragOrderState, pointerY: number) {
   const otherOrder = state.startOrder.filter((identity) => identity !== state.identity)
   let index = 0
@@ -282,21 +260,14 @@ function reorderedOrder(state: DragOrderState) {
   return next
 }
 
-function applyReorderedSlots(state: DragOrderState, nextOrder: string[]) {
-  if (nextOrder.length !== state.slotTargets.length) return false
-
+function commitReorderedSequence(state: DragOrderState, nextOrder: string[]) {
   commitSharedOrder(state.airport, state.runway, nextOrder)
-
-  nextOrder.forEach((identity, index) => {
-    const row = rowByIdentity(state.airport, state.runway, identity)
-    const target = state.slotTargets[index]
-    if (row && Number.isFinite(target)) applyTarget(row, target)
-  })
-
+  // Reordering changes rank only. Keep the dragged aircraft's actual manual TLDT
+  // (for example, a shortcut to 15:20) instead of assigning the old 15:25 slot.
+  // The normal React cascade then moves only followers whose separation is short.
   window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
     detail: { identities: nextOrder, airport: state.airport, runway: state.runway },
   }))
-  return true
 }
 
 function clearDropPreview(state = drag) {
@@ -473,9 +444,8 @@ export function installManualSequenceReorderRuntime() {
     if (!identity || !runway) return
 
     const startOrder = currentGroupOrder(identity.airport, runway)
-    const slotTargets = currentSlotTargets(identity.airport, runway)
     const startIndex = startOrder.indexOf(identity.identity)
-    if (startIndex < 0 || startOrder.length !== slotTargets.length) return
+    if (startIndex < 0) return
 
     // Latch order before React starts changing TLDT. An upward drag is timing-only and
     // the normal pairwise cascade therefore pushes every later follower in real time.
@@ -489,7 +459,6 @@ export function installManualSequenceReorderRuntime() {
       airport: identity.airport,
       runway,
       startOrder,
-      slotTargets,
       targetIndex: startIndex,
       moved: false,
       startY: event.clientY,
@@ -545,19 +514,23 @@ export function installManualSequenceReorderRuntime() {
       return
     }
 
+    finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
+    const nextOrder = reorderedOrder(finished)
+    const orderChanged = !sameOrder(finished.startOrder, nextOrder)
+    // Publish the new rank before React finalises the manual TLDT. The render caused
+    // by onPointerUp will then cascade from the shortcut time using the new order.
+    if (orderChanged) commitReorderedSequence(finished, nextOrder)
+
     reactProps<ReactRowProps>(finished.row)?.onPointerUp?.(
       fakePointer(event.clientY, event.pointerId, finished.row),
     )
 
-    finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
-    const nextOrder = reorderedOrder(finished)
     clearDropPreview(finished)
     delete finished.row.dataset.sequenceReorderDragging
     delete finished.row.dataset.sequenceReorderTarget
     drag = null
 
-    if (!sameOrder(finished.startOrder, nextOrder)) {
-      applyReorderedSlots(finished, nextOrder)
+    if (orderChanged) {
       reconcileGroupAfterRender(finished.airport, finished.runway)
     }
   }
