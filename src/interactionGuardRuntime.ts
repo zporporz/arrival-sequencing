@@ -50,8 +50,9 @@ async function clearSharedTarget(airport: string, callsign: string) {
       callsign,
     }),
   })
-  const payload = await response.json() as { error?: string }
+  const payload = await response.json() as { error?: string; flightState?: unknown }
   if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
+  return payload.flightState ?? null
 }
 
 export function installInteractionGuardRuntime() {
@@ -131,9 +132,15 @@ export function installInteractionGuardRuntime() {
     })
 
     void clearSharedTarget(identity.airport, identity.callsign)
-      .then(() => {
-        const current = findRow(identity.airport, identity.callsign)
-        if (current) reactProps<ReactRowProps>(current)?.onDoubleClick?.()
+      .then((flightState) => {
+        if (!flightState) return
+        // The capture-phase interaction guard owns this dblclick, so the shared
+        // runtime's bubble listener never sees it. Publish the authoritative row
+        // returned by Supabase immediately instead of waiting for the 5 s poll.
+        window.dispatchEvent(new CustomEvent('aman:realtime-flight-state', { detail: flightState }))
+        window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+          detail: { airport: identity.airport, flightState },
+        }))
       })
       .catch((error) => {
         const current = findRow(identity.airport, identity.callsign) || row

@@ -527,7 +527,7 @@ export function installSharedAmanRuntime() {
   const onDoubleClick = (event: MouseEvent) => {
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>('.aman-flight-row') : null
     if (!row || (event.target instanceof Element && event.target.closest('select'))) return
-    window.setTimeout(() => void clearManualTarget(row), 40)
+    void clearManualTarget(row)
   }
 
   const onSequenceReordered = (event: Event) => {
