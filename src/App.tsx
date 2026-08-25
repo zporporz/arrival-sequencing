@@ -165,8 +165,7 @@ function spacingKey(airport: AirportCode, runway: string) {
 }
 
 function rowAirport(id: string): AirportCode {
-  if (id.startsWith('demo:VTBS:') || id.startsWith('VTBS:')) return 'VTBS'
-  return 'VTBD'
+  return id.toUpperCase().includes('VTBS') ? 'VTBS' : 'VTBD'
 }
 
 function formatUtc(date: Date) {

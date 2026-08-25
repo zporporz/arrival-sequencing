@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyManualTargetsWithCascade } from '../src/AppMaestroV24'
 import {
   autoSequenceUnstableArrivals,
@@ -12,7 +12,11 @@ import {
   installManualSequenceReorderRuntime,
   isDownwardSequenceDrag,
   isWithinSequenceDropZone,
+  mergeVisibleSequenceOrder,
   sequenceInsertionIndexForTarget,
+  sequenceOrderForTarget,
+  sequenceOrderRetryDelayMs,
+  sequenceTargetChangesOrder,
   shouldCommitSequenceReorder,
 } from '../src/manualSequenceReorderRuntime'
 import { installTimelineDisplayScaleRuntime } from '../src/timelineDisplayScaleRuntime'
@@ -49,7 +53,11 @@ function rowsAt(times: string[], runways = times.map(() => '19')) {
   })
 }
 
-afterEach(() => setAmanManualSequenceOrderSnapshot({}))
+afterEach(() => {
+  setAmanManualSequenceOrderSnapshot({})
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 describe('pairwise separation', () => {
   it.each(categories.flatMap((leader) => categories.map((follower) => [leader, follower] as const)))(
@@ -128,6 +136,17 @@ describe('manual drag sequencing', () => {
   it('inserts before a yellow target without requiring the pointer to cross its centre', () => {
     expect(sequenceInsertionIndexForTarget(['THA2', 'THA1'], 'THA1', 'THA2')).toBe(0)
     expect(sequenceInsertionIndexForTarget(['THA1', 'THA2', 'THA3'], 'THA3', 'THA2')).toBe(1)
+    expect(sequenceOrderForTarget(['THA1', 'THA2'], 'THA1', 'THA2')).toEqual(['THA1', 'THA2'])
+    expect(sequenceOrderForTarget(['THA2', 'THA1'], 'THA1', 'THA2')).toEqual(['THA1', 'THA2'])
+    expect(sequenceTargetChangesOrder(['THA1', 'THA2'], 'THA1', 'THA2')).toBe(false)
+    expect(sequenceTargetChangesOrder(['THA2', 'THA1'], 'THA1', 'THA2')).toBe(true)
+  })
+
+  it('preserves existing ranks and inserts newly visible flights by target chronology', () => {
+    expect(mergeVisibleSequenceOrder(
+      ['THA1', 'THA3'],
+      ['NEW0', 'THA3', 'NEW2', 'THA1', 'NEW4'],
+    )).toEqual(['NEW0', 'NEW2', 'THA1', 'THA3', 'NEW4'])
   })
 
   it('keeps the dragged shortcut TLDT instead of replacing it with the old slot', () => {
@@ -146,7 +165,7 @@ describe('manual drag sequencing', () => {
     expect(result.find((row) => row.id === tha2.id)?.tldt).toBe('2026-08-25T15:25:00.000Z')
   })
 
-  it('does not restore a pre-reorder visual offset after pointerup', async () => {
+  it('always snaps a dragged strip back to its true TLDT after pointerup', async () => {
     document.body.innerHTML = `
       <div class="aman-flight-row" style="--offset-px: -100px" title="VTBD RWY 21R"><strong>THA1</strong></div>
     `
@@ -166,14 +185,68 @@ describe('manual drag sequencing', () => {
     row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientY: 140 }))
     expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50px')
 
-    window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
-      detail: { identities: ['VTBD:THA1'] },
-    }))
     row.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientY: 140 }))
     await new Promise((resolve) => window.setTimeout(resolve, 40))
 
     expect(row.style.getPropertyValue('--display-offset-px')).toBe('-90px')
     removeRuntime()
+  })
+
+  it('uses the same display drag path while Shift is held', () => {
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: -100px" title="VTBD RWY 21R"><strong>THA1</strong></div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    Object.defineProperty(row, '__reactProps$test', {
+      value: { onPointerMove: () => {} }, configurable: true, enumerable: true,
+    })
+    const removeRuntime = installTimelineDisplayScaleRuntime()
+    row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 100, shiftKey: true }))
+    row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientY: 140, shiftKey: true }))
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50px')
+    removeRuntime()
+  })
+
+  it('uses explicit VTBD rank for cross-runway cascade', () => {
+    const base = autoSequenceUnstableArrivals([
+      prediction('THA1', 'C', '2026-08-25T15:05:00Z', '21R'),
+      prediction('RTAF2', 'C', '2026-08-25T15:15:00Z', '21L'),
+    ], { runwaySpacingSeconds: { '21R': 120, '21L': 120 } })
+    const leader = { ...base[0], id: 'live:VTBD:THA1', callsign: 'THA1', runway: '21R', tldt: '2026-08-25T15:25:00.000Z', sequenceIndex: 1 }
+    const follower = { ...base[1], id: 'live:VTBD:RTAF2', callsign: 'RTAF2', runway: '21L', tldt: '2026-08-25T15:35:00.000Z', sequenceIndex: 2 }
+    const result = applyManualTargetsWithCascade(
+      [leader, follower],
+      { [follower.id]: '2026-08-25T15:20:00.000Z' },
+      { '21R': 120, '21L': 120 },
+      {},
+    )
+    expect(result.find((row) => row.id === leader.id)?.tldt).toBe('2026-08-25T15:25:00.000Z')
+    expect(result.find((row) => row.id === follower.id)?.tldt).toBe('2026-08-25T15:27:00.000Z')
+  })
+
+  it('retries a failed shared sequence write without inventing a local revision', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('still offline'))
+      .mockResolvedValue({ ok: true, json: async () => ({ sequenceOrder: { revision: 9 } }) })
+    vi.stubGlobal('fetch', fetchMock)
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: -100px" title="VTBS RWY 19"><strong>THA1</strong><span class="runway-assignment"><select><option selected>19</option></select></span></div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    const removeRuntime = installManualSequenceReorderRuntime()
+    row.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 100 }))
+    row.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientY: 80 }))
+    row.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientY: 80 }))
+    await vi.runAllTimersAsync()
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(sequenceOrderRetryDelayMs(0)).toBe(300)
+    expect(sequenceOrderRetryDelayMs(1)).toBe(600)
+    removeRuntime()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('keeps explicit sequence ranks when TLDT chronology crosses', () => {

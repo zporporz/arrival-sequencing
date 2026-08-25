@@ -25,21 +25,14 @@ type DragState = {
   pointerId: number
   startClientY: number
   startDisplayOffsetPx: number
-  lastDisplayOffsetPx: number
-  lastPhysicalDeltaPx: number
-  sequenceReordered: boolean
 }
 
 type ReorderDetail = {
   identities?: string[]
 }
 
-const FALLBACK_ROW_HEIGHT_PX = 18
-const RESIDUAL_TOLERANCE_PX = 3
-const MIN_VISUAL_GAP_PX = 0
-
-// Presentation-only offset used only after the real TLDT has been constrained by
-// separation/cascade. The real sequence time never reads this value.
+// Visual offsets exist only while the pointer is down. On release every strip snaps
+// back to its true TLDT so neighbouring strips can never remain visually coupled.
 const visualResidualByKey = new Map<string, number>()
 
 function reactProps<T>(element: Element): T | null {
@@ -61,10 +54,6 @@ function rowIsManual(row: HTMLElement) {
     || row.querySelector('.runway-assignment.is-manual') != null
 }
 
-function rowDisplaySide(row: HTMLElement) {
-  return row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
-}
-
 function rowIdealDisplayOffset(row: HTMLElement) {
   const logicalOffset = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   if (!Number.isFinite(logicalOffset)) return null
@@ -76,15 +65,6 @@ function rowCurrentDisplayOffset(row: HTMLElement) {
   if (ideal == null) return null
   const key = rowKey(row)
   return ideal + (key ? visualResidualByKey.get(key) ?? 0 : 0)
-}
-
-function rowHeightPx(row: HTMLElement) {
-  const measured = row.getBoundingClientRect().height
-  return Number.isFinite(measured) && measured > 0 ? measured : FALLBACK_ROW_HEIGHT_PX
-}
-
-function minimumSpacing(left: HTMLElement, right: HTMLElement) {
-  return (rowHeightPx(left) + rowHeightPx(right)) / 2 + MIN_VISUAL_GAP_PX
 }
 
 function setDisplayOffset(row: HTMLElement, displayOffsetPx: number, idealOffsetPx: number) {
@@ -105,22 +85,6 @@ function resetRowVisual(row: HTMLElement) {
 
 function findRow(key: string) {
   return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).find((row) => rowKey(row) === key) ?? null
-}
-
-function orderedSideRows(row: HTMLElement) {
-  const side = rowDisplaySide(row)
-  return Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
-    .filter((candidate) => rowDisplaySide(candidate) === side && rowIdealDisplayOffset(candidate) != null)
-    .sort((left, right) => (rowIdealDisplayOffset(left) ?? 0) - (rowIdealDisplayOffset(right) ?? 0))
-}
-
-function adjacentRows(row: HTMLElement) {
-  const ordered = orderedSideRows(row)
-  const index = ordered.indexOf(row)
-  return {
-    before: index > 0 ? ordered[index - 1] : null,
-    after: index >= 0 && index < ordered.length - 1 ? ordered[index + 1] : null,
-  }
 }
 
 function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
@@ -144,28 +108,6 @@ function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
   for (const key of visualResidualByKey.keys()) {
     if (!activeKeys.has(key)) visualResidualByKey.delete(key)
   }
-}
-
-function clampToAdjacentBlock(row: HTMLElement, requested: number, physicalDelta: number) {
-  const ideal = rowIdealDisplayOffset(row)
-  if (ideal == null) return requested
-
-  const { before, after } = adjacentRows(row)
-  let minimum = Number.NEGATIVE_INFINITY
-  let maximum = Number.POSITIVE_INFINITY
-
-  if (before) {
-    const offset = rowCurrentDisplayOffset(before)
-    if (offset != null) minimum = offset + minimumSpacing(before, row)
-  }
-  if (after) {
-    const offset = rowCurrentDisplayOffset(after)
-    if (offset != null) maximum = offset - minimumSpacing(row, after)
-  }
-
-  const clamped = Math.min(maximum, Math.max(minimum, requested))
-  if (minimum > maximum) return physicalDelta < 0 ? maximum : minimum
-  return clamped
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -201,9 +143,7 @@ export function installTimelineDisplayScaleRuntime() {
   }
 
   const onPointerDown = (event: PointerEvent) => {
-    // Shift+Drag belongs exclusively to the reorder runtime. Do not start the normal
-    // target/compact drag here as well.
-    if (event.shiftKey || event.button !== 0) return
+    if (event.button !== 0) return
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
@@ -219,9 +159,6 @@ export function installTimelineDisplayScaleRuntime() {
       pointerId: event.pointerId,
       startClientY: event.clientY,
       startDisplayOffsetPx: displayed,
-      lastDisplayOffsetPx: displayed,
-      lastPhysicalDeltaPx: 0,
-      sequenceReordered: false,
     }
   }
 
@@ -236,8 +173,6 @@ export function installTimelineDisplayScaleRuntime() {
     const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
     const pointerDisplay = drag.startDisplayOffsetPx + physicalDelta
 
-    drag.lastDisplayOffsetPx = pointerDisplay
-    drag.lastPhysicalDeltaPx = physicalDelta
     setDisplayOffset(drag.row, pointerDisplay, ideal)
 
     event.preventDefault()
@@ -262,22 +197,8 @@ export function installTimelineDisplayScaleRuntime() {
         const ideal = rowIdealDisplayOffset(row)
         if (ideal == null) return
 
-        // The reorder runtime has already committed a new rank and cleared the old
-        // neighbour offsets. Do not let this later pointerup task recreate a visual
-        // close-gap residual from the pre-reorder neighbours.
-        if (finished.sequenceReordered) {
-          visualResidualByKey.delete(finished.key)
-          setDisplayOffset(row, ideal, ideal)
-          applyStoredVisualPositions(row)
-          return
-        }
-
-        const desired = clampToAdjacentBlock(row, finished.lastDisplayOffsetPx, finished.lastPhysicalDeltaPx)
-        const residual = desired - ideal
-        if (Math.abs(residual) <= RESIDUAL_TOLERANCE_PX) visualResidualByKey.delete(finished.key)
-        else visualResidualByKey.set(finished.key, residual)
-
-        setDisplayOffset(row, ideal + (visualResidualByKey.get(finished.key) ?? 0), ideal)
+        visualResidualByKey.delete(finished.key)
+        setDisplayOffset(row, ideal, ideal)
         applyStoredVisualPositions(row)
       })
     }, 0)
@@ -302,7 +223,6 @@ export function installTimelineDisplayScaleRuntime() {
 
   const onSequenceReordered = (event: Event) => {
     const identities = (event as CustomEvent<ReorderDetail>).detail?.identities ?? []
-    if (drag && identities.includes(drag.key)) drag.sequenceReordered = true
     for (const key of identities) visualResidualByKey.delete(key)
 
     // Old close-gap offsets belong to the old sequence neighbours. Throw them away

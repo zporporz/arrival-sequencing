@@ -59,8 +59,10 @@ const MOVE_TOLERANCE_PX = 4
 const DROP_PROXIMITY_PX = 20
 const POINTER_ID = 70424
 const VTBD_AIRPORT_SEQUENCE_SCOPE = 'ALL'
+const SEQUENCE_ORDER_WRITE_ATTEMPTS = 3
 const groupOrders = new Map<string, string[]>()
 const sharedOrderRevisions = new Map<string, number>()
+const pendingOrderWrites = new Map<string, { order: string[] }>()
 let drag: DragOrderState | null = null
 
 function reactProps<T>(element: Element): T | null {
@@ -165,8 +167,25 @@ function orderFromTargets(airport: string, runway: string) {
 function currentGroupOrder(airport: string, runway: string) {
   const currentRows = new Set(rowsForGroup(airport, runway).map((row) => rowIdentity(row)?.identity).filter(Boolean) as string[])
   const stored = groupOrders.get(groupKey(airport, runway))?.filter((identity) => currentRows.has(identity)) ?? []
-  if (stored.length === currentRows.size && stored.length > 0) return stored
-  return orderFromTargets(airport, runway)
+  const visibleOrder = orderFromTargets(airport, runway)
+  return stored.length ? mergeVisibleSequenceOrder(stored, visibleOrder) : visibleOrder
+}
+
+export function mergeVisibleSequenceOrder(existingOrder: readonly string[], visibleTargetOrder: readonly string[]) {
+  const visible = new Set(visibleTargetOrder)
+  const result = existingOrder.filter((identity, index, values) => visible.has(identity) && values.indexOf(identity) === index)
+  const retained = new Set(result)
+
+  for (const identity of visibleTargetOrder) {
+    if (retained.has(identity)) continue
+    const targetPosition = visibleTargetOrder.indexOf(identity)
+    const insertionIndex = result.findIndex((retainedIdentity) => visibleTargetOrder.indexOf(retainedIdentity) > targetPosition)
+    if (insertionIndex < 0) result.push(identity)
+    else result.splice(insertionIndex, 0, identity)
+    retained.add(identity)
+  }
+
+  return result
 }
 
 function publishOrderSnapshot() {
@@ -181,39 +200,75 @@ function callsignFromIdentity(identity: string) {
   return identity.slice(identity.indexOf(':') + 1)
 }
 
-async function persistSequenceOrder(airport: string, runway: string, order: readonly string[]) {
+export function sequenceOrderRetryDelayMs(failedAttempt: number) {
+  return Math.min(2_000, 300 * 2 ** Math.max(0, failedAttempt))
+}
+
+function waitForRetry(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function persistSequenceOrder(
+  airport: string,
+  runway: string,
+  pending: { order: string[] },
+) {
   const rows = rowsForGroup(airport, runway)
   if (!rows.length || rows.every((row) => row.classList.contains('is-demo'))) return
+  const key = groupKey(airport, runway)
+  let lastError: unknown = null
 
-  try {
-    const response = await fetch('/api/sequence/aman-state', {
-      method: 'POST',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        action: 'setSequenceOrder',
-        serviceDate: new Date().toISOString().slice(0, 10),
-        airport,
-        runway: amanSequenceScopeRunway(airport, runway),
-        orderedCallsigns: order.map(callsignFromIdentity),
-      }),
-    })
-    const payload = await response.json() as { error?: string }
-    if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
-  } catch (error) {
-    window.dispatchEvent(new CustomEvent('aman:shared-state-health', {
-      detail: { status: 'ERROR', detail: error instanceof Error ? error.message : String(error) },
-    }))
+  for (let attempt = 0; attempt < SEQUENCE_ORDER_WRITE_ATTEMPTS; attempt += 1) {
+    if (pendingOrderWrites.get(key) !== pending) return
+    try {
+      const response = await fetch('/api/sequence/aman-state', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          action: 'setSequenceOrder',
+          serviceDate: new Date().toISOString().slice(0, 10),
+          airport,
+          runway: amanSequenceScopeRunway(airport, runway),
+          orderedCallsigns: pending.order.map(callsignFromIdentity),
+        }),
+      })
+      const payload = await response.json() as { error?: string; sequenceOrder?: { revision?: number } }
+      if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
+      if (pendingOrderWrites.get(key) === pending) {
+        pendingOrderWrites.delete(key)
+        const revision = Number(payload.sequenceOrder?.revision)
+        if (Number.isFinite(revision)) sharedOrderRevisions.set(key, Math.max(sharedOrderRevisions.get(key) ?? 0, revision))
+      }
+      window.dispatchEvent(new Event('aman:force-shared-refresh'))
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < SEQUENCE_ORDER_WRITE_ATTEMPTS - 1) {
+        await waitForRetry(sequenceOrderRetryDelayMs(attempt))
+      }
+    }
   }
+
+  if (pendingOrderWrites.get(key) === pending) pendingOrderWrites.delete(key)
+  window.dispatchEvent(new CustomEvent('aman:shared-state-health', {
+    detail: { status: 'ERROR', detail: lastError instanceof Error ? lastError.message : String(lastError) },
+  }))
+  // Release the optimistic guard and immediately re-read the authoritative server
+  // order so a failed local write cannot leave this controller permanently divergent.
+  window.dispatchEvent(new Event('aman:force-shared-refresh'))
 }
 
 function commitSharedOrder(airport: string, runway: string, order: readonly string[]) {
   const key = groupKey(airport, runway)
   groupOrders.set(key, [...order])
-  sharedOrderRevisions.set(key, (sharedOrderRevisions.get(key) ?? 0) + 1)
   publishOrderSnapshot()
-  void persistSequenceOrder(airport, runway, order)
+  const rows = rowsForGroup(airport, runway)
+  if (!rows.length || rows.every((row) => row.classList.contains('is-demo'))) return
+  const pending = { order: [...order] }
+  pendingOrderWrites.set(key, pending)
+  void persistSequenceOrder(airport, runway, pending)
 }
 
 function sameOrder(a: readonly string[], b: readonly string[]) {
@@ -240,7 +295,7 @@ function reconcileGroupAfterRender(airport: string, runway: string) {
       if (retained.length === currentRows.size && retained.length > 0) {
         groupOrders.set(key, retained)
       } else {
-        const order = orderFromTargets(airport, runway)
+        const order = mergeVisibleSequenceOrder(retained, orderFromTargets(airport, runway))
         if (order.length) groupOrders.set(key, order)
         else groupOrders.delete(key)
       }
@@ -257,6 +312,25 @@ export function sequenceInsertionIndexForTarget(
   const otherOrder = startOrder.filter((identity) => identity !== draggedIdentity)
   const targetIndex = otherOrder.indexOf(targetIdentity)
   return targetIndex >= 0 ? targetIndex : Math.max(0, otherOrder.length)
+}
+
+export function sequenceOrderForTarget(
+  startOrder: readonly string[],
+  draggedIdentity: string,
+  targetIdentity: string,
+) {
+  const otherOrder = startOrder.filter((identity) => identity !== draggedIdentity)
+  const next = [...otherOrder]
+  next.splice(sequenceInsertionIndexForTarget(startOrder, draggedIdentity, targetIdentity), 0, draggedIdentity)
+  return next
+}
+
+export function sequenceTargetChangesOrder(
+  startOrder: readonly string[],
+  draggedIdentity: string,
+  targetIdentity: string,
+) {
+  return !sameOrder(startOrder, sequenceOrderForTarget(startOrder, draggedIdentity, targetIdentity))
 }
 
 function reorderedOrder(state: DragOrderState) {
@@ -345,17 +419,19 @@ function validDropTarget(state: DragOrderState, pointerX: number, pointerY: numb
 
 function updateDropPreview(state: DragOrderState, event: PointerEvent) {
   const target = validDropTarget(state, event.clientX, event.clientY)
-  if (state.dropTarget !== target) {
+  const targetIdentity = target ? rowIdentity(target)?.identity : null
+  const effectiveTarget = targetIdentity
+    && sequenceTargetChangesOrder(state.startOrder, state.identity, targetIdentity)
+    ? target
+    : null
+  if (state.dropTarget !== effectiveTarget) {
     clearDropPreview(state)
-    state.dropTarget = target
+    state.dropTarget = effectiveTarget
   }
-  if (!target) return
+  if (!effectiveTarget || !targetIdentity) return
 
-  target.dataset.sequenceReorderDropTarget = 'true'
-  const targetIdentity = rowIdentity(target)?.identity
-  if (targetIdentity) {
-    state.targetIndex = sequenceInsertionIndexForTarget(state.startOrder, state.identity, targetIdentity)
-  }
+  effectiveTarget.dataset.sequenceReorderDropTarget = 'true'
+  state.targetIndex = sequenceInsertionIndexForTarget(state.startOrder, state.identity, targetIdentity)
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
@@ -370,6 +446,11 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
     const key = groupKey(airport, runway)
     explicitGroups.add(key)
 
+    const remoteOrder = state.ordered_callsigns.map((callsign) => amanSequenceOrderIdentity(airport, callsign))
+    const pending = pendingOrderWrites.get(key)
+    if (pending && !sameOrder(pending.order, remoteOrder)) continue
+    if (pending) pendingOrderWrites.delete(key)
+
     const revision = Number(state.revision) || 0
     if (revision < (sharedOrderRevisions.get(key) ?? 0)) continue
     sharedOrderRevisions.set(key, revision)
@@ -379,8 +460,7 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
     const remote = state.ordered_callsigns
       .map((callsign) => amanSequenceOrderIdentity(airport, callsign))
       .filter((identity, index, values) => visible.has(identity) && values.indexOf(identity) === index)
-    const retained = new Set(remote)
-    const merged = [...remote, ...visibleOrder.filter((identity) => !retained.has(identity))]
+    const merged = mergeVisibleSequenceOrder(remote, visibleOrder)
     if (merged.length) groupOrders.set(key, merged)
     else groupOrders.delete(key)
   }
@@ -605,6 +685,7 @@ export function installManualSequenceReorderRuntime() {
     drag = null
     groupOrders.clear()
     sharedOrderRevisions.clear()
+    pendingOrderWrites.clear()
     setAmanManualSequenceOrderSnapshot({})
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)

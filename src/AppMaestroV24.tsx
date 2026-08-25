@@ -188,8 +188,7 @@ function flightKey(airport: string, callsign: string) {
 }
 
 function rowAirport(id: string): AirportCode {
-  if (id.startsWith('demo:VTBS:') || id.startsWith('VTBS:')) return 'VTBS'
-  return 'VTBD'
+  return id.toUpperCase().includes('VTBS') ? 'VTBS' : 'VTBD'
 }
 
 function predictionFlightKey(prediction: Pick<AmanArrivalPrediction, 'id' | 'callsign'>) {
@@ -497,7 +496,9 @@ export function applyManualTargetsWithCascade(
     for (const airport of ['VTBD', 'VTBS'] as const) {
       const airportRows = rows
         .filter((row) => rowAirport(row.id) === airport)
-        .sort((a, b) => (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
+        .sort((a, b) => airport === 'VTBD'
+          ? a.sequenceIndex - b.sequenceIndex
+          : (targetById.get(a.id) ?? 0) - (targetById.get(b.id) ?? 0) || a.sequenceIndex - b.sequenceIndex)
 
       for (let index = 1; index < airportRows.length; index += 1) {
         const leader = airportRows[index - 1]
@@ -748,7 +749,9 @@ export default function App() {
     }
 
     for (const airport of ['VTBD', 'VTBS'] as const) {
-      const airportRows = ordered.filter((row) => rowAirport(row.id) === airport)
+      const airportRows = ordered
+        .filter((row) => rowAirport(row.id) === airport)
+        .sort((a, b) => airport === 'VTBD' ? a.sequenceIndex - b.sequenceIndex : 0)
       for (let index = 1; index < airportRows.length; index += 1) {
         const leader = airportRows[index - 1]
         const follower = airportRows[index]
