@@ -60,7 +60,15 @@ export function installRealtimeAmanRuntime() {
 
   const rooms = new Map<string, Room>()
   const previewOriginals = new Map<string, Map<HTMLElement, { offset: string; tldt: string }>>()
-  let activeDrag: { airport: string; previewId: string; lastSentAt: number } | null = null
+  const lockTimers = new Map<string, number>()
+  let activeDrag: {
+    airport: string
+    callsign: string
+    previewId: string
+    lastSentAt: number
+    pointerId: number
+    row: HTMLElement
+  } | null = null
   let disposed = false
   let activeServiceDate = realtimeUtcServiceDate()
   let serviceDateTimer: number | null = null
@@ -108,6 +116,66 @@ export function installRealtimeAmanRuntime() {
       delete row.dataset.realtimePreview
     })
     previewOriginals.delete(previewId)
+  }
+
+  const findRow = (airport: string, callsign: string) => Array.from(
+    document.querySelectorAll<HTMLElement>('.aman-flight-row'),
+  ).find((row) => {
+    const info = rowInfo(row)
+    return info?.airport === airport && info.callsign === callsign
+  }) ?? null
+
+  const showMessage = (message: string) => {
+    let toast = document.querySelector<HTMLElement>('.aman-runtime-toast')
+    if (!toast) {
+      toast = document.createElement('div')
+      toast.className = 'aman-runtime-toast'
+      document.body.appendChild(toast)
+    }
+    toast.textContent = message
+    toast.classList.add('is-visible')
+    window.setTimeout(() => toast?.classList.remove('is-visible'), 2_200)
+  }
+
+  const clearDragLock = (airport: string, callsign: string, previewId = '') => {
+    const key = `${airport}:${callsign}`
+    const row = findRow(airport, callsign)
+    if (row && (!previewId || row.dataset.realtimeLockPreview === previewId)) {
+      row.classList.remove('is-realtime-locked')
+      delete row.dataset.realtimeLockActor
+      delete row.dataset.realtimeLockPreview
+      delete row.dataset.realtimeLockExpiresAt
+    }
+    const timer = lockTimers.get(key)
+    if (timer != null) window.clearTimeout(timer)
+    lockTimers.delete(key)
+  }
+
+  const applyDragLock = (message: {
+    airport?: string
+    callsign?: string
+    previewId?: string
+    actor?: { vid?: string; name?: string }
+    expiresAt?: number
+  }) => {
+    const airport = String(message.airport || '').toUpperCase()
+    const callsign = String(message.callsign || '').toUpperCase()
+    const previewId = String(message.previewId || '')
+    const expiresAt = Number(message.expiresAt)
+    if (!airport || !callsign || !previewId || !Number.isFinite(expiresAt)) return
+    const row = findRow(airport, callsign)
+    if (!row) return
+    const actor = String(message.actor?.name || message.actor?.vid || 'another controller')
+    row.classList.add('is-realtime-locked')
+    row.dataset.realtimeLockActor = actor
+    row.dataset.realtimeLockPreview = previewId
+    row.dataset.realtimeLockExpiresAt = String(expiresAt)
+    const key = `${airport}:${callsign}`
+    const currentTimer = lockTimers.get(key)
+    if (currentTimer != null) window.clearTimeout(currentTimer)
+    lockTimers.set(key, window.setTimeout(() => {
+      if (Number(row.dataset.realtimeLockExpiresAt) <= Date.now()) clearDragLock(airport, callsign, previewId)
+    }, Math.max(0, expiresAt - Date.now()) + 20))
   }
 
   const applyPreview = (message: { airport?: string; previewId?: string; rows?: Array<{ callsign?: string; targetAt?: string }> }) => {
@@ -167,6 +235,7 @@ export function installRealtimeAmanRuntime() {
       }
       message.flightStates?.forEach(dispatchFlightState)
       message.sequenceOrders?.forEach(dispatchSequenceOrder)
+      message.dragLocks?.forEach(applyDragLock)
       return
     }
     if (message?.type === 'auto_snapshot') {
@@ -176,7 +245,33 @@ export function installRealtimeAmanRuntime() {
       return
     }
     if (message?.type === 'drag_preview') {
+      applyDragLock(message)
       applyPreview(message)
+      return
+    }
+    if (message?.type === 'drag_lock') {
+      applyDragLock(message)
+      return
+    }
+    if (message?.type === 'drag_unlock') {
+      clearDragLock(room.airport, String(message.callsign || '').toUpperCase(), String(message.previewId || ''))
+      return
+    }
+    if (message?.type === 'drag_denied') {
+      const previewId = String(message.previewId || '')
+      if (!activeDrag || activeDrag.previewId !== previewId) return
+      const denied = activeDrag
+      const actor = String(message.actor?.name || message.actor?.vid || 'another controller')
+      showMessage(`${denied.callsign} is being controlled by ${actor}`)
+      const cancelEvent = typeof PointerEvent === 'function'
+        ? new PointerEvent('pointercancel', { bubbles: true, pointerId: denied.pointerId })
+        : new Event('pointercancel', { bubbles: true })
+      denied.row.dispatchEvent(cancelEvent)
+      if (activeDrag === denied) {
+        send(denied.airport, { type: 'drag_cancel', previewId: denied.previewId })
+        activeDrag = null
+      }
+      applyDragLock(message)
       return
     }
     if (message?.type === 'drag_cancel') {
@@ -189,6 +284,10 @@ export function installRealtimeAmanRuntime() {
       return
     }
     if (message?.type === 'sequence_commit') dispatchSequenceOrder(message.sequenceOrder)
+    if (message?.type === 'commit_rejected') {
+      if (message.entity === 'flight') dispatchFlightState(message.current)
+      if (message.entity === 'sequence') dispatchSequenceOrder(message.current)
+    }
   }
 
   const connect = (room: Room, nextServiceDate = activeServiceDate) => {
@@ -301,9 +400,27 @@ export function installRealtimeAmanRuntime() {
   const onPointerDown = (event: PointerEvent) => {
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>('.aman-flight-row') : null
     if (!row || (event.target instanceof Element && event.target.closest('select')) || row.classList.contains('is-demo')) return
+    if (row.classList.contains('is-realtime-locked')) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      showMessage(`${row.querySelector('strong')?.textContent?.trim() || 'Flight'} is being controlled by ${row.dataset.realtimeLockActor || 'another controller'}`)
+      return
+    }
     const info = rowInfo(row)
     if (!info) return
-    activeDrag = { airport: info.airport, previewId: crypto.randomUUID(), lastSentAt: 0 }
+    activeDrag = {
+      airport: info.airport,
+      callsign: info.callsign,
+      previewId: crypto.randomUUID(),
+      lastSentAt: 0,
+      pointerId: event.pointerId,
+      row,
+    }
+    send(info.airport, {
+      type: 'drag_begin',
+      callsign: info.callsign,
+      previewId: activeDrag.previewId,
+    })
   }
 
   const publishDragPreview = () => {
@@ -316,7 +433,12 @@ export function installRealtimeAmanRuntime() {
         ? [{ callsign: info.callsign, targetAt: new Date(valueMs).toISOString(), runway: info.runway }]
         : []
     })
-    send(airport, { type: 'drag_preview', previewId: activeDrag.previewId, rows })
+    send(airport, {
+      type: 'drag_preview',
+      callsign: activeDrag.callsign,
+      previewId: activeDrag.previewId,
+      rows,
+    })
     activeDrag.lastSentAt = performance.now()
   }
 
@@ -362,6 +484,13 @@ export function installRealtimeAmanRuntime() {
       room.socket?.close(1000, 'runtime disposed')
     })
     previewOriginals.forEach((_value, key) => clearPreview(key))
+    lockTimers.forEach((timer) => window.clearTimeout(timer))
+    document.querySelectorAll<HTMLElement>('.aman-flight-row.is-realtime-locked').forEach((row) => {
+      row.classList.remove('is-realtime-locked')
+      delete row.dataset.realtimeLockActor
+      delete row.dataset.realtimeLockPreview
+      delete row.dataset.realtimeLockExpiresAt
+    })
     document.querySelector('.aman-runtime-realtime-status')?.remove()
     window.removeEventListener('aman:local-auto-snapshot', onLocalAutoSnapshot)
     window.removeEventListener('aman:realtime-commit-request', onCommit)

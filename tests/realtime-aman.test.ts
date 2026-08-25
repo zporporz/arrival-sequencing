@@ -74,4 +74,65 @@ describe('realtime AMAN coordination', () => {
 
     dispose()
   })
+
+  it('cancels a local drag when another controller owns the flight lease', () => {
+    vi.useFakeTimers()
+
+    class FakeWebSocket extends EventTarget {
+      static OPEN = 1
+      static CLOSED = 3
+      static instances: FakeWebSocket[] = []
+      readyState = FakeWebSocket.OPEN
+      sent: string[] = []
+
+      constructor(readonly url: string) {
+        super()
+        FakeWebSocket.instances.push(this)
+      }
+
+      send(payload: string) {
+        this.sent.push(payload)
+      }
+
+      close() {
+        this.readyState = FakeWebSocket.CLOSED
+        this.dispatchEvent(new Event('close'))
+      }
+    }
+
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    document.body.innerHTML = `
+      <div class="aman-flight-row" title="VTBS RWY 19" style="--offset-px:-100px">
+        <strong>THA123</strong>
+        <span class="runway-assignment">BS/19</span>
+        <span class="tldt">10:20:00</span>
+      </div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    let pointerCancelled = false
+    row.addEventListener('pointercancel', () => { pointerCancelled = true })
+    const dispose = installRealtimeAmanRuntime()
+    const vtbsSocket = FakeWebSocket.instances.find((socket) => socket.url.includes('airport=VTBS'))!
+
+    const pointerDown = new Event('pointerdown', { bubbles: true })
+    Object.defineProperty(pointerDown, 'pointerId', { value: 42 })
+    row.querySelector('strong')!.dispatchEvent(pointerDown)
+    const begin = vtbsSocket.sent.map((payload) => JSON.parse(payload)).find((payload) => payload.type === 'drag_begin')
+
+    vtbsSocket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({
+      type: 'drag_denied',
+      airport: 'VTBS',
+      callsign: 'THA123',
+      previewId: begin.previewId,
+      actor: { vid: '222', name: 'CONTROLLER TWO' },
+      expiresAt: Date.now() + 5_000,
+    }) }))
+
+    expect(pointerCancelled).toBe(true)
+    expect(row.classList.contains('is-realtime-locked')).toBe(true)
+    expect(document.querySelector('.aman-runtime-toast')?.textContent).toContain('CONTROLLER TWO')
+
+    dispose()
+    document.body.innerHTML = ''
+  })
 })

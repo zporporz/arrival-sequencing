@@ -22,5 +22,6 @@
   letter-spacing:.08em;
   pointer-events:none;
 }
+.aman-flight-row.is-realtime-locked{cursor:not-allowed!important;outline:1px dashed rgba(255,188,65,.7);outline-offset:-1px;filter:saturate(.72)}
 .aman-runtime-shared-status dd{color:#72d7a9!important}
 .aman-runtime-shared-status dd.is-warning{color:#ff8078!important}
