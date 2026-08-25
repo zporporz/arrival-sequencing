@@ -195,8 +195,8 @@ export default function StaffMasterDataAdmin() {
       </section>
 
       <section className="masteradmin-warning">
-        <strong>DATABASE EDITOR LIVE</strong>
-        <span>Changes are stored and audited in Supabase. Production AMAN still uses hard-coded runway and nominal STAR timing constants until the runtime is wired to published master data.</span>
+        <strong>OPERATIONAL MASTER DATA LIVE</strong>
+        <span>Published + Active runway flows with Timing Active feed production AMAN. Effective active fix timings refresh automatically; code constants remain only as an outage fallback.</span>
       </section>
 
       <section className="masteradmin-summary">

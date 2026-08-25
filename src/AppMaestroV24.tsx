@@ -22,7 +22,7 @@ import {
   nmToMinutesAtReferenceSpeed,
   splitAmanDelay,
 } from './core/amanConstants'
-import { readAircraftPerformance, readIvaoTraffic, readRouteGeometry, type IvaoArrivalTrafficFlight } from './core/api'
+import { readAircraftPerformance, readIvaoTraffic, readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
   amanSequenceOrderIdentity,
@@ -128,6 +128,11 @@ const RUNWAY_PROFILES: Record<AirportCode, readonly RunwayProfile[]> = {
 const DEFAULT_PROFILE: Record<AirportCode, string> = {
   VTBD: 'DUAL_21RARR_21LARR',
   VTBS: 'SEMI35_19MIX_20LDEP_20RARR',
+}
+
+const RUNTIME_MASTER_FLOW: Record<AirportCode, string> = {
+  VTBD: '21',
+  VTBS: '19_20',
 }
 
 const DEFAULT_RUNWAY_MODES: Record<AirportCode, Record<string, RunwayMode>> = {
@@ -239,6 +244,28 @@ function nominalStarSeconds(airport: AirportCode, fix: string) {
   return Number.isFinite(minutes) ? minutes * 60 : null
 }
 
+function masterTimingLookup(config: OperationalConfigPayload | null) {
+  const result: Record<AirportCode, Record<string, number>> = { VTBD: {}, VTBS: {} }
+  if (!config) return result
+  for (const airport of ['VTBD', 'VTBS'] as const) {
+    const airportWorkspaces = config.workspaces.filter((item) => item.airport === airport)
+    const workspace = airportWorkspaces.find((item) => item.flow === RUNTIME_MASTER_FLOW[airport])
+      ?? (airportWorkspaces.length === 1 ? airportWorkspaces[0] : null)
+    for (const timing of workspace?.timings ?? []) {
+      if (Number.isFinite(timing.nominalSeconds) && timing.nominalSeconds > 0) {
+        result[airport][timing.fix.toUpperCase()] = timing.nominalSeconds
+      }
+    }
+  }
+  return result
+}
+
+function hasOperationalWorkspace(config: OperationalConfigPayload | null, airport: AirportCode) {
+  if (!config) return false
+  const matches = config.workspaces.filter((item) => item.airport === airport)
+  return matches.some((item) => item.flow === RUNTIME_MASTER_FLOW[airport]) || matches.length === 1
+}
+
 function compactFix(airport: AirportCode, fix: string) {
   if (airport === 'VTBD') {
     return (VTBD_IAWP_COMPACT_CODES as Record<string, string>)[fix] || fix.slice(0, 1)
@@ -290,9 +317,11 @@ function processingDistanceNm(flight: IvaoArrivalTrafficFlight) {
   return distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, Number(flight.latitude), Number(flight.longitude))
 }
 
-function buildDemoPredictions(airport: AirportCode, anchor: Date) {
+function buildDemoPredictions(airport: AirportCode, anchor: Date, timingLookup: Record<AirportCode, Record<string, number>>, useMaster: boolean) {
   return DEMO_SPECS[airport].flatMap<AmanArrivalPrediction>((spec, index) => {
-    const nominalSeconds = nominalStarSeconds(airport, spec.refFix)
+    const nominalSeconds = useMaster
+      ? timingLookup[airport][spec.refFix] ?? null
+      : nominalStarSeconds(airport, spec.refFix)
     if (nominalSeconds == null) return []
     const naturalLandingMs = anchor.getTime() + spec.naturalLandingOffsetMinutes * 60_000
     return [{
@@ -580,6 +609,8 @@ export default function App() {
   const [livePredictions, setLivePredictions] = useState<AmanArrivalPrediction[]>([])
   const [loading, setLoading] = useState(true)
   const [trafficError, setTrafficError] = useState<string | null>(null)
+  const [operationalConfig, setOperationalConfig] = useState<OperationalConfigPayload | null>(null)
+  const [operationalConfigError, setOperationalConfigError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [demoMode, setDemoMode] = useState(false)
   const [demoAnchor, setDemoAnchor] = useState<Date | null>(null)
@@ -599,6 +630,8 @@ export default function App() {
   const liveSequenceRef = useRef<AmanSequenceRow[]>([])
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
+  const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig), [operationalConfig])
+  const operationalTimingCount = Object.values(operationalTimings).reduce((total, timings) => total + Object.keys(timings).length, 0)
   const ticks = useMemo(() => timelineTicks(now), [now])
   const processingNowMs = Math.floor(now.getTime() / 60_000) * 60_000
   const runwaySpacingSeconds = useMemo(() => {
@@ -684,7 +717,7 @@ export default function App() {
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchor) return []
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
-      buildDemoPredictions(airport, demoAnchor),
+      buildDemoPredictions(airport, demoAnchor, operationalTimings, hasOperationalWorkspace(operationalConfig, airport)),
       airport,
       runwayModes,
       spacingNm,
@@ -694,7 +727,7 @@ export default function App() {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, demoAnchor, demoMode, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, demoAnchor, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoSequence = useMemo(
     () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}, autoReturnFloorTldt),
@@ -896,6 +929,30 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false
+    const loadOperationalConfig = async () => {
+      try {
+        const config = await readOperationalConfig()
+        if (disposed) return
+        setOperationalConfig(config)
+        setOperationalConfigError(null)
+      } catch (error) {
+        if (disposed) return
+        setOperationalConfigError(error instanceof Error ? error.message : String(error))
+      }
+    }
+    const refresh = () => void loadOperationalConfig()
+    refresh()
+    const timer = window.setInterval(refresh, 60_000)
+    window.addEventListener('aman:force-shared-refresh', refresh)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('aman:force-shared-refresh', refresh)
+    }
+  }, [])
+
+  useEffect(() => {
+    let disposed = false
     const loadTraffic = async () => {
       setLoading(true)
       const results = await Promise.all(airports.map(async (airport) => {
@@ -906,7 +963,9 @@ export default function App() {
             const distanceToBkk = processingDistanceNm(flight)
             const match = findAipIawp(airport, flight.route, [...ENTRY_FIXES[airport]])
             if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
-            const nominalSeconds = nominalStarSeconds(airport, match.entryFix)
+            const nominalSeconds = hasOperationalWorkspace(operationalConfig, airport)
+              ? operationalTimings[airport][match.entryFix] ?? null
+              : nominalStarSeconds(airport, match.entryFix)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const [geometry, performancePayload] = await Promise.all([
               resolveRouteGeometry(flight, airport),
@@ -985,7 +1044,7 @@ export default function App() {
       disposed = true
       window.clearInterval(refresh)
     }
-  }, [airports])
+  }, [airports, operationalConfig, operationalTimings])
 
   const toggleDemo = () => {
     resetManualState()
@@ -1287,6 +1346,7 @@ export default function App() {
             <div><dt>Airport scope</dt><dd>{airportScope}</dd></div>
             <div><dt>Arrival runways</dt><dd>{activeArrivalRunways.length}</dd></div>
             <div><dt>IAWP mapping</dt><dd>ACTIVE</dd></div>
+            <div><dt>Nominal timing</dt><dd className={operationalConfigError ? 'is-warning' : ''}>{operationalTimingCount ? `MASTER DATA · ${operationalTimingCount} FIX` : operationalConfigError ? 'CODE FALLBACK' : 'LOADING'}</dd></div>
             <div><dt>Processing radius</dt><dd>{AMAN_PROCESSING_RADIUS_BAND_NM.MIN}-{AMAN_PROCESSING_RADIUS_BAND_NM.MAX} NM · ENTRY {AMAN_PROCESSING_RADIUS_NM}</dd></div>
             <div><dt>Monitored inbound</dt><dd>{monitoredInboundCount}</dd></div>
             <div><dt>Late insert</dt><dd className={latePendingCount ? 'is-warning' : ''}>{latePendingCount ? `${latePendingCount} PENDING` : 'NONE'}</dd></div>

@@ -57,6 +57,7 @@ import { installMissedApproachDirectInsertRuntime } from './missedApproachDirect
 
 const StaffNavdataAdminPage = lazy(() => import('./StaffNavdataAdminPage'))
 const StaffMasterDataAdmin = lazy(() => import('./StaffMasterDataAdmin'))
+const StaffCaatAdmin = lazy(() => import('./StaffCaatAdmin'))
 const StaffAdminTools = lazy(() => import('./StaffAdminTools'))
 
 installReconnectTrafficFetch()
@@ -133,6 +134,7 @@ function RootApp() {
   const route = adminRoute()
   if (route === 'navdata') return <StaffNavdataAdminPage />
   if (route === 'master') return <StaffMasterDataAdmin />
+  if (route === 'caat') return <StaffCaatAdmin />
   if (route === 'tools') return <StaffAdminTools />
   return <AppWithRuntime />
 }

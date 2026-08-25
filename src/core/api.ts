@@ -91,6 +91,32 @@ export type AircraftPerformancePayload = {
   }
 }
 
+export type OperationalFixTiming = {
+  airport: string
+  flow: string
+  fix: string
+  nominalSeconds: number
+  source: string | null
+  verified: boolean
+  effectiveFrom: string
+  effectiveTo: string | null
+  updatedAt: string | null
+}
+
+export type OperationalTimingWorkspace = {
+  airport: string
+  airportName: string
+  flow: string
+  label: string
+  timings: OperationalFixTiming[]
+}
+
+export type OperationalConfigPayload = {
+  serviceDate: string
+  generatedAt: string
+  workspaces: OperationalTimingWorkspace[]
+}
+
 export type IvaoTrafficPayload<TFlight = IvaoArrivalTrafficFlight> = {
   airport: string
   fetchedAt: string
@@ -152,6 +178,11 @@ export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: str
 export function readAircraftPerformance(type: string) {
   const params = new URLSearchParams({ type: type.trim().toUpperCase() })
   return apiGet<AircraftPerformancePayload>(`/api/sequence/aircraft-performance?${params.toString()}`)
+}
+
+export function readOperationalConfig(serviceDate = new Date().toISOString().slice(0, 10)) {
+  const params = new URLSearchParams({ serviceDate })
+  return apiGet<OperationalConfigPayload>(`/api/sequence/operational-config?${params.toString()}`)
 }
 
 export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string) {

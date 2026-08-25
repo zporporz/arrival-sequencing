@@ -209,9 +209,9 @@ async function approveImport(env, auth, body) {
       active: true,
     };
 
-    const match = existing
-      .filter((item) => item.runway_config_id === runwayConfigId && item.designator === designator)
-      .sort((a, b) => String(b.effective_from || '').localeCompare(String(a.effective_from || '')))[0];
+    const match = existing.find((item) => item.runway_config_id === runwayConfigId
+      && item.designator === designator
+      && String(item.effective_from || '') === effectiveFrom);
 
     if (!match) {
       await supabaseAdminRequest(env, 'star_procedures?select=*', {
@@ -219,7 +219,7 @@ async function approveImport(env, auth, body) {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify([{ ...next, ...creatorPatch(auth) }]),
       });
-      existing.push(next);
+      existing.push({ ...next, id: null });
       created += 1;
       continue;
     }

@@ -1,6 +1,6 @@
 # Codex Handoff — ATC Arrival Sequencing / Thailand AMAN
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 Repository: `zporporz/arrival-sequencing`
 Production: `https://atc-sequence.pages.dev`
 Supabase project: `jamwzmqcerkivkgpezfh`
@@ -114,12 +114,13 @@ The intended UX is directional.
 - The follower strips themselves must move visually live, not just their TLDT text
 - Releasing the mouse only ends the drag; no special drop action is required
 
-### Drag DOWN (earlier TLDT)
+### Drag DOWN (earlier TLDT / resequence)
 
-- Normal TLDT movement is allowed
-- A yellow target may appear over another same-airport/runway aircraft
-- Releasing directly on the yellow target may explicitly replace/reorder
-- Passing near another aircraft without a valid drop must not reorder
+- Normal TLDT movement is allowed.
+- Sequence rank changes live when the pointer crosses the centre of another eligible callsign row.
+- The user does not need to overlap the boxes or release on an exact yellow target.
+- The yellow row is feedback for the latest crossed target; it is not a second aircraft attached to the drag.
+- Releasing commits the latest crossed order once. Tight adjacent rows must behave the same as widely spaced rows.
 
 Relevant files:
 
@@ -127,7 +128,7 @@ Relevant files:
 - `src/timelineDisplayScaleRuntime.ts`
 - `src/AppMaestroV24.tsx`
 
-Recent fixes preserve browser pointer-capture cleanup after reorder and prevent a strip remaining stuck to the mouse.
+Recent fixes preserve browser pointer-capture cleanup after reorder, prevent adjacent strips remaining stuck together and use the same VTBD airport-wide ordering path for TEST and live traffic.
 
 ### Important architecture rule
 
@@ -196,9 +197,17 @@ Main files:
 - `src/staffMasterDataAdmin.css`
 - `functions/api/admin/master.js`
 
-Important: production MAESTRO calculations still rely on hardcoded operational constants in places such as `src/core/amanConstants.ts` / `src/AppMaestroV24.tsx`. Editing DB `fix_timings` does not necessarily change live AMAN timing yet.
+Production MAESTRO now loads effective nominal fix timings through authenticated `/api/sequence/operational-config`.
 
-Future correct direction: publish effective operational timing config to frontend and consume it with hardcoded fallback, without destructive migration.
+- Only Active + Published airports/runway flows with `timing_status=ACTIVE` are exposed to the runtime.
+- The newest active timing revision effective on the UTC service date wins for each airport/flow/fix.
+- The frontend refreshes operational master timing every 60 seconds and on `aman:force-shared-refresh`.
+- `src/core/amanConstants.ts` remains a non-destructive outage/missing-record fallback.
+- The System panel reports `MASTER DATA` or `CODE FALLBACK` so controllers can see the active source.
+
+CAAT review is available at `/?admin=caat`. It scans the effective CAAT eAIP, maps records to configured runway flows, marks NEW/CHANGED/SAME/REVIEW/UNMAPPED rows and requires explicit staff selection plus confirmation before audited import. A new effective-date revision is inserted instead of overwriting the previous AIRAC revision.
+
+CI uses the Node 24-based `actions/checkout@v5` and `actions/setup-node@v5` actions.
 
 ## Missed approach caution
 

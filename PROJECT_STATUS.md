@@ -1,6 +1,6 @@
 # Bangkok FIR Arrival Sequencing — Project Status
 
-Last reviewed: 2026-08-16
+Last reviewed: 2026-08-25
 
 ## Production-ready scope
 
@@ -13,8 +13,8 @@ Last reviewed: 2026-08-16
 - Airport and runway configuration master data.
 - Published / Not Published / Archived states are separate.
 - STAR procedures are optional and editable from Admin.
-- AIP STAR Importer can auto-detect the current CAAT eAIP or parse an uploaded AIP PDF, preview differences and require staff approval before changing master data.
-- Fix timing editor uses the same `fix_timings` dataset as live sequencing.
+- CAAT eAIP review can auto-detect the effective AIRAC, preview mapped STAR differences and requires explicit staff approval before changing master data.
+- The current MAESTRO runtime loads effective `fix_timings` from published Timing Active runway flows, refreshes them every 60 seconds and retains code constants as an outage fallback.
 - Configuration history is append-only with field-level diff and rollback.
 - Session history supports close, reopen, archive and restore.
 - Session detail includes stored arrivals, statistics and CSV export.

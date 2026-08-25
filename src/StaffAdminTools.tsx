@@ -123,12 +123,12 @@ export default function StaffAdminTools() {
           <small>Airport · Runway flow · Fix timing · Supabase audit</small>
         </a>
 
-        <article className="stafftools-card">
-          <div className="stafftools-card-head"><span>CAAT</span><b>BACKEND</b></div>
+        <a className="stafftools-card is-ready" href="/?admin=caat">
+          <div className="stafftools-card-head"><span>CAAT</span><b>READY</b></div>
           <h2>CAAT eAIP Import</h2>
-          <p>Existing staff backend can scan CAAT AIRAC issues and STAR references. This remains a secondary official-source cross-check beside structured navdata.</p>
-          <small>CAAT eAIP scanner · review workflow pending</small>
-        </article>
+          <p>Scan the effective CAAT AIRAC, review mapped STAR records and explicitly approve selected changes into audited master data.</p>
+          <small>CAAT eAIP scanner · staff review · approval audit</small>
+        </a>
 
         <a className="stafftools-card is-ready" href="#login-audit">
           <div className="stafftools-card-head"><span>AUDIT</span><b>LIVE</b></div>
