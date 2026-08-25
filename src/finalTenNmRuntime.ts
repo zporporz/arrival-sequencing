@@ -24,7 +24,6 @@ const FINAL_ALONG_TRACK_NM = 10
 const FINAL_CROSS_TRACK_NM = 1.5
 const FINAL_HEADING_TOLERANCE_DEG = 35
 const TRACK_MAX_AGE_MS = 90_000
-const AIRPORTS = ['VTBD', 'VTBS'] as const
 
 function dms(deg: number, min: number, sec: number) {
   return deg + min / 60 + sec / 3600
@@ -39,7 +38,12 @@ const RUNWAYS: Record<string, RunwayGeometry> = {
   'VTBS:20R': { lat: dms(13, 42, 0.68), lon: dms(100, 44, 18.41), course: 194.0 },
 }
 
+// Every airport represented by runway geometry is refreshed independently.
+// Adding another airport's runways automatically adds its own traffic health scope.
+const AIRPORTS = [...new Set(Object.keys(RUNWAYS).map((key) => key.split(':')[0]).filter(Boolean))]
+
 const latestFlights = new Map<string, LiveFlight>()
+const airportAvailability = new Map<string, boolean>()
 
 function toRad(value: number) {
   return value * Math.PI / 180
@@ -137,6 +141,13 @@ function applyToRows() {
     const airport = rowAirport(row)
     const runway = rowRunway(row)
     const callsign = rowCallsign(row)
+    if (!airport || airportAvailability.get(airport) !== true) {
+      row.dataset.finalGeometryAvailable = 'false'
+      row.dataset.finalTenNm = 'false'
+      delete row.dataset.finalAlongNm
+      delete row.dataset.finalCrossNm
+      return
+    }
     const result = evaluateFinalTenNm(airport, runway, latestFlights.get(`${airport}:${callsign}`))
 
     row.dataset.finalGeometryAvailable = result.available ? 'true' : 'false'
@@ -148,6 +159,12 @@ function applyToRows() {
   })
 }
 
+function clearAirportFlights(airport: string) {
+  for (const [key] of latestFlights) {
+    if (key.startsWith(`${airport}:`)) latestFlights.delete(key)
+  }
+}
+
 async function refreshAirport(airport: string) {
   const response = await fetch(`/api/sequence/ivao-traffic?airport=${encodeURIComponent(airport)}`, {
     credentials: 'same-origin',
@@ -156,9 +173,7 @@ async function refreshAirport(airport: string) {
   })
   if (!response.ok) throw new Error(`IVAO traffic ${airport} returned ${response.status}`)
   const payload = await response.json() as TrafficPayload
-  for (const [key] of latestFlights) {
-    if (key.startsWith(`${airport}:`)) latestFlights.delete(key)
-  }
+  clearAirportFlights(airport)
   for (const flight of payload.flights || []) {
     const callsign = String(flight.callsign || '').trim().toUpperCase()
     if (callsign) latestFlights.set(`${airport}:${callsign}`, flight)
@@ -169,17 +184,16 @@ export function installFinalTenNmRuntime() {
   let disposed = false
 
   const refresh = async () => {
-    try {
-      await Promise.all(AIRPORTS.map((airport) => refreshAirport(airport)))
-      if (!disposed) applyToRows()
-    } catch {
-      if (!disposed) {
-        document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
-          row.dataset.finalGeometryAvailable = 'false'
-          row.dataset.finalTenNm = 'false'
-        })
+    await Promise.allSettled(AIRPORTS.map(async (airport) => {
+      try {
+        await refreshAirport(airport)
+        airportAvailability.set(airport, true)
+      } catch {
+        clearAirportFlights(airport)
+        airportAvailability.set(airport, false)
       }
-    }
+    }))
+    if (!disposed) applyToRows()
   }
 
   void refresh()
@@ -191,5 +205,6 @@ export function installFinalTenNmRuntime() {
     window.clearInterval(fetchTimer)
     window.clearInterval(applyTimer)
     latestFlights.clear()
+    airportAvailability.clear()
   }
 }
