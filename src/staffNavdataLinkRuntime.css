@@ -1,0 +1,19 @@
+.aman-staff-admin-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border: 1px solid #315569;
+  color: #8bdce8 !important;
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.aman-staff-admin-link:hover,
+.aman-staff-admin-link:focus-visible {
+  border-color: #63b5c7;
+  background: #102331;
+  color: #c9f6fb !important;
+}
