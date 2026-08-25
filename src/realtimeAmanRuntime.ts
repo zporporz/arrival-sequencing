@@ -16,8 +16,14 @@ export function canonicalSnapshotIsFresh(updatedAt: unknown, nowMs = Date.now())
   return Number.isFinite(value) && Math.abs(nowMs - value) <= AUTO_SNAPSHOT_MAX_AGE_MS
 }
 
-function serviceDate() {
-  return new Date().toISOString().slice(0, 10)
+export function realtimeUtcServiceDate(nowMs = Date.now()) {
+  return new Date(nowMs).toISOString().slice(0, 10)
+}
+
+export function millisecondsUntilNextUtcServiceDate(nowMs = Date.now()) {
+  const now = new Date(nowMs)
+  const nextUtcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+  return nextUtcMidnight - nowMs
 }
 
 function rowInfo(row: HTMLElement) {
@@ -47,6 +53,7 @@ export function installRealtimeAmanRuntime() {
     leader: boolean
     attempt: number
     reconnectTimer: number | null
+    serviceDate: string
     latestLocal: CanonicalArrival[]
     status: 'CONNECTING' | 'LIVE' | 'DEGRADED'
   }
@@ -55,6 +62,8 @@ export function installRealtimeAmanRuntime() {
   const previewOriginals = new Map<string, Map<HTMLElement, { offset: string; tldt: string }>>()
   let activeDrag: { airport: string; previewId: string; lastSentAt: number } | null = null
   let disposed = false
+  let activeServiceDate = realtimeUtcServiceDate()
+  let serviceDateTimer: number | null = null
 
   const renderHealth = () => {
     const list = document.querySelector<HTMLElement>('.aman-status-list')
@@ -182,19 +191,30 @@ export function installRealtimeAmanRuntime() {
     if (message?.type === 'sequence_commit') dispatchSequenceOrder(message.sequenceOrder)
   }
 
-  const connect = (room: Room) => {
+  const connect = (room: Room, nextServiceDate = activeServiceDate) => {
     if (disposed) return
+    if (room.reconnectTimer != null) {
+      window.clearTimeout(room.reconnectTimer)
+      room.reconnectTimer = null
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const params = new URLSearchParams({ serviceDate: serviceDate(), airport: room.airport })
+    const params = new URLSearchParams({ serviceDate: nextServiceDate, airport: room.airport })
     const socket = new WebSocket(`${protocol}//${window.location.host}/api/sequence/realtime?${params}`)
     room.socket = socket
+    room.serviceDate = nextServiceDate
     socket.addEventListener('open', () => {
+      if (room.socket !== socket || room.serviceDate !== activeServiceDate) {
+        socket.close(1000, 'stale service date')
+        return
+      }
       room.attempt = 0
       room.status = 'LIVE'
       renderHealth()
       window.dispatchEvent(new CustomEvent('aman:realtime-health', { detail: { airport: room.airport, status: 'LIVE' } }))
     })
-    socket.addEventListener('message', (event) => handleMessage(room, event))
+    socket.addEventListener('message', (event) => {
+      if (room.socket === socket && room.serviceDate === activeServiceDate) handleMessage(room, event)
+    })
     const reconnect = () => {
       if (room.socket !== socket || disposed) return
       room.socket = null
@@ -203,18 +223,62 @@ export function installRealtimeAmanRuntime() {
       renderHealth()
       window.dispatchEvent(new CustomEvent('aman:realtime-health', { detail: { airport: room.airport, status: 'DEGRADED' } }))
       const delay = realtimeReconnectDelayMs(room.attempt++)
-      room.reconnectTimer = window.setTimeout(() => connect(room), delay)
+      room.reconnectTimer = window.setTimeout(() => {
+        room.reconnectTimer = null
+        connect(room)
+      }, delay)
     }
     socket.addEventListener('close', reconnect)
     socket.addEventListener('error', () => socket.close())
   }
 
   for (const airport of AIRPORTS) {
-    const room: Room = { airport, socket: null, leader: false, attempt: 0, reconnectTimer: null, latestLocal: [], status: 'CONNECTING' }
+    const room: Room = {
+      airport,
+      socket: null,
+      leader: false,
+      attempt: 0,
+      reconnectTimer: null,
+      serviceDate: activeServiceDate,
+      latestLocal: [],
+      status: 'CONNECTING',
+    }
     rooms.set(airport, room)
     connect(room)
   }
   renderHealth()
+
+  const reconnectForCurrentServiceDate = () => {
+    const nextServiceDate = realtimeUtcServiceDate()
+    if (nextServiceDate === activeServiceDate) return false
+    activeServiceDate = nextServiceDate
+    activeDrag = null
+    previewOriginals.forEach((_value, key) => clearPreview(key))
+    for (const room of rooms.values()) {
+      if (room.reconnectTimer != null) window.clearTimeout(room.reconnectTimer)
+      room.reconnectTimer = null
+      const previousSocket = room.socket
+      room.socket = null
+      room.leader = false
+      room.attempt = 0
+      room.status = 'CONNECTING'
+      previousSocket?.close(1000, 'UTC service date changed')
+      connect(room, nextServiceDate)
+    }
+    renderHealth()
+    return true
+  }
+
+  const scheduleServiceDateCheck = () => {
+    if (disposed) return
+    reconnectForCurrentServiceDate()
+    if (serviceDateTimer != null) window.clearTimeout(serviceDateTimer)
+    serviceDateTimer = window.setTimeout(() => {
+      serviceDateTimer = null
+      scheduleServiceDateCheck()
+    }, millisecondsUntilNextUtcServiceDate() + 50)
+  }
+  scheduleServiceDateCheck()
 
   const onLocalAutoSnapshot = (event: Event) => {
     const predictions = (event as CustomEvent<LocalAutoSnapshotDetail>).detail?.predictions || []
@@ -274,6 +338,7 @@ export function installRealtimeAmanRuntime() {
 
   const onVisibility = () => {
     if (document.visibilityState !== 'visible') return
+    reconnectForCurrentServiceDate()
     for (const room of rooms.values()) {
       if (!room.socket || room.socket.readyState === WebSocket.CLOSED) connect(room)
     }
@@ -291,6 +356,7 @@ export function installRealtimeAmanRuntime() {
 
   return () => {
     disposed = true
+    if (serviceDateTimer != null) window.clearTimeout(serviceDateTimer)
     rooms.forEach((room) => {
       if (room.reconnectTimer != null) window.clearTimeout(room.reconnectTimer)
       room.socket?.close(1000, 'runtime disposed')
