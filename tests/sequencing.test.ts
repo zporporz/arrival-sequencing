@@ -11,6 +11,7 @@ import {
   installManualSequenceReorderRuntime,
   isDownwardSequenceDrag,
   isWithinSequenceDropZone,
+  sequenceInsertionIndexForTarget,
   shouldCommitSequenceReorder,
 } from '../src/manualSequenceReorderRuntime'
 import type { AircraftPerformanceCategory } from '../src/core/api'
@@ -113,6 +114,11 @@ describe('manual drag sequencing', () => {
     expect(isWithinSequenceDropZone(rect, 250, 185)).toBe(true)
     expect(isWithinSequenceDropZone(rect, 250, 179)).toBe(false)
     expect(isWithinSequenceDropZone(rect, 99, 210)).toBe(false)
+  })
+
+  it('inserts before a yellow target without requiring the pointer to cross its centre', () => {
+    expect(sequenceInsertionIndexForTarget(['THA2', 'THA1'], 'THA1', 'THA2')).toBe(0)
+    expect(sequenceInsertionIndexForTarget(['THA1', 'THA2', 'THA3'], 'THA3', 'THA2')).toBe(1)
   })
 
   it('keeps the dragged shortcut TLDT instead of replacing it with the old slot', () => {

@@ -238,19 +238,14 @@ function reconcileGroupAfterRender(airport: string, runway: string) {
   }, 80)
 }
 
-function insertionIndexFromPointer(state: DragOrderState, pointerY: number) {
-  const otherOrder = state.startOrder.filter((identity) => identity !== state.identity)
-  let index = 0
-
-  for (const identity of otherOrder) {
-    const row = rowByIdentity(state.airport, state.runway, identity)
-    if (!row) continue
-    const rect = row.getBoundingClientRect()
-    const centreY = rect.top + rect.height / 2
-    if (centreY > pointerY) index += 1
-  }
-
-  return Math.max(0, Math.min(otherOrder.length, index))
+export function sequenceInsertionIndexForTarget(
+  startOrder: readonly string[],
+  draggedIdentity: string,
+  targetIdentity: string,
+) {
+  const otherOrder = startOrder.filter((identity) => identity !== draggedIdentity)
+  const targetIndex = otherOrder.indexOf(targetIdentity)
+  return targetIndex >= 0 ? targetIndex : Math.max(0, otherOrder.length)
 }
 
 function reorderedOrder(state: DragOrderState) {
@@ -346,7 +341,10 @@ function updateDropPreview(state: DragOrderState, event: PointerEvent) {
   if (!target) return
 
   target.dataset.sequenceReorderDropTarget = 'true'
-  state.targetIndex = insertionIndexFromPointer(state, event.clientY)
+  const targetIdentity = rowIdentity(target)?.identity
+  if (targetIdentity) {
+    state.targetIndex = sequenceInsertionIndexForTarget(state.startOrder, state.identity, targetIdentity)
+  }
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
@@ -514,7 +512,10 @@ export function installManualSequenceReorderRuntime() {
       return
     }
 
-    finished.targetIndex = insertionIndexFromPointer(finished, event.clientY)
+    const targetIdentity = finished.dropTarget ? rowIdentity(finished.dropTarget)?.identity : null
+    if (targetIdentity) {
+      finished.targetIndex = sequenceInsertionIndexForTarget(finished.startOrder, finished.identity, targetIdentity)
+    }
     const nextOrder = reorderedOrder(finished)
     const orderChanged = !sameOrder(finished.startOrder, nextOrder)
     // Publish the new rank before React finalises the manual TLDT. The render caused
