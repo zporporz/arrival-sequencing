@@ -38,7 +38,7 @@ type AirportCode = 'VTBD' | 'VTBS'
 type AirportScope = AirportCode | 'BOTH'
 type RunwayMode = 'ARR' | 'DEP' | 'MIX' | 'CLOSED'
 type OperationalState = 'NORMAL' | 'MISSED_APPROACH' | 'DESEQUENCED' | 'REMOVED'
-type PlanningState = 'SEQUENCED' | 'MONITORED' | 'LATE' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
+type PlanningState = 'SEQUENCED' | 'MONITORED' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
 
 type InboundPreview = {
   airport: AirportCode
@@ -176,7 +176,6 @@ const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
 const DRAG_SNAP_MS = 15_000
 const UNKNOWN_DISTANCE_FALLBACK_MINUTES = 45
-const LATE_INSERT_MARGIN_MS = 15_000
 const VTBS_CROSS_RUNWAY_STAGGER_SECONDS = 60
 const VTBD_21L_CALLSIGN_PREFIXES = ['LKY', 'RTN', 'WHK', 'RTAF', 'VMS'] as const
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
@@ -619,16 +618,11 @@ export default function App() {
   const [manualRunways, setManualRunways] = useState<Record<string, string>>({})
   const [stableIds, setStableIds] = useState<Record<string, true>>({})
   const [autoReturnFloorTldt, setAutoReturnFloorTldt] = useState<Record<string, string>>({})
-  const [latePendingIds, setLatePendingIds] = useState<Record<string, true>>({})
   const [operationalStateByKey, setOperationalStateByKey] = useState<Record<string, OperationalState>>({})
   const [reservedGapSecondsByKey, setReservedGapSecondsByKey] = useState<Record<string, number>>({})
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [opsMenu, setOpsMenu] = useState<OpsMenuState | null>(null)
   const dragRef = useRef<DragState | null>(null)
-  const initializedAirportsRef = useRef<Set<AirportCode>>(new Set())
-  const insideProcessingByAirportRef = useRef<Record<AirportCode, Set<string>>>({ VTBD: new Set(), VTBS: new Set() })
-  const latePendingIdsRef = useRef<Record<string, true>>({})
-  const liveSequenceRef = useRef<AmanSequenceRow[]>([])
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
   const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig), [operationalConfig])
@@ -724,10 +718,8 @@ export default function App() {
 
   const liveSequencedPredictions = useMemo(() => effectiveLivePredictions.filter((prediction) => {
     const state = operationalStateByKey[predictionFlightKey(prediction)] ?? 'NORMAL'
-    return state === 'NORMAL'
-      && isWithinProcessingRadius(prediction, processingNowMs)
-      && !latePendingIds[prediction.id]
-  }), [effectiveLivePredictions, latePendingIds, operationalStateByKey, processingNowMs])
+    return state === 'NORMAL' && isWithinProcessingRadius(prediction, processingNowMs)
+  }), [effectiveLivePredictions, operationalStateByKey, processingNowMs])
 
   const gapAfterSecondsById = useMemo(() => {
     const result: Record<string, number> = {}
@@ -775,8 +767,6 @@ export default function App() {
     () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds, gapAfterSecondsById, autoReturnFloorTldt),
     [autoReturnFloorTldt, gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds],
   )
-  liveSequenceRef.current = liveSequence
-
   const activeSequence = demoMode ? demoSequence : liveSequence
   const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE').length, [inbound])
   const liveTmaCount = useMemo(() => inbound.filter(({ flight }) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude) && distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, flight.latitude as number, flight.longitude as number) <= BANGKOK_TMA_WORKING_RADIUS_NM).length, [inbound])
@@ -869,7 +859,6 @@ export default function App() {
         if (operationalState === 'MISSED_APPROACH') planningState = 'MISSED'
         else if (operationalState === 'DESEQUENCED') planningState = 'DESEQUENCED'
         else if (operationalState === 'REMOVED') planningState = 'REMOVED'
-        else if (latePendingIds[item.id]) planningState = 'LATE'
         else if (prediction && isWithinProcessingRadius(prediction, processingNowMs)) planningState = 'SEQUENCED'
         else planningState = 'MONITORED'
 
@@ -881,16 +870,15 @@ export default function App() {
           aircraft: item.flight.aircraft || '----',
           refFix: item.refFix || '----',
           eta: item.predictedIawpAt,
-          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${AMAN_PROCESSING_RADIUS_NM} NM PROCESSING RADIUS` : ''}${planningState === 'LATE' ? ' · LATE INSERT PENDING ATC ACCEPTANCE' : ''}${planningState === 'MISSED' ? ' · MISSED APPROACH / AWAITING REINSERT' : ''}${planningState === 'DESEQUENCED' ? ' · DESEQUENCED / AWAITING REINSERT' : ''}${planningState === 'REMOVED' ? ' · REMOVED FROM SEQUENCE' : ''}${distanceText}${item.reason ? ` · ${item.reason}` : ''}`,
+          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${AMAN_PROCESSING_RADIUS_NM} NM PROCESSING RADIUS` : ''}${planningState === 'MISSED' ? ' · MISSED APPROACH / AWAITING REINSERT' : ''}${planningState === 'DESEQUENCED' ? ' · DESEQUENCED / AWAITING REINSERT' : ''}${planningState === 'REMOVED' ? ' · REMOVED FROM SEQUENCE' : ''}${distanceText}${item.reason ? ` · ${item.reason}` : ''}`,
           planningState,
           processingDistanceNm: item.processingDistanceNm,
           operationalState,
         }
       }),
-  [demoMode, demoSequence, inbound, latePendingIds, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
+  [demoMode, demoSequence, inbound, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
 
   const monitoredInboundCount = displayInboundRows.filter((item) => item.planningState === 'MONITORED').length
-  const latePendingCount = displayInboundRows.filter((item) => item.planningState === 'LATE').length
   const operationalQueueCount = displayInboundRows.filter((item) => ['MISSED', 'DESEQUENCED', 'REMOVED'].includes(item.planningState)).length
   const displayTmaCount = demoMode ? Math.min(8, demoSequence.length) : liveTmaCount
   const displayTotCount = demoMode ? demoSequence.length : inbound.length
@@ -927,16 +915,6 @@ export default function App() {
     if (Number.isFinite(value) && value > 0) {
       setSpacingNm((current) => ({ ...current, [spacingKey(airport, runway)]: value }))
     }
-  }
-
-  const acceptLateInsert = (id: string) => {
-    setLatePendingIds((current) => {
-      if (!current[id]) return current
-      const next = { ...current }
-      delete next[id]
-      latePendingIdsRef.current = next
-      return next
-    })
   }
 
   const setOperationalState = (airport: AirportCode, callsign: string, state: OperationalState) => {
@@ -1037,38 +1015,6 @@ export default function App() {
       const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
 
-      const activeIds = new Set(previews.map((item) => item.id))
-      const nextLatePending: Record<string, true> = { ...latePendingIdsRef.current }
-      for (const id of Object.keys(nextLatePending)) {
-        if (!activeIds.has(id)) delete nextLatePending[id]
-      }
-
-      const nowMs = Date.now()
-      for (const result of results) {
-        const wasInitialized = initializedAirportsRef.current.has(result.airport)
-        const previousInside = insideProcessingByAirportRef.current[result.airport]
-        const insideNow = new Set<string>()
-        const latestExistingTarget = liveSequenceRef.current
-          .filter((row) => rowAirport(row.id) === result.airport)
-          .reduce((latest, row) => Math.max(latest, new Date(row.tldt).getTime()), Number.NEGATIVE_INFINITY)
-
-        for (const item of result.resolved) {
-          const prediction = item.prediction
-          if (!prediction || !isWithinProcessingRadius(prediction, nowMs)) continue
-          insideNow.add(prediction.id)
-          if (!wasInitialized || previousInside.has(prediction.id)) continue
-          const naturalMs = naturalLandingTimeMs(prediction)
-          if (Number.isFinite(latestExistingTarget) && naturalMs < latestExistingTarget - LATE_INSERT_MARGIN_MS) {
-            nextLatePending[prediction.id] = true
-          }
-        }
-
-        insideProcessingByAirportRef.current[result.airport] = insideNow
-        initializedAirportsRef.current.add(result.airport)
-      }
-
-      latePendingIdsRef.current = nextLatePending
-      setLatePendingIds(nextLatePending)
       setInbound(previews.sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
       setLivePredictions(predictions)
       setFetchedAt(fetchedTimes.at(-1) ?? null)
@@ -1201,7 +1147,6 @@ export default function App() {
   }
 
   const reinsertInbound = (item: DisplayInboundRow) => {
-    acceptLateInsert(item.id)
     setOperationalState(item.airport, item.callsign, 'NORMAL')
   }
 
@@ -1273,7 +1218,6 @@ export default function App() {
             <span title={`MAESTRO processing coverage ${AMAN_PROCESSING_RADIUS_BAND_NM.MIN}-${AMAN_PROCESSING_RADIUS_BAND_NM.MAX} NM; project admission at outer edge`}>RADIUS {AMAN_PROCESSING_RADIUS_NM} NM</span>
             <span>ETA-FF {AMAN_ETA_FF_REFRESH_SECONDS} SEC</span>
             <label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label>
-            {latePendingCount > 0 && <span className="aman-late-alert">LATE INSERT {latePendingCount}</span>}
             {(capacityOverload || matrixOverloadCount > 0) && <span className="aman-capacity-alert">OVERLOAD</span>}
             <span className="aman-capacity-chip">AAR {capacitySummary}</span>
             <span className="is-drag-enabled">DRAG = SET TARGET · DBL CLICK = RETURN AUTO · RIGHT CLICK = OPS</span>
@@ -1349,8 +1293,8 @@ export default function App() {
             })}
           </div>
           {!loading && !visibleSequence.length && !demoMode && <div className="aman-empty-sequence">
-            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : latePendingCount ? 'LATE INSERT AWAITING ATC' : operationalQueueCount ? 'TRAFFIC DESEQUENCED / MISSED' : monitoredInboundCount ? 'INBOUND OUTSIDE PROCESSING RADIUS' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
-            <span>{trafficError || (latePendingCount ? `${latePendingCount} inbound would enter an established sequence. Accept it from Inbound before resequencing.` : operationalQueueCount ? `${operationalQueueCount} flight(s) are outside the active sequence by controller action. Use REINSERT in Inbound.` : monitoredInboundCount ? `${monitoredInboundCount} inbound monitored outside the ${AMAN_PROCESSING_RADIUS_NM} NM processing boundary.` : activeArrivalRunways.length ? `No live inbound inside the ${AMAN_PROCESSING_RADIUS_NM} NM processing boundary right now.` : 'Set at least one runway to ARR or MIX.')}</span>
+            <strong>{trafficError ? 'LIVE TRAFFIC ERROR' : operationalQueueCount ? 'TRAFFIC DESEQUENCED / MISSED' : monitoredInboundCount ? 'INBOUND OUTSIDE PROCESSING RADIUS' : activeArrivalRunways.length ? 'NO SEQUENCEABLE INBOUND' : 'NO ARRIVAL RUNWAY ACTIVE'}</strong>
+            <span>{trafficError || (operationalQueueCount ? `${operationalQueueCount} flight(s) are outside the active sequence by controller action. Use REINSERT in Inbound.` : monitoredInboundCount ? `${monitoredInboundCount} inbound monitored outside the ${AMAN_PROCESSING_RADIUS_NM} NM processing boundary.` : activeArrivalRunways.length ? `No live inbound inside the ${AMAN_PROCESSING_RADIUS_NM} NM processing boundary right now.` : 'Set at least one runway to ARR or MIX.')}</span>
           </div>}
         </div>
       </section>
@@ -1365,7 +1309,6 @@ export default function App() {
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
                 {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON{Number.isFinite(item.processingDistanceNm) ? ` ${Math.round(Number(item.processingDistanceNm))}NM` : ''}</small>}
-                {item.planningState === 'LATE' && <button type="button" className="aman-late-insert-button" onClick={() => acceptLateInsert(item.id)}>INSERT</button>}
                 {item.planningState === 'MISSED' && <button type="button" className="aman-reinsert-button is-missed" onClick={() => reinsertInbound(item)}>MISSED · REINSERT</button>}
                 {item.planningState === 'DESEQUENCED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>DSEQ · REINSERT</button>}
                 {item.planningState === 'REMOVED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>REM · REINSERT</button>}
@@ -1387,7 +1330,6 @@ export default function App() {
             <div><dt>Nominal timing</dt><dd className={operationalConfigError ? 'is-warning' : ''}>{operationalTimingCount ? `MASTER DATA · ${operationalTimingCount} FIX` : operationalConfigError ? 'CODE FALLBACK' : 'LOADING'}</dd></div>
             <div><dt>Processing radius</dt><dd>{AMAN_PROCESSING_RADIUS_BAND_NM.MIN}-{AMAN_PROCESSING_RADIUS_BAND_NM.MAX} NM · ENTRY {AMAN_PROCESSING_RADIUS_NM}</dd></div>
             <div><dt>Monitored inbound</dt><dd>{monitoredInboundCount}</dd></div>
-            <div><dt>Late insert</dt><dd className={latePendingCount ? 'is-warning' : ''}>{latePendingCount ? `${latePendingCount} PENDING` : 'NONE'}</dd></div>
             <div><dt>ETA-FF refresh</dt><dd>{AMAN_ETA_FF_REFRESH_SECONDS} SEC</dd></div>
             <div><dt>Live route ETA</dt><dd>{liveRouteCount}/{inbound.length}</dd></div>
             <div><dt>Delay splitting</dt><dd>TDLY → EDLY + ADLY</dd></div>

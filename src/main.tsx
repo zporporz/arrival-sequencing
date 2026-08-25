@@ -47,7 +47,6 @@ import { installManualSequenceReorderRuntime } from './manualSequenceReorderRunt
 import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
 import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
-import { installKnownInboundAdmissionRuntime } from './knownInboundAdmissionRuntime'
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
@@ -89,7 +88,6 @@ function AppWithRuntime() {
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
     const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
-    const removeKnownInboundAdmissionRuntime = installKnownInboundAdmissionRuntime()
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
@@ -117,7 +115,6 @@ function AppWithRuntime() {
       removeManualSequenceReorderRuntime()
       removeTimelineDisplayScaleRuntime()
       removeManualTargetSyncCompatRuntime()
-      removeKnownInboundAdmissionRuntime()
       removeMonitoredTimelineRuntime()
       removeMaestroOpsMenuRuntime()
       removeLandedHistoryRuntime()
