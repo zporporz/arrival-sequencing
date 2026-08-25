@@ -26,6 +26,9 @@ type EtaStageState = {
   displayedMs: number | null
   offBlockMs: number | null
   dynamicAirborneLatched: boolean
+  stableEtaMs: number | null
+  iawpCrossingMs: number | null
+  iawpFix: string | null
   touchedAtMs: number
 }
 
@@ -36,6 +39,7 @@ const STAGE_STORAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 const AIRBORNE_DYNAMIC_FL300_FT = 30_000
 const AIRBORNE_CRUISE_CAPTURE_TOLERANCE_FT = 1_000
 const AIRBORNE_DYNAMIC_DEADBAND_MS = 30_000
+const STABLE_ETA_LOCK_WINDOW_MS = 15 * 60_000
 
 export function resetArrivalEtaStageState() {
   stageStateByFlight.clear()
@@ -74,6 +78,9 @@ function loadPersistedStageState(key: string, nowMs: number): EtaStageState | nu
       displayedMs: finite(parsed.displayedMs) ? parsed.displayedMs : null,
       offBlockMs: finite(parsed.offBlockMs) ? parsed.offBlockMs : null,
       dynamicAirborneLatched: parsed.dynamicAirborneLatched === true,
+      stableEtaMs: finite(parsed.stableEtaMs) ? parsed.stableEtaMs : null,
+      iawpCrossingMs: finite(parsed.iawpCrossingMs) ? parsed.iawpCrossingMs : null,
+      iawpFix: typeof parsed.iawpFix === 'string' ? parsed.iawpFix : null,
       touchedAtMs: parsed.touchedAtMs,
     }
   } catch {
@@ -181,6 +188,9 @@ function groundStageEstimate(
   const etoMs = etotMs + Math.max(0, flight.filedEetSeconds - nominalStarSeconds) * 1000
   state.phase = 'GROUND'
   state.displayedMs = etoMs
+  state.stableEtaMs = null
+  state.iawpCrossingMs = null
+  state.iawpFix = null
   state.touchedAtMs = nowMs
 
   return {
@@ -229,6 +239,9 @@ export function estimateIawpArrival(
       displayedMs: null,
       offBlockMs: null,
       dynamicAirborneLatched: false,
+      stableEtaMs: null,
+      iawpCrossingMs: null,
+      iawpFix: null,
       touchedAtMs: nowMs,
     }
   existing.touchedAtMs = nowMs
@@ -246,6 +259,45 @@ export function estimateIawpArrival(
   const referenceIso = flight.connectedAt || fetchedAt
   const takeoffBaselineMs = estimateFromTakeoff(flight, nominalStarSeconds, referenceIso)
   const legacyMs = safeTime(legacy.predictedIawpAt)
+  const normalizedRefFix = refFix.trim().toUpperCase()
+
+  // ETA-FF stops being an estimate once the aircraft has crossed the feeder fix.
+  // The legacy route model can back-estimate that crossing on every refresh, but
+  // changing groundspeed after the fix would otherwise keep rewriting history.
+  if (existing.iawpFix && existing.iawpFix !== normalizedRefFix) {
+    existing.stableEtaMs = null
+    existing.iawpCrossingMs = null
+    existing.iawpFix = null
+  }
+  if (existing.stableEtaMs != null && existing.iawpFix === normalizedRefFix) {
+    existing.phase = 'AIRBORNE'
+    existing.offBlockMs = null
+    existing.displayedMs = existing.stableEtaMs
+    persistStageState(key, existing)
+    return {
+      ...legacy,
+      predictedIawpAt: new Date(existing.stableEtaMs).toISOString(),
+      reason: `${legacy.reason || 'ETA LIVE'} · STABLE ETA LOCKED`,
+    }
+  }
+  if (legacy.pastCrossing && legacyMs != null && existing.iawpCrossingMs == null) {
+    existing.iawpCrossingMs = legacyMs
+    existing.stableEtaMs = legacyMs
+    existing.iawpFix = normalizedRefFix
+  }
+  if (existing.iawpCrossingMs != null && existing.iawpFix === normalizedRefFix) {
+    existing.phase = 'AIRBORNE'
+    existing.offBlockMs = null
+    existing.displayedMs = existing.iawpCrossingMs
+    persistStageState(key, existing)
+    return {
+      ...legacy,
+      predictedIawpAt: new Date(existing.iawpCrossingMs).toISOString(),
+      pastCrossing: true,
+      remainingNm: 0,
+      reason: `${legacy.reason || 'IAWP PASSED'} · IAWP CROSSING LATCHED`,
+    }
+  }
   const triggerFt = dynamicAirborneTriggerFt(flight)
   const altitudeFt = finite(flight.altitude) && flight.altitude >= 0 ? flight.altitude : null
   const wasDynamic = existing.dynamicAirborneLatched
@@ -291,11 +343,16 @@ export function estimateIawpArrival(
       ? candidateMs
       : Math.min(existing.displayedMs, candidateMs)
   }
+
+  if (existing.displayedMs != null && existing.displayedMs - nowMs <= STABLE_ETA_LOCK_WINDOW_MS) {
+    existing.stableEtaMs = existing.displayedMs
+    existing.iawpFix = normalizedRefFix
+  }
   persistStageState(key, existing)
 
   if (existing.displayedMs == null) return legacy
 
-  const displayedIso = new Date(existing.displayedMs).toISOString()
+  const displayedIso = new Date(existing.stableEtaMs ?? existing.displayedMs).toISOString()
   const heldLaterLive = legacyMs != null && legacyMs > existing.displayedMs
   const acceptedEarlier = legacyMs != null && legacyMs <= existing.displayedMs
   const baselineLabel = takeoffBaselineMs != null ? new Date(takeoffBaselineMs).toISOString() : 'NA'
@@ -303,10 +360,11 @@ export function estimateIawpArrival(
   const etaStageLabel = existing.dynamicAirborneLatched
     ? `AIRBORNE DYNAMIC LATCHED${descentStageObserved ? ' · DESCENT OBSERVED' : ''}${dynamicDeadbandHeld ? ' · DEADBAND HELD' : ' · LIVE BOTH-DIRECTIONS'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
     : `AIRBORNE MONOTONIC ${heldLaterLive ? 'HELD EARLIER DISPLAY' : acceptedEarlier ? 'ACCEPTED EARLIER/EQUAL LIVE' : 'TAKEOFF BASELINE'} · ALT ${altitudeLabel} · TRIGGER ${Math.round(triggerFt)}FT`
+  const stableLabel = existing.stableEtaMs != null ? ' · STABLE ETA LOCKED' : ''
 
   return {
     ...legacy,
     predictedIawpAt: displayedIso,
-    reason: `${legacy.reason || 'ETA LIVE'} · ${etaStageLabel} · ATOT BASE ${baselineLabel}`,
+    reason: `${legacy.reason || 'ETA LIVE'} · ${etaStageLabel} · ATOT BASE ${baselineLabel}${stableLabel}`,
   }
 }

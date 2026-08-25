@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { estimateIawpArrival, resetArrivalEtaStageState, type RouteGeometry } from '../src/core/arrivalEta'
 import type { IvaoArrivalTrafficFlight } from '../src/core/api'
-import { resolveFrozenTrigger } from '../src/etaFfLifecycleRuntime'
+import { installEtaFfLifecycleRuntime, resolveFrozenTrigger } from '../src/etaFfLifecycleRuntime'
 import { evaluateFinalTenNm } from '../src/finalTenNmRuntime'
 
 const now = Date.parse('2026-08-25T10:00:00.000Z')
@@ -60,6 +60,29 @@ const geometry: RouteGeometry = {
   }],
 }
 
+const crossedGeometry: RouteGeometry = {
+  origin: 'START',
+  destination: 'END',
+  totalDistance: 120,
+  errors: [],
+  segments: [
+    {
+      from: { identifier: 'START', type: 'FIX', coordinates: { lat: 0, lon: 0 } },
+      to: { identifier: 'NORTA', type: 'FIX', coordinates: { lat: 0, lon: 1 } },
+      distance: 60,
+      bearing: 90,
+      cumulativeDistance: 60,
+    },
+    {
+      from: { identifier: 'NORTA', type: 'FIX', coordinates: { lat: 0, lon: 1 } },
+      to: { identifier: 'END', type: 'FIX', coordinates: { lat: 0, lon: 2 } },
+      distance: 60,
+      bearing: 90,
+      cumulativeDistance: 120,
+    },
+  ],
+}
+
 afterEach(() => {
   resetArrivalEtaStageState()
   window.localStorage.clear()
@@ -104,7 +127,63 @@ describe('FROZEN detection', () => {
   })
 })
 
+describe('STABLE ETA lock', () => {
+  it('keeps an AUTO ETA fixed from STABLE and advances status using the locked time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    const etaCell = document.createElement('span')
+    etaCell.textContent = '10:14'
+    document.body.innerHTML = `
+      <div class="aman-flight-row" data-final-geometry-available="true"
+        title="ETA-FF 10:14:00Z · STA/TLDT 10:30:00Z · STA-FF/TTO 10:14:00Z · VTBS RWY 19">
+        <span></span><strong>THA123</strong><span></span><span></span>
+      </div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    row.appendChild(etaCell)
+
+    const removeRuntime = installEtaFfLifecycleRuntime()
+    expect(row.dataset.flightStatus).toBe('STABLE')
+    expect(row.dataset.etaFfLocked).toBe('true')
+    expect(etaCell.textContent).toBe('10:14')
+
+    row.title = 'ETA-FF 10:18:00Z · STA/TLDT 10:30:00Z · STA-FF/TTO 10:14:00Z · VTBS RWY 19'
+    etaCell.textContent = '10:18'
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(row.dataset.flightStatus).toBe('STABLE')
+    expect(etaCell.textContent).toBe('10:14')
+
+    vi.advanceTimersByTime(10 * 60_000)
+    expect(row.dataset.flightStatus).toBe('SUPERSTABLE')
+    expect(etaCell.textContent).toBe('10:14')
+    removeRuntime()
+    vi.useRealTimers()
+  })
+})
+
 describe('dynamic ETA', () => {
+  it('latches the actual feeder-fix crossing instead of changing ETA after the STAR entry', () => {
+    const first = estimateIawpArrival(flight({
+      sessionId: 'passed-iawp',
+      longitude: 1.2,
+      groundSpeed: 300,
+    }), crossedGeometry, 'NORTA', 0, new Date(now).toISOString())
+    const laterSampleTime = now + 60_000
+    const afterCrossing = estimateIawpArrival(flight({
+      sessionId: 'passed-iawp',
+      longitude: 1.5,
+      groundSpeed: 100,
+      trackTimestamp: new Date(laterSampleTime).toISOString(),
+    }), crossedGeometry, 'NORTA', 0, new Date(laterSampleTime).toISOString())
+
+    expect(first.pastCrossing).toBe(true)
+    expect(afterCrossing.pastCrossing).toBe(true)
+    expect(afterCrossing.predictedIawpAt).toBe(first.predictedIawpAt)
+    expect(afterCrossing.reason).toContain('STABLE ETA LOCKED')
+  })
+
   it('puts a late-joining controller directly into dynamic ETA during descent', () => {
     const descendingFlight = flight({
       sessionId: 'late-controller-descent',
@@ -134,11 +213,12 @@ describe('dynamic ETA', () => {
     expect(estimate.reason).toContain('LIVE BOTH-DIRECTIONS')
   })
 
-  it('allows ETA to move later after a hold/vector slowdown at cruise altitude', () => {
-    const first = estimateIawpArrival(flight({ groundSpeed: 600 }), geometry, 'NORTA', 0, new Date(now).toISOString())
+  it('allows an UNSTABLE ETA to move later after a hold/vector slowdown at cruise altitude', () => {
+    const first = estimateIawpArrival(flight({ groundSpeed: 400, longitude: 0 }), geometry, 'NORTA', 0, new Date(now).toISOString())
     const laterSampleTime = now + 60_000
     const slowed = estimateIawpArrival(flight({
       groundSpeed: 100,
+      longitude: 0,
       trackTimestamp: new Date(laterSampleTime).toISOString(),
     }), geometry, 'NORTA', 0, new Date(laterSampleTime).toISOString())
 
@@ -146,5 +226,22 @@ describe('dynamic ETA', () => {
     expect(slowed.source).toBe('LIVE_ROUTE')
     expect(new Date(slowed.predictedIawpAt!).getTime()).toBeGreaterThan(new Date(first.predictedIawpAt!).getTime())
     expect(slowed.reason).toContain('LIVE BOTH-DIRECTIONS')
+  })
+
+  it('does not move ETA after an AUTO flight enters STABLE', () => {
+    const first = estimateIawpArrival(flight({
+      sessionId: 'stable-auto',
+      groundSpeed: 600,
+    }), geometry, 'NORTA', 0, new Date(now).toISOString())
+    const laterSampleTime = now + 60_000
+    const slowed = estimateIawpArrival(flight({
+      sessionId: 'stable-auto',
+      groundSpeed: 100,
+      trackTimestamp: new Date(laterSampleTime).toISOString(),
+    }), geometry, 'NORTA', 0, new Date(laterSampleTime).toISOString())
+
+    expect(new Date(first.predictedIawpAt!).getTime() - now).toBeLessThanOrEqual(15 * 60_000)
+    expect(slowed.predictedIawpAt).toBe(first.predictedIawpAt)
+    expect(slowed.reason).toContain('STABLE ETA LOCKED')
   })
 })

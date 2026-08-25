@@ -139,9 +139,11 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
     return 'STABLE'
   }
 
-  const liveEta = liveEtaFfMs(row, now)
-  if (liveEta != null) {
-    const minutesToIawp = (liveEta - now.getTime()) / 60_000
+  // Once STABLE has captured ETA-FF, use that fixed time for all later lifecycle
+  // transitions. A changed live ETA must neither move the time nor demote the status.
+  const lifecycleEta = lockedEtaFfByKey.get(key) ?? liveEtaFfMs(row, now)
+  if (lifecycleEta != null) {
+    const minutesToIawp = (lifecycleEta - now.getTime()) / 60_000
     if (minutesToIawp <= SUPERSTABLE_BEFORE_IAWP_MINUTES) return 'SUPERSTABLE'
     if (minutesToIawp <= STABLE_BEFORE_IAWP_MINUTES) return 'STABLE'
     return 'UNSTABLE'
@@ -154,18 +156,12 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
 
 function resolveDisplayedEta(row: HTMLElement, now: Date, status: AmanFlightStatus, key: string) {
   const liveEta = liveEtaFfMs(row, now)
-  const manual = isManualTarget(row)
 
-  // Preserve the existing ETA-FF/ETO lock semantics exactly.
+  // UNSTABLE is the only live ETA stage. Entering STABLE (automatically by time or
+  // immediately through controller takeover) hard-locks ETA-FF; SUPERSTABLE and
+  // FROZEN retain that same captured value.
   if (status === 'UNSTABLE') {
     lockedEtaFfByKey.delete(key)
-  } else if (status === 'STABLE' || status === 'SUPERSTABLE') {
-    if (!manual) {
-      lockedEtaFfByKey.delete(key)
-    } else if (!lockedEtaFfByKey.has(key)) {
-      const takeoverEta = liveEta ?? displayedEtaFfMs(row, now)
-      if (takeoverEta != null) lockedEtaFfByKey.set(key, takeoverEta)
-    }
   } else if (!lockedEtaFfByKey.has(key)) {
     const entryEta = liveEta ?? displayedEtaFfMs(row, now)
     if (entryEta != null) lockedEtaFfByKey.set(key, entryEta)

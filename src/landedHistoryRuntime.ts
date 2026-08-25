@@ -8,6 +8,7 @@ type LandedRecord = {
   raw_session_id?: string | null
   aircraft_type: string | null
   landed_at: string
+  last_seen_at?: string | null
   snapshot?: Record<string, unknown>
 }
 
@@ -41,6 +42,38 @@ const POINTER_ID = 70425
 const testLandedByKey = new Map<string, LandedRecord>()
 const testMissedByKey = new Set<string>()
 const lastRunwayByKey = new Map<string, string>()
+
+function recordTimestamp(value?: string | null) {
+  const parsed = new Date(value || '').getTime()
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+
+export function dedupeLandedRecords(records: LandedRecord[]) {
+  const collapsed = new Map<string, LandedRecord>()
+
+  for (const record of records) {
+    const airport = String(record.airport || '').trim().toUpperCase()
+    const callsign = String(record.callsign || '').trim().toUpperCase()
+    if (!airport || !callsign) continue
+
+    const key = `${airport}:${callsign}`
+    const existing = collapsed.get(key)
+    if (!existing) {
+      collapsed.set(key, record)
+      continue
+    }
+
+    const existingLandedMs = recordTimestamp(existing.landed_at)
+    const recordLandedMs = recordTimestamp(record.landed_at)
+    const earliestLandedAt = recordLandedMs < existingLandedMs ? record.landed_at : existing.landed_at
+    const existingFreshness = Math.max(recordTimestamp(existing.last_seen_at), existingLandedMs)
+    const recordFreshness = Math.max(recordTimestamp(record.last_seen_at), recordLandedMs)
+    const freshest = recordFreshness > existingFreshness ? record : existing
+    collapsed.set(key, { ...freshest, landed_at: earliestLandedAt })
+  }
+
+  return [...collapsed.values()].sort((left, right) => recordTimestamp(right.landed_at) - recordTimestamp(left.landed_at))
+}
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -444,7 +477,7 @@ export function installLandedHistoryRuntime() {
       }
     }))
     if (disposed || testTrafficEnabled()) return
-    liveRecords = results.flat()
+    liveRecords = dedupeLandedRecords(results.flat())
     render()
   }
 

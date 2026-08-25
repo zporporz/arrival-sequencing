@@ -45,6 +45,42 @@ function airlineAircraft(pilot) {
   return String(pilot?.flightPlan?.aircraftId || pilot?.flightPlan?.aircraft?.icaoCode || '').trim().toUpperCase() || null;
 }
 
+function timestampMs(value) {
+  const parsed = new Date(value || '').getTime();
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+// IVAO may assign a new raw session id after a reconnect while the aircraft is
+// still on the ground. Keep the first observed landing time, but retain the
+// freshest session/snapshot so missed-approach validation uses the live track.
+export function collapseDuplicateLandings(records) {
+  const collapsed = new Map();
+
+  for (const record of Array.isArray(records) ? records : []) {
+    const airport = String(record?.airport || '').trim().toUpperCase();
+    const callsign = String(record?.callsign || '').trim().toUpperCase();
+    if (!airport || !callsign) continue;
+
+    const key = `${airport}:${callsign}`;
+    const existing = collapsed.get(key);
+    if (!existing) {
+      collapsed.set(key, record);
+      continue;
+    }
+
+    const existingLandedMs = timestampMs(existing.landed_at);
+    const recordLandedMs = timestampMs(record.landed_at);
+    const earliestLandedAt = recordLandedMs < existingLandedMs ? record.landed_at : existing.landed_at;
+    const existingFreshness = Math.max(timestampMs(existing.last_seen_at), existingLandedMs);
+    const recordFreshness = Math.max(timestampMs(record.last_seen_at), recordLandedMs);
+    const freshest = recordFreshness > existingFreshness ? record : existing;
+
+    collapsed.set(key, { ...freshest, landed_at: earliestLandedAt });
+  }
+
+  return [...collapsed.values()].sort((left, right) => timestampMs(right.landed_at) - timestampMs(left.landed_at));
+}
+
 async function suppressedCallsigns(env, serviceDate, airport) {
   try {
     const result = await supabaseAdminRequest(
@@ -155,7 +191,11 @@ export async function onRequestGet(context) {
       `aman_landed_history?select=*&service_date=eq.${serviceDate}&airport=eq.${airport}&landed_at=gte.${encodeURIComponent(cutoff)}&order=landed_at.desc`,
     );
 
-    return json({ airport, fetchedAt: new Date().toISOString(), flights: result.data || [] });
+    return json({
+      airport,
+      fetchedAt: new Date().toISOString(),
+      flights: collapseDuplicateLandings(result.data || []),
+    });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : String(error) }, 500);
   }
