@@ -14,6 +14,7 @@ Last reviewed: 2026-08-25
 - Published / Not Published / Archived states are separate.
 - STAR procedures are optional and editable from Admin.
 - CAAT eAIP review can auto-detect the effective AIRAC, preview mapped STAR differences and requires explicit staff approval before changing master data.
+- Reviewed CAAT records can create missing Thailand airport/runway mappings automatically as Not Published / Timing Pending drafts; nominal timing and publication remain manual safety gates.
 - The current MAESTRO runtime loads effective `fix_timings` from published Timing Active runway flows, refreshes them every 60 seconds and retains code constants as an outage fallback.
 - Configuration history is append-only with field-level diff and rollback.
 - Session history supports close, reopen, archive and restore.

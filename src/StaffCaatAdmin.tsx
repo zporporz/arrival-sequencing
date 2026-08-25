@@ -8,8 +8,8 @@ type Airport = { id: string; icao: string; name: string }
 type Runway = { id: string; airport_id: string; flow: string; label: string; active: boolean; published?: boolean }
 type ExistingStar = { id: string; runway_config_id: string; designator: string; entry_fix: string | null; runway_applicability: string | null; chart_reference: string | null; effective_from: string | null; active: boolean; source: string | null }
 type Dashboard = { airports: Airport[]; runwayConfigs: Runway[]; starProcedures: ExistingStar[] }
-type ReviewStatus = 'NEW' | 'CHANGED' | 'SAME' | 'REVIEW' | 'UNMAPPED'
-type ReviewRow = ParsedAipStar & { key: string; runwayConfigId: string; effectiveFrom: string; selected: boolean; status: ReviewStatus; source?: string | null }
+type ReviewStatus = 'NEW' | 'CHANGED' | 'SAME' | 'REVIEW' | 'DRAFT' | 'UNMAPPED'
+type ReviewRow = ParsedAipStar & { key: string; runwayConfigId: string; inferredFlow: string; effectiveFrom: string; selected: boolean; status: ReviewStatus; source?: string | null }
 
 const EMPTY_DASHBOARD: Dashboard = { airports: [], runwayConfigs: [], starProcedures: [] }
 
@@ -24,9 +24,13 @@ function runwayTokens(value: string) {
   return String(value || '').toUpperCase().match(/\b\d{2}[LRC]?\b/g)?.sort().join('|') || ''
 }
 
+function inferredRunwayFlow(value: string) {
+  return String(value || '').toUpperCase().match(/\b\d{2}[LRC]?\b/g)?.filter((item, index, values) => values.indexOf(item) === index).sort().join('_') || ''
+}
+
 function rowStatus(row: ReviewRow, existing: ExistingStar[]): ReviewStatus {
-  if (!row.runwayConfigId) return 'UNMAPPED'
   if (!row.effectiveFrom) return 'REVIEW'
+  if (!row.runwayConfigId) return row.inferredFlow ? 'DRAFT' : 'UNMAPPED'
   const match = existing.find((item) => item.runway_config_id === row.runwayConfigId
     && item.designator === row.designator
     && String(item.effective_from || '') === row.effectiveFrom)
@@ -60,9 +64,9 @@ export default function StaffCaatAdmin() {
         const airport = dashboard.airports.find((item) => item.icao === record.airport)
         const recordRunways = runwayTokens(record.runwayApplicability)
         const mapped = dashboard.runwayConfigs.find((item) => item.airport_id === airport?.id && runwayTokens(item.label) === recordRunways)
-        const base: ReviewRow = { ...record, key: `${record.airport}:${record.designator}:${record.chartReference}:${index}`, runwayConfigId: mapped?.id || '', effectiveFrom: record.effectiveFrom || result.issue.effectiveDate || '', selected: false, status: 'REVIEW' }
+        const base: ReviewRow = { ...record, key: `${record.airport}:${record.designator}:${record.chartReference}:${index}`, runwayConfigId: mapped?.id || '', inferredFlow: inferredRunwayFlow(record.runwayApplicability), effectiveFrom: record.effectiveFrom || result.issue.effectiveDate || '', selected: false, status: 'REVIEW' }
         const nextStatus = rowStatus(base, dashboard.starProcedures)
-        return { ...base, status: nextStatus, selected: nextStatus === 'NEW' || nextStatus === 'CHANGED' }
+        return { ...base, status: nextStatus, selected: nextStatus === 'NEW' || nextStatus === 'CHANGED' || nextStatus === 'DRAFT' }
       })
       setIssue(result.issue); setRows(nextRows); setStatus(`REVIEW ${nextRows.length} RECORDS`)
     } catch (err) {
@@ -80,16 +84,17 @@ export default function StaffCaatAdmin() {
   }
 
   const approve = async () => {
-    const selected = rows.filter((row) => row.selected && (row.status === 'NEW' || row.status === 'CHANGED'))
-    if (!selected.length || !window.confirm(`Approve ${selected.length} reviewed CAAT STAR record(s) into master data?`)) return
+    const selected = rows.filter((row) => row.selected && ['NEW', 'CHANGED', 'DRAFT'].includes(row.status))
+    const draftCount = selected.filter((row) => row.status === 'DRAFT').length
+    if (!selected.length || !window.confirm(`Approve ${selected.length} reviewed CAAT STAR record(s)?${draftCount ? ` ${draftCount} row(s) will create safe PENDING / Not Published airport-runway drafts.` : ''}`)) return
     setBusy(true); setError(null); setStatus('IMPORTING')
     try {
-      const result = await readJson<{ result: { created: number; updated: number; unchanged: number } }>('/api/admin/aip-import', {
+      const result = await readJson<{ result: { created: number; updated: number; unchanged: number; draftAirportsCreated: number; draftRunwaysCreated: number } }>('/api/admin/aip-import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve', records: selected.map((row) => ({ runwayConfigId: row.runwayConfigId, designator: row.designator, entryFix: row.entryFix, runwayApplicability: row.runwayApplicability, chartReference: row.chartReference, source: row.source, effectiveFrom: row.effectiveFrom })) }),
+        body: JSON.stringify({ action: 'approve', records: selected.map((row) => ({ runwayConfigId: row.runwayConfigId, airport: row.airport, designator: row.designator, entryFix: row.entryFix, runwayApplicability: row.runwayApplicability, chartReference: row.chartReference, source: row.source, effectiveFrom: row.effectiveFrom })) }),
       })
       const summary = result.result
-      setStatus(`DONE · ${summary.created} NEW · ${summary.updated} UPDATED · ${summary.unchanged} SAME`)
+      setStatus(`DONE · ${summary.created} STAR NEW · ${summary.updated} UPDATED · ${summary.draftAirportsCreated} APT DRAFT · ${summary.draftRunwaysCreated} RWY DRAFT`)
       setDashboard(await readJson<Dashboard>('/api/admin/master')); setRows([])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err)); setStatus('IMPORT FAILED')
@@ -104,21 +109,21 @@ export default function StaffCaatAdmin() {
     <main className="caat-main">
       <section className="caat-hero"><div><span>OFFICIAL SOURCE CROSS-CHECK</span><h1>CAAT STAR Review</h1><p>Scan the effective CAAT eAIP, review every mapped STAR and approve only selected records.</p></div><b>{busy ? 'WORKING' : status}</b></section>
       <section className="caat-actions">
-        <button className="primary" disabled={busy || !dashboard.airports.length} onClick={() => void scan()}>SCAN CURRENT CAAT AIRAC</button>
+        <button className="primary" disabled={busy} onClick={() => void scan()}>SCAN CURRENT CAAT AIRAC</button>
         <button disabled={busy || !selectedCount} onClick={() => void approve()}>APPROVE SELECTED ({selectedCount})</button>
         {issue && <div><strong>AIRAC {issue.airac || issue.folder}</strong><span>Effective {issue.effectiveDate || 'REVIEW DATE'} · Published {issue.publicationDate || '—'}</span><a href={issue.sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a></div>}
       </section>
       {error && <div className="caat-error">{error}</div>}
-      <section className="caat-summary">{(['NEW', 'CHANGED', 'SAME', 'REVIEW', 'UNMAPPED'] as const).map((item) => <article key={item}><span>{item}</span><strong>{rows.filter((row) => row.status === item).length}</strong></article>)}</section>
+      <section className="caat-summary">{(['NEW', 'CHANGED', 'SAME', 'DRAFT', 'REVIEW', 'UNMAPPED'] as const).map((item) => <article key={item}><span>{item}</span><strong>{rows.filter((row) => row.status === item).length}</strong></article>)}</section>
       <section className="caat-table-wrap"><table><thead><tr><th>USE</th><th>STATE</th><th>APT</th><th>STAR</th><th>ENTRY FIX</th><th>RUNWAY FLOW</th><th>EFFECTIVE</th><th>CHART</th></tr></thead><tbody>
         {rows.map((row) => {
           const airport = dashboard.airports.find((item) => item.icao === row.airport)
           const runwayOptions = dashboard.runwayConfigs.filter((item) => item.airport_id === airport?.id)
-          return <tr key={row.key}><td><input type="checkbox" checked={row.selected} disabled={!['NEW', 'CHANGED'].includes(row.status)} onChange={(event) => updateRow(row.key, { selected: event.target.checked })} /></td><td><b className={`state-${row.status.toLowerCase()}`}>{row.status}</b></td><td>{row.airport}</td><td><strong>{row.designator}</strong></td><td><input value={row.entryFix} onChange={(event) => updateRow(row.key, { entryFix: event.target.value.toUpperCase() })} /></td><td><select value={row.runwayConfigId} onChange={(event) => updateRow(row.key, { runwayConfigId: event.target.value })}><option value="">UNMAPPED</option>{runwayOptions.map((runway) => <option value={runway.id} key={runway.id}>{runway.flow} · {runway.label}{runway.published ? ' · PUB' : ''}</option>)}</select></td><td><input type="date" value={row.effectiveFrom} onChange={(event) => updateRow(row.key, { effectiveFrom: event.target.value })} /></td><td title={row.source || ''}>{row.chartReference}<small>{row.runwayApplicability}</small></td></tr>
+          return <tr key={row.key}><td><input type="checkbox" checked={row.selected} disabled={!['NEW', 'CHANGED', 'DRAFT'].includes(row.status)} onChange={(event) => updateRow(row.key, { selected: event.target.checked })} /></td><td><b className={`state-${row.status.toLowerCase()}`}>{row.status}</b></td><td>{row.airport}</td><td><strong>{row.designator}</strong></td><td><input value={row.entryFix} onChange={(event) => updateRow(row.key, { entryFix: event.target.value.toUpperCase() })} /></td><td><select value={row.runwayConfigId} onChange={(event) => updateRow(row.key, { runwayConfigId: event.target.value })}><option value="">{row.inferredFlow ? `AUTO DRAFT · ${row.inferredFlow}` : 'UNMAPPED'}</option>{runwayOptions.map((runway) => <option value={runway.id} key={runway.id}>{runway.flow} · {runway.label}{runway.published ? ' · PUB' : ''}</option>)}</select></td><td><input type="date" value={row.effectiveFrom} onChange={(event) => updateRow(row.key, { effectiveFrom: event.target.value })} /></td><td title={row.source || ''}>{row.chartReference}<small>{row.runwayApplicability}</small></td></tr>
         })}
         {!rows.length && <tr><td colSpan={8} className="empty">Scan CAAT to load a review candidate. Nothing is written until staff approval.</td></tr>}
       </tbody></table></section>
-      <p className="caat-note">CAAT import updates STAR master data only. It never changes nominal fix timings or publishes a runway flow automatically.</p>
+      <p className="caat-note">Missing airports/runways are created automatically as PENDING / Not Published drafts from reviewed CAAT runway data. The importer never invents nominal timings or publishes a runway flow automatically.</p>
     </main>
   </div>
 }

@@ -50,6 +50,17 @@ function normalizeRunway(value) {
     .trim();
 }
 
+export function runwayFlowFromApplicability(value) {
+  const runways = normalizeRunway(value).match(/\b\d{2}[LRC]?\b/g) || [];
+  const unique = [...new Set(runways)].sort();
+  if (!unique.length) return null;
+  return unique.join('_').slice(0, 32);
+}
+
+function sameRunwaySet(left, right) {
+  return runwayFlowFromApplicability(left) === runwayFlowFromApplicability(right);
+}
+
 function sourceForRecord(issue, record) {
   const chartDate = record.effectiveFrom || issue.effectiveDate || 'unknown date';
   return `CAAT eAIP AIRAC ${issue.airac || issue.folder.replace('-AIRAC', '')}; ${record.chartReference}; chart date ${chartDate}`.slice(0, 300);
@@ -182,14 +193,94 @@ async function approveImport(env, auth, body) {
   if (!records.length) throw new Error('No STAR records selected for import');
   if (records.length > 500) throw new Error('Import is limited to 500 STAR records per approval');
 
-  const existingResult = await supabaseAdminRequest(env, 'star_procedures?select=*');
+  const [existingResult, airportsResult, runwaysResult] = await Promise.all([
+    supabaseAdminRequest(env, 'star_procedures?select=*'),
+    supabaseAdminRequest(env, 'airports?select=*'),
+    supabaseAdminRequest(env, 'runway_configs?select=*'),
+  ]);
   const existing = existingResult.data || [];
+  const airports = airportsResult.data || [];
+  const runways = runwaysResult.data || [];
   let created = 0;
   let updated = 0;
   let unchanged = 0;
+  let draftAirportsCreated = 0;
+  let draftRunwaysCreated = 0;
+
+  const ensureDraftMapping = async (input) => {
+    const airportCode = cleanText(input.airport, 4)?.toUpperCase();
+    const runwayLabel = normalizeRunway(input.runwayApplicability);
+    const flow = runwayFlowFromApplicability(runwayLabel);
+    if (!airportCode || !/^VT[A-Z0-9]{2}$/.test(airportCode)) throw new Error('A valid Thailand airport ICAO is required for automatic mapping');
+    if (!flow) throw new Error(`${airportCode}: CAAT runway applicability could not be resolved`);
+
+    let airport = airports.find((item) => item.icao === airportCode);
+    if (!airport) {
+      const inserted = await supabaseAdminRequest(env, 'airports?on_conflict=icao&select=*', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+        body: JSON.stringify([{
+          icao: airportCode,
+          name: `${airportCode} · CAAT eAIP draft`,
+          city: null,
+          fir: 'BANGKOK',
+          active: true,
+          published: false,
+          ...creatorPatch(auth),
+        }]),
+      });
+      airport = inserted.data?.[0];
+      if (!airport) {
+        const reread = await supabaseAdminRequest(env, `airports?icao=eq.${encodeURIComponent(airportCode)}&select=*&limit=1`);
+        airport = reread.data?.[0];
+      } else {
+        draftAirportsCreated += 1;
+      }
+      if (!airport) throw new Error(`${airportCode}: failed to create draft airport`);
+      airports.push(airport);
+    }
+
+    let runway = runways.find((item) => item.airport_id === airport.id && sameRunwaySet(item.label || item.flow, runwayLabel));
+    if (!runway) {
+      const inserted = await supabaseAdminRequest(env, 'runway_configs?on_conflict=airport_id,flow&select=*', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+        body: JSON.stringify([{
+          airport_id: airport.id,
+          flow,
+          label: runwayLabel,
+          timing_status: 'PENDING',
+          active: true,
+          published: false,
+          sort_order: 900,
+          notes: 'Draft mapping created from reviewed CAAT eAIP STAR runway applicability; requires staff timing review before publication.',
+          ...creatorPatch(auth),
+        }]),
+      });
+      runway = inserted.data?.[0];
+      if (!runway) {
+        const reread = await supabaseAdminRequest(env, `runway_configs?airport_id=eq.${encodeURIComponent(airport.id)}&flow=eq.${encodeURIComponent(flow)}&select=*&limit=1`);
+        runway = reread.data?.[0];
+      } else {
+        draftRunwaysCreated += 1;
+      }
+      if (!runway) throw new Error(`${airportCode} RWY ${runwayLabel}: failed to create draft runway flow`);
+      runways.push(runway);
+    }
+    return runway.id;
+  };
 
   for (const input of records) {
-    const runwayConfigId = cleanText(input.runwayConfigId, 64);
+    let runwayConfigId = cleanText(input.runwayConfigId, 64);
+    if (runwayConfigId) {
+      const configuredRunway = runways.find((item) => item.id === runwayConfigId);
+      const configuredAirport = airports.find((item) => item.id === configuredRunway?.airport_id);
+      const inputAirport = cleanText(input.airport, 4)?.toUpperCase();
+      if (!configuredRunway || !configuredAirport) throw new Error('Selected runway mapping no longer exists');
+      if (inputAirport && configuredAirport.icao !== inputAirport) throw new Error(`${inputAirport}: selected runway mapping belongs to ${configuredAirport.icao}`);
+    } else {
+      runwayConfigId = await ensureDraftMapping(input);
+    }
     const designator = cleanText(input.designator, 40)?.toUpperCase();
     const effectiveFrom = cleanText(input.effectiveFrom, 10);
     if (!runwayConfigId || !designator) throw new Error('Every imported STAR needs a runway configuration and designator');
@@ -240,7 +331,7 @@ async function approveImport(env, auth, body) {
     updated += 1;
   }
 
-  return { created, updated, unchanged, total: records.length };
+  return { created, updated, unchanged, draftAirportsCreated, draftRunwaysCreated, total: records.length };
 }
 
 export async function onRequestGet(context) {

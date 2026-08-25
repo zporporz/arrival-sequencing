@@ -212,7 +212,7 @@ Production MAESTRO now loads effective nominal fix timings through authenticated
 - `src/core/amanConstants.ts` remains a non-destructive outage/missing-record fallback.
 - The System panel reports `MASTER DATA` or `CODE FALLBACK` so controllers can see the active source.
 
-CAAT review is available at `/?admin=caat`. It scans the effective CAAT eAIP, maps records to configured runway flows, marks NEW/CHANGED/SAME/REVIEW/UNMAPPED rows and requires explicit staff selection plus confirmation before audited import. A new effective-date revision is inserted instead of overwriting the previous AIRAC revision.
+CAAT review is available at `/?admin=caat`. It scans the effective CAAT eAIP, maps records to configured runway flows and requires explicit staff selection plus confirmation before audited import. When CAAT provides a valid Thailand ICAO and runway group that is missing from Master Data, the review marks it `DRAFT`; approval creates the missing airport and runway flow as Active but Not Published with Timing Pending, then links the STAR. It never invents timing or enables the workspace. A new effective-date STAR revision is inserted instead of overwriting the previous AIRAC revision.
 
 CI uses the Node 24-based `actions/checkout@v5` and `actions/setup-node@v5` actions.
 
