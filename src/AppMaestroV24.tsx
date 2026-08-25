@@ -25,6 +25,7 @@ import {
 import { readAircraftPerformance, readIvaoTraffic, readRouteGeometry, type IvaoArrivalTrafficFlight } from './core/api'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
+  amanSequenceOrderIdentity,
   autoSequenceUnstableArrivals,
   averageDelayMinutes,
   calculateArrivalMetrics,
@@ -1051,16 +1052,33 @@ export default function App() {
   }
 
   const resetRow = (row: AmanSequenceRow, floorAtCurrentTime = true) => {
+    const floorMs = Math.ceil(Date.now() / DRAG_SNAP_MS) * DRAG_SNAP_MS
+    const autoBaseRow = (demoMode ? demoBaseSequence : liveBaseSequence).find((candidate) => candidate.id === row.id)
+    const autoBaseMs = autoBaseRow ? new Date(autoBaseRow.tldt).getTime() : NaN
+    const autoTargetMs = floorAtCurrentTime
+      ? Math.max(floorMs, Number.isFinite(autoBaseMs) ? autoBaseMs : floorMs)
+      : autoBaseMs
+
     setAutoReturnFloorTldt((current) => {
       const next = { ...current }
       if (floorAtCurrentTime) {
-        const floorMs = Math.ceil(Date.now() / DRAG_SNAP_MS) * DRAG_SNAP_MS
         next[row.id] = new Date(floorMs).toISOString()
       } else {
         delete next[row.id]
       }
       return next
     })
+    if (floorAtCurrentTime && Number.isFinite(autoTargetMs)) {
+      const airport = rowAirport(row.id)
+      window.dispatchEvent(new CustomEvent('aman:return-flight-auto', {
+        detail: {
+          airport,
+          runway: row.runway,
+          identity: amanSequenceOrderIdentity(airport, row.callsign),
+          autoTldt: new Date(autoTargetMs).toISOString(),
+        },
+      }))
+    }
     setManualTldt((current) => {
       const next = { ...current }
       delete next[row.id]

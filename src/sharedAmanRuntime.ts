@@ -509,9 +509,17 @@ export function installSharedAmanRuntime() {
   }
 
   const onSequenceReordered = (event: Event) => {
-    const detail = (event as CustomEvent<{ airport?: string; identities?: string[] }>).detail
+    const detail = (event as CustomEvent<{
+      airport?: string
+      identities?: string[]
+      manualIdentity?: string
+      preview?: boolean
+      returnAuto?: boolean
+    }>).detail
+    if (detail?.preview || detail?.returnAuto) return
     const airport = String(detail?.airport || '').trim().toUpperCase()
-    const callsigns = new Set((detail?.identities || []).map((value) =>
+    const persistedIdentities = detail?.manualIdentity ? [detail.manualIdentity] : detail?.identities || []
+    const callsigns = new Set(persistedIdentities.map((value) =>
       String(value).slice(String(value).indexOf(':') + 1).trim().toUpperCase(),
     ))
     if (!airport || !callsigns.size) return

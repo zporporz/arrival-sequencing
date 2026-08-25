@@ -24,6 +24,13 @@ type SharedStateDetail = {
   sequenceOrders?: SharedSequenceOrder[]
 }
 
+type ReturnFlightAutoDetail = {
+  airport?: string
+  runway?: string
+  identity?: string
+  autoTldt?: string
+}
+
 type FakePointerEvent = {
   button: number
   preventDefault: () => void
@@ -347,13 +354,35 @@ export function sequenceOrderAfterCrossedTargets(
   }, [...currentOrder])
 }
 
+export function sequenceOrderAfterAutoReturn(
+  currentOrder: readonly string[],
+  returnedIdentity: string,
+  returnedTargetMs: number,
+  targetMsByIdentity: Readonly<Record<string, number>>,
+) {
+  const retained = currentOrder.filter((identity, index, values) =>
+    identity !== returnedIdentity && values.indexOf(identity) === index)
+  const insertionIndex = retained.findIndex((identity) => {
+    const targetMs = targetMsByIdentity[identity]
+    return Number.isFinite(targetMs) && targetMs > returnedTargetMs
+  })
+  const next = [...retained]
+  next.splice(insertionIndex < 0 ? next.length : insertionIndex, 0, returnedIdentity)
+  return next
+}
+
 function commitReorderedSequence(state: DragOrderState, nextOrder: string[]) {
   commitSharedOrder(state.airport, state.runway, nextOrder)
   // Reordering changes rank only. Keep the dragged aircraft's actual manual TLDT
   // (for example, a shortcut to 15:20) instead of assigning the old 15:25 slot.
   // The normal React cascade then moves only followers whose separation is short.
   window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
-    detail: { identities: nextOrder, airport: state.airport, runway: state.runway },
+    detail: {
+      identities: nextOrder,
+      airport: state.airport,
+      runway: state.runway,
+      manualIdentity: state.identity,
+    },
   }))
 }
 
@@ -723,6 +752,36 @@ export function installManualSequenceReorderRuntime() {
     syncSharedManualOrder((event as CustomEvent<SharedStateDetail>).detail)
   }
 
+  const onReturnFlightAuto = (event: Event) => {
+    const detail = (event as CustomEvent<ReturnFlightAutoDetail>).detail
+    const airport = String(detail?.airport || '').trim().toUpperCase()
+    const runway = String(detail?.runway || '').trim().toUpperCase()
+    const identity = String(detail?.identity || '').trim().toUpperCase()
+    const autoTargetMs = new Date(String(detail?.autoTldt || '')).getTime()
+    if (!airport || !runway || !identity || !Number.isFinite(autoTargetMs)) return
+
+    const scopeRunway = amanSequenceScopeRunway(airport, runway)
+    const currentOrder = currentGroupOrder(airport, scopeRunway)
+    if (!currentOrder.includes(identity)) return
+
+    const targetMsByIdentity: Record<string, number> = {}
+    for (const row of rowsForGroup(airport, scopeRunway)) {
+      const rowId = rowIdentity(row)?.identity
+      const targetMs = rowTargetMs(row)
+      if (rowId && targetMs != null) targetMsByIdentity[rowId] = targetMs
+    }
+    const nextOrder = sequenceOrderAfterAutoReturn(currentOrder, identity, autoTargetMs, targetMsByIdentity)
+    if (sameOrder(currentOrder, nextOrder)) return
+
+    // Release only this aircraft's manual rank. Other aircraft keep their relative
+    // controller order, then the normal cascade recalculates separation once.
+    commitSharedOrder(airport, scopeRunway, nextOrder)
+    window.dispatchEvent(new CustomEvent('aman:sequence-reordered', {
+      detail: { identities: nextOrder, airport, runway: scopeRunway, returnAuto: true },
+    }))
+    reconcileGroupAfterRender(airport, scopeRunway)
+  }
+
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
   document.addEventListener('pointerup', onPointerUp, true)
@@ -730,6 +789,7 @@ export function installManualSequenceReorderRuntime() {
   window.addEventListener('dblclick', onDoubleClick, true)
   document.addEventListener('change', onChange, true)
   window.addEventListener('aman:shared-state', onSharedState)
+  window.addEventListener('aman:return-flight-auto', onReturnFlightAuto)
 
   return () => {
     clearDropPreview()
@@ -745,5 +805,6 @@ export function installManualSequenceReorderRuntime() {
     window.removeEventListener('dblclick', onDoubleClick, true)
     document.removeEventListener('change', onChange, true)
     window.removeEventListener('aman:shared-state', onSharedState)
+    window.removeEventListener('aman:return-flight-auto', onReturnFlightAuto)
   }
 }

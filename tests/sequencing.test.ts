@@ -15,6 +15,7 @@ import {
   mergeVisibleSequenceOrder,
   sequenceInsertionIndexForTarget,
   sequenceOrderAfterCrossedTargets,
+  sequenceOrderAfterAutoReturn,
   sequenceOrderForTarget,
   sequenceOrderRetryDelayMs,
   sequenceTargetChangesOrder,
@@ -214,6 +215,30 @@ describe('manual drag sequencing', () => {
 
     expect(Object.fromEntries(result.map((row) => [row.callsign, row.sequenceIndex]))).toEqual({ THA1: 2, THA2: 1 })
     removeRuntime()
+  })
+
+  it('returns only one aircraft to its AUTO position and preserves all other ranks', () => {
+    expect(sequenceOrderAfterAutoReturn(
+      ['B', 'C', 'D', 'A'],
+      'C',
+      new Date('2026-08-25T10:25:00Z').getTime(),
+      {
+        B: new Date('2026-08-25T10:20:00Z').getTime(),
+        D: new Date('2026-08-25T10:30:00Z').getTime(),
+        A: new Date('2026-08-25T10:40:00Z').getTime(),
+      },
+    )).toEqual(['B', 'C', 'D', 'A'])
+
+    expect(sequenceOrderAfterAutoReturn(
+      ['B', 'C', 'D', 'A'],
+      'A',
+      new Date('2026-08-25T10:25:00Z').getTime(),
+      {
+        B: new Date('2026-08-25T10:20:00Z').getTime(),
+        C: new Date('2026-08-25T10:30:00Z').getTime(),
+        D: new Date('2026-08-25T10:35:00Z').getTime(),
+      },
+    )).toEqual(['B', 'A', 'C', 'D'])
   })
 
   it('activates the yellow target before flight boxes physically overlap', () => {
