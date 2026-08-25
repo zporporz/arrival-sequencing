@@ -451,7 +451,7 @@ function assignPredictionsToRunways(
   })
 }
 
-function applyManualTargetsWithCascade(
+export function applyManualTargetsWithCascade(
   rows: AmanSequenceRow[],
   manualTldt: Record<string, string>,
   runwaySpacingSeconds: Record<string, number>,

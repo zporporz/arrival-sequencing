@@ -97,19 +97,37 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
   element.dataset.flightStatus = status
 }
 
+export function resolveFrozenTrigger(input: {
+  finalTenNm: boolean
+  finalGeometryAvailable: boolean
+  targetLandingMs: number | null
+  nowMs: number
+}) {
+  if (input.finalTenNm) return '10NM_FINAL' as const
+  if (!input.finalGeometryAvailable
+    && input.targetLandingMs != null
+    && (input.targetLandingMs - input.nowMs) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES) {
+    return 'TLDT_4MIN_FALLBACK' as const
+  }
+  return null
+}
+
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
   if (frozenStatusByKey.has(key)) return 'FROZEN'
 
   const finalTenNm = row.dataset.finalTenNm === 'true'
   const finalGeometryAvailable = row.dataset.finalGeometryAvailable === 'true'
   const targetLanding = targetTldtMs(row, now)
-  const fallbackFourMinutes = !finalGeometryAvailable
-    && targetLanding != null
-    && (targetLanding - now.getTime()) / 60_000 <= FROZEN_BEFORE_TLDT_MINUTES
+  const frozenTrigger = resolveFrozenTrigger({
+    finalTenNm,
+    finalGeometryAvailable,
+    targetLandingMs: targetLanding,
+    nowMs: now.getTime(),
+  })
 
-  if (finalTenNm || fallbackFourMinutes) {
+  if (frozenTrigger) {
     frozenStatusByKey.add(key)
-    row.dataset.frozenTrigger = finalTenNm ? '10NM_FINAL' : 'TLDT_4MIN_FALLBACK'
+    row.dataset.frozenTrigger = frozenTrigger
     return 'FROZEN'
   }
 

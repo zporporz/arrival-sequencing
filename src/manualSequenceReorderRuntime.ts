@@ -307,8 +307,23 @@ function clearDropPreview(state = drag) {
   state.dropTarget = null
 }
 
+export function isDownwardSequenceDrag(startY: number, pointerY: number) {
+  return pointerY - startY >= MOVE_TOLERANCE_PX
+}
+
+export function shouldCommitSequenceReorder(input: {
+  startY: number
+  pointerY: number
+  moved: boolean
+  hasDropTarget: boolean
+}) {
+  return input.moved
+    && isDownwardSequenceDrag(input.startY, input.pointerY)
+    && input.hasDropTarget
+}
+
 function isDownwardDrag(state: DragOrderState, pointerY: number) {
-  return pointerY - state.startY >= MOVE_TOLERANCE_PX
+  return isDownwardSequenceDrag(state.startY, pointerY)
 }
 
 function validDropTarget(state: DragOrderState, pointerX: number, pointerY: number) {
@@ -515,7 +530,12 @@ export function installManualSequenceReorderRuntime() {
     if (downward) updateDropPreview(finished, event)
     else clearDropPreview(finished)
 
-    const shouldReorder = finished.moved && downward && Boolean(finished.dropTarget)
+    const shouldReorder = shouldCommitSequenceReorder({
+      startY: finished.startY,
+      pointerY: event.clientY,
+      moved: finished.moved,
+      hasDropTarget: Boolean(finished.dropTarget),
+    })
 
     if (!shouldReorder) {
       clearDropPreview(finished)

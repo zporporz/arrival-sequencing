@@ -89,19 +89,19 @@ function rowRunway(row: HTMLElement) {
   return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || ''
 }
 
-function trackFresh(flight: LiveFlight) {
+function trackFresh(flight: LiveFlight, nowMs = Date.now()) {
   if (!flight.trackTimestamp) return false
   const millis = new Date(flight.trackTimestamp).getTime()
-  return Number.isFinite(millis) && Math.abs(Date.now() - millis) <= TRACK_MAX_AGE_MS
+  return Number.isFinite(millis) && Math.abs(nowMs - millis) <= TRACK_MAX_AGE_MS
 }
 
-function evaluateFinal(airport: string, runway: string, flight: LiveFlight | undefined) {
+export function evaluateFinalTenNm(airport: string, runway: string, flight: LiveFlight | undefined, nowMs = Date.now()) {
   const geometry = RUNWAYS[`${airport}:${runway}`]
   if (!geometry || !flight || flight.onGround !== false) return { available: false, final: false, along: null, cross: null }
   if (!Number.isFinite(flight.latitude)
     || !Number.isFinite(flight.longitude)
     || !Number.isFinite(flight.heading)
-    || !trackFresh(flight)) {
+    || !trackFresh(flight, nowMs)) {
     return { available: false, final: false, along: null, cross: null }
   }
 
@@ -137,7 +137,7 @@ function applyToRows() {
     const airport = rowAirport(row)
     const runway = rowRunway(row)
     const callsign = rowCallsign(row)
-    const result = evaluateFinal(airport, runway, latestFlights.get(`${airport}:${callsign}`))
+    const result = evaluateFinalTenNm(airport, runway, latestFlights.get(`${airport}:${callsign}`))
 
     row.dataset.finalGeometryAvailable = result.available ? 'true' : 'false'
     row.dataset.finalTenNm = result.final ? 'true' : 'false'

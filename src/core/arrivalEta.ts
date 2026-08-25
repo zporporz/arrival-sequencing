@@ -37,6 +37,10 @@ const AIRBORNE_DYNAMIC_FL300_FT = 30_000
 const AIRBORNE_CRUISE_CAPTURE_TOLERANCE_FT = 1_000
 const AIRBORNE_DYNAMIC_DEADBAND_MS = 30_000
 
+export function resetArrivalEtaStageState() {
+  stageStateByFlight.clear()
+}
+
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
