@@ -25,6 +25,9 @@ type EtaStageState = {
   phase: 'GROUND' | 'AIRBORNE'
   displayedMs: number | null
   offBlockMs: number | null
+  groundMovementSamples: number
+  groundMovementStartedMs: number | null
+  lastGroundMovementTrackMs: number | null
   dynamicAirborneLatched: boolean
   stableEtaMs: number | null
   iawpCrossingMs: number | null
@@ -40,6 +43,9 @@ const AIRBORNE_DYNAMIC_FL300_FT = 30_000
 const AIRBORNE_CRUISE_CAPTURE_TOLERANCE_FT = 1_000
 const AIRBORNE_DYNAMIC_DEADBAND_MS = 30_000
 const STABLE_ETA_LOCK_WINDOW_MS = 15 * 60_000
+const PUSHBACK_CONFIRM_GS_KT = 2
+const PUSHBACK_IMMEDIATE_GS_KT = 7
+const PUSHBACK_CONFIRM_SAMPLES = 2
 
 export function resetArrivalEtaStageState() {
   stageStateByFlight.clear()
@@ -77,6 +83,9 @@ function loadPersistedStageState(key: string, nowMs: number): EtaStageState | nu
       phase: parsed.phase,
       displayedMs: finite(parsed.displayedMs) ? parsed.displayedMs : null,
       offBlockMs: finite(parsed.offBlockMs) ? parsed.offBlockMs : null,
+      groundMovementSamples: finite(parsed.groundMovementSamples) ? Math.max(0, parsed.groundMovementSamples) : 0,
+      groundMovementStartedMs: finite(parsed.groundMovementStartedMs) ? parsed.groundMovementStartedMs : null,
+      lastGroundMovementTrackMs: finite(parsed.lastGroundMovementTrackMs) ? parsed.lastGroundMovementTrackMs : null,
       dynamicAirborneLatched: parsed.dynamicAirborneLatched === true,
       stableEtaMs: finite(parsed.stableEtaMs) ? parsed.stableEtaMs : null,
       iawpCrossingMs: finite(parsed.iawpCrossingMs) ? parsed.iawpCrossingMs : null,
@@ -112,6 +121,34 @@ function isAirborne(flight: IvaoArrivalTrafficFlight) {
 
 function isDeparting(flight: IvaoArrivalTrafficFlight) {
   return String(flight.state || '').trim().toLowerCase() === 'departing'
+}
+
+function detectGroundMovementDeparture(
+  flight: IvaoArrivalTrafficFlight,
+  state: EtaStageState,
+  nowMs: number,
+) {
+  const groundSpeedKt = finite(flight.groundSpeed) ? Math.max(0, flight.groundSpeed) : null
+  const trackMs = safeTime(flight.trackTimestamp) ?? nowMs
+  const isNewTrack = state.lastGroundMovementTrackMs !== trackMs
+
+  if (groundSpeedKt == null || groundSpeedKt < PUSHBACK_CONFIRM_GS_KT) {
+    if (isNewTrack) {
+      state.groundMovementSamples = 0
+      state.groundMovementStartedMs = null
+      state.lastGroundMovementTrackMs = trackMs
+    }
+    return false
+  }
+
+  if (isNewTrack) {
+    if (state.groundMovementSamples === 0) state.groundMovementStartedMs = trackMs
+    state.groundMovementSamples += 1
+    state.lastGroundMovementTrackMs = trackMs
+  }
+
+  return groundSpeedKt >= PUSHBACK_IMMEDIATE_GS_KT
+    || state.groundMovementSamples >= PUSHBACK_CONFIRM_SAMPLES
 }
 
 function dynamicAirborneTriggerFt(flight: IvaoArrivalTrafficFlight) {
@@ -162,12 +199,16 @@ function groundStageEstimate(
 
   let etotMs: number
   let stageLabel: string
-  const currentlyDeparting = isDeparting(flight)
+  const ivaoDeparting = isDeparting(flight)
+  const movementDeparting = !ivaoDeparting && detectGroundMovementDeparture(flight, state, nowMs)
+  const currentlyDeparting = ivaoDeparting || movementDeparting
   const departingLatched = currentlyDeparting || state.offBlockMs != null
 
   if (departingLatched) {
     if (state.offBlockMs == null) {
-      state.offBlockMs = safeTime(flight.trackTimestamp) ?? nowMs
+      state.offBlockMs = movementDeparting
+        ? state.groundMovementStartedMs ?? safeTime(flight.trackTimestamp) ?? nowMs
+        : safeTime(flight.trackTimestamp) ?? nowMs
     }
     const plannedEtotMs = state.offBlockMs + taxiMs
     // Once IVAO has reported Departing for this flight, offBlockMs becomes a one-way
@@ -176,7 +217,8 @@ function groundStageEstimate(
     // Once the standard taxi time has expired and the aircraft is still on the ground,
     // keep ETOT current so real taxi delay propagates into ELDT/ETO instead of freezing.
     etotMs = Math.max(plannedEtotMs, nowMs)
-    stageLabel = `DEPARTING${currentlyDeparting ? '' : ' LATCHED'} AOBT+STT ${sttMinutes}MIN${nowMs > plannedEtotMs ? ' · TAXI OVERRUN→NOW' : ''}`
+    const departingSource = movementDeparting ? ' MOTION' : ivaoDeparting ? ' IVAO' : ' LATCHED'
+    stageLabel = `DEPARTING${departingSource} AOBT+STT ${sttMinutes}MIN${nowMs > plannedEtotMs ? ' · TAXI OVERRUN→NOW' : ''}`
   } else {
     // Boarding: if filed EOBT is already overdue, NOW is the best current off-block
     // estimate. This avoids carrying an already-expired EOBT through the entire model.
@@ -238,6 +280,9 @@ export function estimateIawpArrival(
       phase: 'GROUND' as const,
       displayedMs: null,
       offBlockMs: null,
+      groundMovementSamples: 0,
+      groundMovementStartedMs: null,
+      lastGroundMovementTrackMs: null,
       dynamicAirborneLatched: false,
       stableEtaMs: null,
       iawpCrossingMs: null,

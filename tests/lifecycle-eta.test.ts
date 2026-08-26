@@ -163,6 +163,62 @@ describe('STABLE ETA lock', () => {
   })
 })
 
+describe('ground stage pushback detection', () => {
+  function groundFlight(sessionId: string, groundSpeed: number, trackMs: number) {
+    return flight({
+      sessionId,
+      state: 'Boarding',
+      onGround: true,
+      altitude: 0,
+      groundSpeed,
+      trackTimestamp: new Date(trackMs).toISOString(),
+      filedDepartureTimeSeconds: 10 * 60 * 60,
+      filedEetSeconds: 90 * 60,
+    })
+  }
+
+  it('infers DEPARTING after two distinct moving samples while IVAO still says Boarding', () => {
+    const first = estimateIawpArrival(groundFlight('pushback-two-samples', 3, now), geometry, 'NORTA', 15 * 60, new Date(now).toISOString())
+    const secondMs = now + 15_000
+    const second = estimateIawpArrival(groundFlight('pushback-two-samples', 3, secondMs), geometry, 'NORTA', 15 * 60, new Date(secondMs).toISOString())
+
+    expect(first.reason).toContain('ETA STAGE BOARDING')
+    expect(second.reason).toContain('ETA STAGE DEPARTING MOTION')
+  })
+
+  it('does not count the same IVAO track sample twice', () => {
+    const sample = groundFlight('pushback-same-track', 3, now)
+    const first = estimateIawpArrival(sample, geometry, 'NORTA', 15 * 60, new Date(now).toISOString())
+    const repeated = estimateIawpArrival(sample, geometry, 'NORTA', 15 * 60, new Date(now + 15_000).toISOString())
+
+    expect(first.reason).toContain('ETA STAGE BOARDING')
+    expect(repeated.reason).toContain('ETA STAGE BOARDING')
+  })
+
+  it('infers DEPARTING immediately when ground speed is clearly above pushback speed', () => {
+    const estimate = estimateIawpArrival(groundFlight('pushback-fast', 7, now), geometry, 'NORTA', 15 * 60, new Date(now).toISOString())
+    expect(estimate.reason).toContain('ETA STAGE DEPARTING MOTION')
+  })
+
+  it('keeps DEPARTING latched after the aircraft stops and IVAO still says Boarding', () => {
+    estimateIawpArrival(groundFlight('pushback-latch', 7, now), geometry, 'NORTA', 15 * 60, new Date(now).toISOString())
+    const stoppedMs = now + 15_000
+    const stopped = estimateIawpArrival(groundFlight('pushback-latch', 0, stoppedMs), geometry, 'NORTA', 15 * 60, new Date(stoppedMs).toISOString())
+
+    expect(stopped.reason).toContain('ETA STAGE DEPARTING LATCHED')
+    expect(stopped.reason).not.toContain('ETA STAGE BOARDING')
+  })
+
+  it('accepts IVAO Departing immediately without waiting for motion samples', () => {
+    const estimate = estimateIawpArrival(flight({
+      ...groundFlight('pushback-ivao', 0, now),
+      state: 'Departing',
+    }), geometry, 'NORTA', 15 * 60, new Date(now).toISOString())
+
+    expect(estimate.reason).toContain('ETA STAGE DEPARTING IVAO')
+  })
+})
+
 describe('dynamic ETA', () => {
   it('latches the actual feeder-fix crossing instead of changing ETA after the STAR entry', () => {
     const first = estimateIawpArrival(flight({
