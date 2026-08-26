@@ -306,7 +306,7 @@ describe('manual drag sequencing', () => {
     expect(result.find((row) => row.id === tha2.id)?.tldt).toBe('2026-08-25T15:25:00.000Z')
   })
 
-  it('always snaps a dragged strip back to its true TLDT after pointerup', async () => {
+  it('holds the released strip until the new true TLDT is rendered', async () => {
     document.body.innerHTML = `
       <div class="aman-flight-row" style="--offset-px: -100px" title="VTBD RWY 21R"><strong>THA1</strong></div>
     `
@@ -327,9 +327,15 @@ describe('manual drag sequencing', () => {
     expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50px')
 
     row.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientY: 140 }))
+    await new Promise((resolve) => window.setTimeout(resolve, 20))
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50px')
+
+    // Simulate the React render that commits the snapped manual TLDT.
+    row.style.setProperty('--offset-px', '-56px')
     await new Promise((resolve) => window.setTimeout(resolve, 40))
 
-    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-90px')
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-50.4px')
+    expect(row.style.getPropertyValue('--ideal-display-offset-px')).toBe('-50.4px')
     removeRuntime()
   })
 

@@ -25,15 +25,28 @@ type DragState = {
   pointerId: number
   startClientY: number
   startDisplayOffsetPx: number
+  startIdealDisplayOffsetPx: number
+  lastDisplayOffsetPx: number
 }
 
 type ReorderDetail = {
   identities?: string[]
 }
 
-// Visual offsets exist only while the pointer is down. On release every strip snaps
-// back to its true TLDT so neighbouring strips can never remain visually coupled.
+// Visual offsets exist only during a drag and its short render handoff. Every strip
+// still settles on its true TLDT so neighbouring strips cannot remain coupled.
 const visualResidualByKey = new Map<string, number>()
+const releaseHoldKeys = new Set<string>()
+
+export function dragVisualCommitReady(
+  startIdealDisplayOffsetPx: number,
+  currentIdealDisplayOffsetPx: number,
+  startDisplayOffsetPx: number,
+  releasedDisplayOffsetPx: number,
+) {
+  const moved = Math.abs(releasedDisplayOffsetPx - startDisplayOffsetPx) >= 0.5
+  return !moved || Math.abs(currentIdealDisplayOffsetPx - startIdealDisplayOffsetPx) >= 0.25
+}
 
 function reactProps<T>(element: Element): T | null {
   const key = Object.keys(element).find((name) => name.startsWith('__reactProps$'))
@@ -101,7 +114,7 @@ function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
       visualResidualByKey.delete(key)
     }
 
-    if (row === exceptRow) return
+    if (row === exceptRow || releaseHoldKeys.has(key)) return
     setDisplayOffset(row, ideal + (visualResidualByKey.get(key) ?? 0), ideal)
   })
 
@@ -153,12 +166,16 @@ export function installTimelineDisplayScaleRuntime() {
     const displayed = rowCurrentDisplayOffset(row)
     if (!key || ideal == null || displayed == null) return
 
+    releaseHoldKeys.delete(key)
+
     drag = {
       row,
       key,
       pointerId: event.pointerId,
       startClientY: event.clientY,
       startDisplayOffsetPx: displayed,
+      startIdealDisplayOffsetPx: ideal,
+      lastDisplayOffsetPx: displayed,
     }
   }
 
@@ -172,6 +189,7 @@ export function installTimelineDisplayScaleRuntime() {
     const logicalClientY = drag.startClientY + logicalDelta
     const ideal = rowIdealDisplayOffset(drag.row) ?? drag.startDisplayOffsetPx
     const pointerDisplay = drag.startDisplayOffsetPx + physicalDelta
+    drag.lastDisplayOffsetPx = pointerDisplay
 
     setDisplayOffset(drag.row, pointerDisplay, ideal)
 
@@ -185,29 +203,53 @@ export function installTimelineDisplayScaleRuntime() {
     if (!drag || (event && drag.pointerId !== event.pointerId)) return
     const finished = drag
     drag = null
+    releaseHoldKeys.add(finished.key)
+    setDisplayOffset(finished.row, finished.lastDisplayOffsetPx, finished.startIdealDisplayOffsetPx)
 
-    window.setTimeout(() => {
-      window.requestAnimationFrame(() => {
-        if (disposed) return
-        const row = findRow(finished.key)
-        if (!row) {
-          visualResidualByKey.delete(finished.key)
-          return
-        }
-        const ideal = rowIdealDisplayOffset(row)
-        if (ideal == null) return
-
+    // React receives pointer moves through a native capture listener. Its final state
+    // can therefore land one frame after pointerup. Keep the strip at the release
+    // position until --offset-px reflects that commit; otherwise it flashes at the
+    // old TLDT for one frame before jumping to the new one.
+    const deadline = performance.now() + 300
+    const completeVisualHandoff = () => {
+      if (disposed) return
+      // A rapid second drag owns the visual position now; an older release must not
+      // overwrite it when its delayed handoff callback runs.
+      if (drag?.key === finished.key) return
+      const row = findRow(finished.key)
+      if (!row) {
+        releaseHoldKeys.delete(finished.key)
         visualResidualByKey.delete(finished.key)
-        setDisplayOffset(row, ideal, ideal)
-        applyStoredVisualPositions(row)
-      })
-    }, 0)
+        return
+      }
+      const ideal = rowIdealDisplayOffset(row)
+      if (ideal == null) return
+      const ready = dragVisualCommitReady(
+        finished.startIdealDisplayOffsetPx,
+        ideal,
+        finished.startDisplayOffsetPx,
+        finished.lastDisplayOffsetPx,
+      )
+      if (!ready && performance.now() < deadline) {
+        setDisplayOffset(row, finished.lastDisplayOffsetPx, ideal)
+        window.requestAnimationFrame(completeVisualHandoff)
+        return
+      }
+
+      releaseHoldKeys.delete(finished.key)
+      visualResidualByKey.delete(finished.key)
+      setDisplayOffset(row, ideal, ideal)
+      applyStoredVisualPositions(row)
+    }
+    window.requestAnimationFrame(completeVisualHandoff)
   }
 
   const onDoubleClick = (event: MouseEvent) => {
     if (!(event.target instanceof Element) || event.target.closest('select')) return
     const row = event.target.closest<HTMLElement>('.aman-flight-row')
     if (!row) return
+
+    releaseHoldKeys.delete(rowKey(row))
 
     // Let the normal reset handler clear the manual target. Independently clear the
     // presentation offset now and again after React renders the AUTO target.
@@ -261,6 +303,7 @@ export function installTimelineDisplayScaleRuntime() {
     document.removeEventListener('dblclick', onDoubleClick, true)
     window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     visualResidualByKey.clear()
+    releaseHoldKeys.clear()
     document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
       row.style.removeProperty('--display-offset-px')
       row.style.removeProperty('--ideal-display-offset-px')
