@@ -634,7 +634,10 @@ export default function App() {
   const [reservedGapSecondsByKey, setReservedGapSecondsByKey] = useState<Record<string, number>>({})
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [opsMenu, setOpsMenu] = useState<OpsMenuState | null>(null)
+  const [mobileInboundOpen, setMobileInboundOpen] = useState(false)
+  const [mobileInboundUnread, setMobileInboundUnread] = useState(false)
   const dragRef = useRef<DragState | null>(null)
+  const previousInboundRef = useRef<{ scope: AirportScope; ids: Set<string> } | null>(null)
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
   const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig), [operationalConfig])
@@ -889,6 +892,33 @@ export default function App() {
         }
       }),
   [demoMode, demoSequence, inbound, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
+
+  useEffect(() => {
+    const ids = new Set(displayInboundRows.map((item) => item.id))
+    const previous = previousInboundRef.current
+    if (previous?.scope === airportScope && !mobileInboundOpen) {
+      const hasNewInbound = [...ids].some((id) => !previous.ids.has(id))
+      if (hasNewInbound) setMobileInboundUnread(true)
+    }
+    if (mobileInboundOpen) setMobileInboundUnread(false)
+    previousInboundRef.current = { scope: airportScope, ids }
+  }, [airportScope, displayInboundRows, mobileInboundOpen])
+
+  const toggleMobileInbound = () => {
+    setMobileInboundOpen((open) => {
+      if (!open) setMobileInboundUnread(false)
+      return !open
+    })
+  }
+
+  useEffect(() => {
+    if (!mobileInboundOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileInboundOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [mobileInboundOpen])
 
   const monitoredInboundCount = displayInboundRows.filter((item) => item.planningState === 'MONITORED').length
   const operationalQueueCount = displayInboundRows.filter((item) => ['MISSED', 'DESEQUENCED', 'REMOVED'].includes(item.planningState)).length
@@ -1223,8 +1253,15 @@ export default function App() {
 
     <main className="aman-workspace">
       <section className="aman-panel aman-timeline-panel">
-        <div className="aman-panel-header">
-          <div><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div>
+        <div className="aman-panel-header aman-timeline-header">
+          <div className="aman-timeline-heading"><span className="aman-eyebrow">MAESTRO STYLE</span><h1>Arrival Timeline</h1></div>
+          <button
+            type="button"
+            className={`aman-mobile-inbound-toggle${mobileInboundUnread ? ' has-unread' : ''}`}
+            aria-expanded={mobileInboundOpen}
+            aria-controls="aman-mobile-inbound"
+            onClick={toggleMobileInbound}
+          >INBOUND <b>{displayInboundRows.length}</b></button>
           <div className="aman-panel-meta">
             <span>5 MIN MAJOR</span><span>1 MIN MINOR</span>
             <span title={`MAESTRO processing coverage ${AMAN_PROCESSING_RADIUS_BAND_NM.MIN}-${AMAN_PROCESSING_RADIUS_BAND_NM.MAX} NM; project admission at outer edge`}>RADIUS {AMAN_PROCESSING_RADIUS_NM} NM</span>
@@ -1311,9 +1348,10 @@ export default function App() {
         </div>
       </section>
 
+      {mobileInboundOpen && <button type="button" className="aman-mobile-inbound-backdrop" aria-label="Close inbound traffic" onClick={() => setMobileInboundOpen(false)} />}
       <aside className="aman-side-stack">
-        <section className="aman-panel aman-inbound-panel">
-          <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span></div>
+        <section id="aman-mobile-inbound" className={`aman-panel aman-inbound-panel${mobileInboundOpen ? ' is-mobile-open' : ''}`}>
+          <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><div className="aman-inbound-header-actions"><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span><button type="button" className="aman-mobile-inbound-close" aria-label="Close inbound traffic" onClick={() => setMobileInboundOpen(false)}>×</button></div></div>
           <div className="aman-inbound-list">
             <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA-FF</span></div>
             {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} key={item.id} title={item.title}>

@@ -1,0 +1,236 @@
+/* Final responsive layer for the operational screen.
+   This file is intentionally imported last so older MAESTRO layout layers cannot
+   reopen the narrow-screen clipping bugs fixed here. */
+
+.aman-mobile-inbound-toggle,
+.aman-mobile-inbound-close,
+.aman-mobile-inbound-backdrop {
+  display: none;
+}
+
+.aman-inbound-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 980px) {
+  .aman-workspace,
+  .scope-both .aman-workspace {
+    height: calc(100dvh - 212px);
+    min-height: 520px;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .aman-timeline-panel > .aman-timeline-header {
+    height: auto !important;
+    min-height: 82px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 9px 12px;
+    overflow: visible;
+  }
+
+  .aman-timeline-heading {
+    min-width: 0;
+  }
+
+  .aman-timeline-heading h1 {
+    margin: 2px 0 0;
+    white-space: nowrap;
+  }
+
+  .aman-mobile-inbound-toggle {
+    min-width: 96px;
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid #426485;
+    border-radius: 4px;
+    background: #102238;
+    color: #bcd3e8;
+    font: 900 10px/1 Consolas, monospace;
+    letter-spacing: .06em;
+    cursor: pointer;
+  }
+
+  .aman-mobile-inbound-toggle b {
+    min-width: 22px;
+    padding: 3px 5px;
+    border-radius: 10px;
+    background: #1b3958;
+    color: #dcecff;
+    font-size: 10px;
+  }
+
+  .aman-mobile-inbound-toggle.has-unread {
+    border-color: #d8a33e;
+    color: #ffd36a;
+    box-shadow: 0 0 0 2px rgba(216, 163, 62, .12);
+  }
+
+  .aman-mobile-inbound-toggle.has-unread b {
+    background: #5b4214;
+    color: #ffe195;
+  }
+
+  .aman-timeline-header .aman-panel-meta {
+    grid-column: 1 / -1;
+    min-width: 0;
+    display: flex !important;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .aman-timeline-header .aman-panel-meta > span {
+    display: none;
+  }
+
+  .aman-timeline-header .aman-panel-meta > .is-drag-enabled,
+  .aman-timeline-header .aman-panel-meta > .aman-capacity-alert,
+  .aman-timeline-header .aman-panel-meta > span:last-child {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  .aman-timeline-header .aman-panel-meta > .is-drag-enabled {
+    font-size: 0;
+  }
+
+  .aman-timeline-header .aman-panel-meta > .is-drag-enabled::after {
+    content: 'DRAG · DBL CLICK AUTO · RIGHT CLICK OPS';
+    font-size: 9px;
+    white-space: nowrap;
+  }
+
+  .aman-timeline-header .aman-demo-toggle {
+    flex: 0 0 auto;
+    min-height: 30px;
+  }
+
+  .aman-timeline-stage {
+    min-height: 0 !important;
+  }
+
+  .aman-side-stack {
+    min-height: 0 !important;
+    height: 0;
+  }
+
+  .aman-inbound-panel {
+    display: none !important;
+  }
+
+  .aman-inbound-panel.is-mobile-open {
+    position: fixed;
+    z-index: 3100;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    top: max(12px, env(safe-area-inset-top));
+    bottom: max(52px, calc(env(safe-area-inset-bottom) + 52px));
+    width: min(720px, calc(100vw - 16px));
+    height: auto !important;
+    min-height: 0 !important;
+    margin: auto;
+    display: flex !important;
+    flex-direction: column;
+    border-color: #456987;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .72);
+  }
+
+  .aman-inbound-panel.is-mobile-open .aman-inbound-list {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+  }
+
+  .aman-mobile-inbound-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3050;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgba(1, 6, 12, .72);
+    backdrop-filter: blur(2px);
+  }
+
+  .aman-mobile-inbound-close {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid #3b5876;
+    border-radius: 4px;
+    background: #0b1929;
+    color: #bcd0e2;
+    font: 400 24px/1 Arial, sans-serif;
+    cursor: pointer;
+  }
+
+  .aman-system-panel.is-runtime-collapsible {
+    position: fixed;
+    z-index: 3000;
+    left: max(6px, env(safe-area-inset-left));
+    right: max(6px, env(safe-area-inset-right));
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 700px) {
+  .aman-workspace,
+  .scope-both .aman-workspace {
+    height: auto;
+    min-height: 0;
+    padding: 6px;
+  }
+
+  .aman-timeline-panel > .aman-timeline-header {
+    min-height: 74px;
+    padding: 7px 9px;
+  }
+
+  .aman-timeline-heading h1 {
+    font-size: 17px;
+  }
+
+  .aman-timeline-header .aman-panel-meta > .is-drag-enabled {
+    display: none;
+  }
+
+  .aman-timeline-stage {
+    height: max(430px, calc(100dvh - 250px)) !important;
+    min-height: 430px !important;
+  }
+
+  .aman-mobile-inbound-toggle,
+  .aman-mobile-inbound-close {
+    min-height: 44px;
+  }
+
+  .aman-mobile-inbound-close {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .aman-inbound-panel.is-mobile-open {
+    left: max(4px, env(safe-area-inset-left));
+    right: max(4px, env(safe-area-inset-right));
+    top: max(6px, env(safe-area-inset-top));
+    width: calc(100vw - 8px);
+  }
+}
