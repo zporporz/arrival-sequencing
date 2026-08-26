@@ -124,19 +124,23 @@ function isTerminalSnapshot(snapshot) {
   return snapshot?.onGround === true || TERMINAL_STATES.has(state);
 }
 
-function looksLandedAtAirport(snapshot, airport) {
-  if (isTerminalSnapshot(snapshot)) return true;
+export function looksLandedAtAirport(snapshot, airport) {
   const reference = AIRPORT_REFERENCE[airport];
   if (!reference) return false;
 
   const latitude = finite(snapshot?.latitude);
   const longitude = finite(snapshot?.longitude);
   const groundSpeed = finite(snapshot?.groundSpeed);
-  if (latitude == null || longitude == null || groundSpeed == null) return false;
+  if (latitude == null || longitude == null) {
+    // A bare LANDED state is still useful when IVAO omits position, but ON BLOCKS /
+    // ON GROUND can also describe an aircraft waiting at its departure gate.
+    return String(snapshot?.state ?? '').trim().toLowerCase() === 'landed';
+  }
 
   const airportDistanceNm = distanceNm(reference.lat, reference.lon, latitude, longitude);
-  return airportDistanceNm <= LANDED_RELEASE_RADIUS_NM
-    && groundSpeed <= LANDED_RELEASE_MAX_GS_KT;
+  if (airportDistanceNm > LANDED_RELEASE_RADIUS_NM) return false;
+  return isTerminalSnapshot(snapshot)
+    || (groundSpeed != null && groundSpeed <= LANDED_RELEASE_MAX_GS_KT);
 }
 
 // A controller-triggered GA/MISSED direct insert writes a fresh MANUAL target at
@@ -287,7 +291,10 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
     };
     pendingRows.push(write);
 
-    const terminalNow = isTerminalSnapshot(snapshot);
+    // ON BLOCKS / ON GROUND at the departure airport is a valid inbound that has
+    // not departed yet. Only suppress it once the same terminal indication is at
+    // the AMAN destination airport.
+    const terminalNow = looksLandedAtAirport(snapshot, airport);
     const missedReinsert = terminalNow && hasActiveMissedReinsert(record, snapshot, fetchedMs);
     if (terminalNow && !missedReinsert) continue;
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { reconcileAmanFlights, utcServiceDate } from '../functions/_lib/amanSharedState.js'
+import { looksLandedAtAirport, reconcileAmanFlights, utcServiceDate } from '../functions/_lib/amanSharedState.js'
+import { isInboundPilotForAirport } from '../functions/api/sequence/ivao-traffic.js'
 import { secondsOfDayToNearestUtc } from '../src/core/arrivalEta'
 import { installSharedAmanRuntime } from '../src/sharedAmanRuntime'
 
@@ -25,6 +26,40 @@ function mockFlightStateApi(existing = []) {
 afterEach(() => vi.restoreAllMocks())
 
 describe('terminal flight protection', () => {
+  it.each(['on blocks', 'on ground', 'boarding'])('keeps a pre-departure %s flight inbound when it is away from the destination', (state) => {
+    const pilot = {
+      callsign: 'TLM1',
+      flightPlan: { departureId: 'VTCC', arrivalId: 'VTBS' },
+      lastTrack: {
+        state,
+        onGround: true,
+        latitude: 18.7668,
+        longitude: 98.9626,
+        groundSpeed: 0,
+      },
+    }
+
+    expect(isInboundPilotForAirport(pilot, 'VTBS')).toBe(true)
+    expect(looksLandedAtAirport(pilot.lastTrack, 'VTBS')).toBe(false)
+  })
+
+  it('removes an on-blocks flight only when it is at the destination airport', () => {
+    const pilot = {
+      callsign: 'TLM1',
+      flightPlan: { departureId: 'VTCC', arrivalId: 'VTBS' },
+      lastTrack: {
+        state: 'on blocks',
+        onGround: true,
+        latitude: 13.6811,
+        longitude: 100.7473,
+        groundSpeed: 0,
+      },
+    }
+
+    expect(isInboundPilotForAirport(pilot, 'VTBS')).toBe(false)
+    expect(looksLandedAtAirport(pilot.lastTrack, 'VTBS')).toBe(true)
+  })
+
   it.each(['landed', 'on ground', 'on blocks'])('does not reinsert a terminal %s flight', async (state) => {
     mockFlightStateApi()
     const flights = await reconcileAmanFlights(env, 'VTBS', [{
@@ -33,6 +68,9 @@ describe('terminal flight protection', () => {
       state,
       onGround: state === 'on ground',
       arrival: 'VTBS',
+      latitude: 13.6811,
+      longitude: 100.7473,
+      groundSpeed: 0,
       trackTimestamp: '2026-08-25T10:00:00.000Z',
     }], '2026-08-25T10:00:10.000Z')
 
@@ -59,6 +97,9 @@ describe('terminal flight protection', () => {
       state: 'landed',
       onGround: true,
       arrival: 'VTBS',
+      latitude: 13.6811,
+      longitude: 100.7473,
+      groundSpeed: 0,
       trackTimestamp: '2026-08-25T10:00:00.000Z',
     }], '2026-08-25T10:00:10.000Z')
 

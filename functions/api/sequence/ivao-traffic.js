@@ -1,4 +1,4 @@
-import { reconcileAmanFlights } from '../../_lib/amanSharedState.js';
+import { looksLandedAtAirport, reconcileAmanFlights } from '../../_lib/amanSharedState.js';
 
 const WHAZZUP_TTL_MS = 15000;
 const FLIGHT_PLAN_TTL_MS = 5 * 60 * 1000;
@@ -155,6 +155,21 @@ function isAirborneNow(pilot) {
   return pilot?.lastTrack?.onGround === false || ['initial climb', 'en route', 'approach'].includes(state);
 }
 
+export function isInboundPilotForAirport(pilot, airportValue) {
+  const airport = cleanAirport(airportValue);
+  if (!airport) return false;
+  if (String(pilot?.flightPlan?.arrivalId || '').trim().toUpperCase() !== airport) return false;
+
+  const track = pilot?.lastTrack || {};
+  return !looksLandedAtAirport({
+    state: track.state,
+    onGround: track.onGround,
+    latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
+    longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
+    groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
+  }, airport);
+}
+
 async function legacyDomesticTiming(pilot, detailedFlightPlan, env) {
   const summary = pilot?.flightPlan || {};
   const detailed = detailedFlightPlan || {};
@@ -243,11 +258,8 @@ export async function onRequestGet(context) {
 
     const data = await getWhazzup(context.env);
     const pilots = Array.isArray(data?.clients?.pilots) ? data.clients.pilots : [];
-    const terminalStates = new Set(['landed', 'on blocks']);
-
     const inboundPilots = pilots
-      .filter((pilot) => String(pilot?.flightPlan?.arrivalId || '').trim().toUpperCase() === airport)
-      .filter((pilot) => !terminalStates.has(String(pilot?.lastTrack?.state || '').trim().toLowerCase()));
+      .filter((pilot) => isInboundPilotForAirport(pilot, airport));
 
     const flights = await mapWithConcurrency(
       inboundPilots,
