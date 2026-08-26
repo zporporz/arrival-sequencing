@@ -294,7 +294,8 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
     // ON BLOCKS / ON GROUND at the departure airport is a valid inbound that has
     // not departed yet. Only suppress it once the same terminal indication is at
     // the AMAN destination airport.
-    const terminalNow = looksLandedAtAirport(snapshot, airport);
+    const terminalNow = snapshot.predepartureLocal !== true
+      && looksLandedAtAirport(snapshot, airport);
     const missedReinsert = terminalNow && hasActiveMissedReinsert(record, snapshot, fetchedMs);
     if (terminalNow && !missedReinsert) continue;
 

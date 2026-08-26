@@ -155,19 +155,43 @@ function isAirborneNow(pilot) {
   return pilot?.lastTrack?.onGround === false || ['initial climb', 'en route', 'approach'].includes(state);
 }
 
-export function isInboundPilotForAirport(pilot, airportValue) {
-  const airport = cleanAirport(airportValue);
-  if (!airport) return false;
-  if (String(pilot?.flightPlan?.arrivalId || '').trim().toUpperCase() !== airport) return false;
-
+function pilotTrackSnapshot(pilot) {
   const track = pilot?.lastTrack || {};
-  return !looksLandedAtAirport({
+  return {
     state: track.state,
     onGround: track.onGround,
     latitude: finiteNumber(track.latitude, track.lat, pilot.latitude, pilot.lat),
     longitude: finiteNumber(track.longitude, track.lon, track.lng, pilot.longitude, pilot.lon, pilot.lng),
     groundSpeed: finiteNumber(track.groundSpeed, track.groundspeed, track.speed, pilot.groundSpeed),
-  }, airport);
+  };
+}
+
+export async function isLocalPredeparturePilot(pilot, airportValue, env) {
+  const airport = cleanAirport(airportValue);
+  if (!airport) return false;
+  const flightPlan = pilot?.flightPlan || {};
+  const departure = String(flightPlan.departureId || '').trim().toUpperCase();
+  const arrival = String(flightPlan.arrivalId || '').trim().toUpperCase();
+  if (departure !== airport || arrival !== airport) return false;
+  if (!looksLandedAtAirport(pilotTrackSnapshot(pilot), airport)) return false;
+
+  // For a same-airport flight, position alone cannot tell whether the aircraft is
+  // waiting to depart or has returned after landing. An actual departure time or
+  // a ground-to-air transition in this IVAO session proves it has already flown.
+  const actualDeparture = finiteNumber(flightPlan.actualDepartureTime);
+  if (actualDeparture != null && actualDeparture > 0) return false;
+
+  const sessionId = String(pilot?.id ?? '').trim();
+  if (!sessionId) return true;
+
+  try {
+    return !(await getTrackedTakeoff(sessionId, env));
+  } catch {
+    // If IVAO track history is temporarily unavailable, keep the flight visible.
+    // Losing a legitimate inbound is operationally worse than retaining one
+    // ambiguous local flight for another refresh cycle.
+    return true;
+  }
 }
 
 async function legacyDomesticTiming(pilot, detailedFlightPlan, env) {
@@ -258,8 +282,10 @@ export async function onRequestGet(context) {
 
     const data = await getWhazzup(context.env);
     const pilots = Array.isArray(data?.clients?.pilots) ? data.clients.pilots : [];
+    // Pass terminal arrivals through reconciliation as well. It needs the current
+    // destination-ground snapshot to expire the old active/ghost record cleanly.
     const inboundPilots = pilots
-      .filter((pilot) => isInboundPilotForAirport(pilot, airport));
+      .filter((pilot) => String(pilot?.flightPlan?.arrivalId || '').trim().toUpperCase() === airport);
 
     const flights = await mapWithConcurrency(
       inboundPilots,
@@ -267,6 +293,7 @@ export async function onRequestGet(context) {
       async (pilot) => {
         const fp = pilot.flightPlan || {};
         const track = pilot.lastTrack || {};
+        const predepartureLocal = await isLocalPredeparturePilot(pilot, airport, context.env);
         let detailed = {};
         let flightPlanDetailError = null;
 
@@ -316,6 +343,7 @@ export async function onRequestGet(context) {
           domesticTriggerStatus: domestic.domesticTriggerStatus,
           domesticTriggerError: domestic.domesticTriggerError,
           flightPlanDetailError,
+          predepartureLocal,
         };
       },
     );
@@ -327,7 +355,9 @@ export async function onRequestGet(context) {
       .sort((a, b) => a.callsign.localeCompare(b.callsign));
 
     let sharedStateError = null;
-    let reconciledFlights = liveFlights;
+    let reconciledFlights = liveFlights.filter((flight) => (
+      flight.predepartureLocal || !looksLandedAtAirport(flight, airport)
+    ));
     try {
       reconciledFlights = await reconcileAmanFlights(context.env, airport, liveFlights, fetchedAt);
     } catch (error) {

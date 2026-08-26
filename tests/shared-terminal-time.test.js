@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { looksLandedAtAirport, reconcileAmanFlights, utcServiceDate } from '../functions/_lib/amanSharedState.js'
-import { isInboundPilotForAirport } from '../functions/api/sequence/ivao-traffic.js'
+import { isLocalPredeparturePilot } from '../functions/api/sequence/ivao-traffic.js'
 import { secondsOfDayToNearestUtc } from '../src/core/arrivalEta'
 import { installSharedAmanRuntime } from '../src/sharedAmanRuntime'
 
@@ -39,7 +39,6 @@ describe('terminal flight protection', () => {
       },
     }
 
-    expect(isInboundPilotForAirport(pilot, 'VTBS')).toBe(true)
     expect(looksLandedAtAirport(pilot.lastTrack, 'VTBS')).toBe(false)
   })
 
@@ -56,8 +55,67 @@ describe('terminal flight protection', () => {
       },
     }
 
-    expect(isInboundPilotForAirport(pilot, 'VTBS')).toBe(false)
     expect(looksLandedAtAirport(pilot.lastTrack, 'VTBS')).toBe(true)
+  })
+
+  it('keeps a same-airport flight at the gate before its first takeoff', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse([
+      { onGround: true, timestamp: '2026-08-26T03:55:00.000Z' },
+      { onGround: true, timestamp: '2026-08-26T04:00:00.000Z' },
+    ]))
+    const pilot = {
+      id: 'local-predeparture',
+      flightPlan: { departureId: 'VTBS', arrivalId: 'VTBS' },
+      lastTrack: { state: 'on blocks', onGround: true, latitude: 13.6811, longitude: 100.7473, groundSpeed: 0 },
+    }
+
+    expect(await isLocalPredeparturePilot(pilot, 'VTBS', { IVAO_API_KEY: 'test' })).toBe(true)
+  })
+
+  it('removes a same-airport flight after track history proves it took off and returned', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse([
+      { onGround: true, timestamp: '2026-08-26T02:00:00.000Z' },
+      { onGround: false, timestamp: '2026-08-26T02:10:00.000Z' },
+      { onGround: true, timestamp: '2026-08-26T03:30:00.000Z' },
+    ]))
+    const pilot = {
+      id: 'local-completed',
+      flightPlan: { departureId: 'VTBS', arrivalId: 'VTBS' },
+      lastTrack: { state: 'on blocks', onGround: true, latitude: 13.6811, longitude: 100.7473, groundSpeed: 0 },
+    }
+
+    expect(await isLocalPredeparturePilot(pilot, 'VTBS', { IVAO_API_KEY: 'test' })).toBe(false)
+  })
+
+  it('keeps an ambiguous same-airport predeparture visible when track history is unavailable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('tracker unavailable'))
+    const pilot = {
+      id: 'local-track-error',
+      flightPlan: { departureId: 'VTBS', arrivalId: 'VTBS' },
+      lastTrack: { state: 'on blocks', onGround: true, latitude: 13.6811, longitude: 100.7473, groundSpeed: 0 },
+    }
+
+    expect(await isLocalPredeparturePilot(pilot, 'VTBS', { IVAO_API_KEY: 'test' })).toBe(true)
+  })
+
+  it('does not suppress a confirmed same-airport predeparture during shared-state reconciliation', async () => {
+    mockFlightStateApi()
+    const flights = await reconcileAmanFlights(env, 'VTBS', [{
+      callsign: 'LOC101',
+      sessionId: 'local-shared-state',
+      departure: 'VTBS',
+      arrival: 'VTBS',
+      state: 'on blocks',
+      onGround: true,
+      latitude: 13.6811,
+      longitude: 100.7473,
+      groundSpeed: 0,
+      predepartureLocal: true,
+      trackTimestamp: '2026-08-26T04:00:00.000Z',
+    }], '2026-08-26T04:00:10.000Z')
+
+    expect(flights).toHaveLength(1)
+    expect(flights[0]).toMatchObject({ callsign: 'LOC101', predepartureLocal: true })
   })
 
   it.each(['landed', 'on ground', 'on blocks'])('does not reinsert a terminal %s flight', async (state) => {
