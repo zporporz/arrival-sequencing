@@ -65,6 +65,34 @@ function cleanIso(value, required = false) {
   return new Date(millis).toISOString();
 }
 
+function cleanPositiveInteger(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new Error('AUTO baseline rank must be a positive integer');
+  return number;
+}
+
+export function autoBaselineForManualTarget(existing, payload, capturedAt = new Date().toISOString()) {
+  if (String(existing?.target_mode || '').toUpperCase() === 'MANUAL') {
+    return {
+      auto_baseline_tldt: existing?.auto_baseline_tldt || null,
+      auto_baseline_runway: existing?.auto_baseline_runway || null,
+      auto_baseline_rank: existing?.auto_baseline_rank == null ? null : Number(existing.auto_baseline_rank),
+      auto_baseline_captured_at: existing?.auto_baseline_captured_at || null,
+    };
+  }
+
+  const tldt = cleanIso(payload?.autoBaselineTldt, false);
+  const runway = cleanRunway(payload?.autoBaselineRunway);
+  const rank = cleanPositiveInteger(payload?.autoBaselineRank);
+  return {
+    auto_baseline_tldt: tldt,
+    auto_baseline_runway: runway,
+    auto_baseline_rank: rank,
+    auto_baseline_captured_at: tldt || runway || rank ? capturedAt : null,
+  };
+}
+
 function cleanObject(value, field) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${field} must be an object`);
@@ -237,6 +265,7 @@ export async function onRequestPost(context) {
 
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        ...autoBaselineForManualTarget(existing, payload),
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
         manual_runway: manualRunway,

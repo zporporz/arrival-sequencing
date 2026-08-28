@@ -195,4 +195,61 @@ describe('forced shared refresh', () => {
 
     removeRuntime()
   })
+
+  it('sends the original AUTO position with the first manual drag', async () => {
+    const requests = []
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options = {}) => {
+      if (!options.method || options.method === 'GET') {
+        return jsonResponse({
+          serviceDate: new Date().toISOString().slice(0, 10),
+          workspaceStates: [],
+          flightStates: [],
+          sequenceOrders: [],
+        })
+      }
+      const body = JSON.parse(String(options.body || '{}'))
+      requests.push(body)
+      return jsonResponse({
+        ok: true,
+        flightState: {
+          service_date: body.serviceDate,
+          airport: body.airport,
+          callsign: body.callsign,
+          target_mode: 'MANUAL',
+          manual_tldt: body.manualTldt,
+          manual_runway: body.manualRunway,
+          revision: 2,
+        },
+      })
+    })
+    document.body.innerHTML = `
+      <div class="aman-flight-row" data-target-mode="AUTO"
+        data-auto-baseline-tldt="2026-08-28T10:15:00.000Z"
+        data-auto-baseline-runway="19" data-auto-baseline-rank="3"
+        title="VTBS RWY 19" style="--offset-px:-100px">
+        <span class="tldt">10:15</span><strong>THA123</strong>
+        <em class="runway-assignment"><select><option selected>19</option></select></em>
+      </div>
+    `
+
+    const removeRuntime = installSharedAmanRuntime()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const callsign = document.querySelector('strong')
+    callsign.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
+    callsign.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }))
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]).toMatchObject({
+      action: 'setManualTarget',
+      airport: 'VTBS',
+      callsign: 'THA123',
+      manualRunway: '19',
+      autoBaselineTldt: '2026-08-28T10:15:00.000Z',
+      autoBaselineRunway: '19',
+      autoBaselineRank: 3,
+    })
+
+    removeRuntime()
+    document.body.innerHTML = ''
+  })
 })

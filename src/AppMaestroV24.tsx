@@ -1361,12 +1361,18 @@ export default function App() {
               const matrix = getAmanOperationalMatrixAdvice(row.delayMinutes)
               const matrixClass = matrix.band.toLowerCase().replace(/_/g, '-')
               const gapSeconds = Math.max(0, gapAfterSecondsById[row.id] ?? 0)
+              const autoBaselineRow = (demoMode ? demoBaseSequence : liveBaseSequence)
+                .find((candidate) => candidate.id === row.id)
 
               return <div
                 key={row.id}
                 className={`aman-flight-row action-${row.delayAction.toLowerCase()} matrix-${matrixClass}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
+                data-target-mode={isStable ? 'MANUAL' : 'AUTO'}
+                data-auto-baseline-tldt={autoBaselineRow?.tldt}
+                data-auto-baseline-runway={autoBaselineRow?.runway}
+                data-auto-baseline-rank={autoBaselineRow?.sequenceIndex}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}

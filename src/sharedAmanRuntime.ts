@@ -25,6 +25,10 @@ type FlightState = {
   manual_updated_by_vid: string | null
   manual_updated_by_name: string | null
   manual_updated_at: string | null
+  auto_baseline_tldt: string | null
+  auto_baseline_runway: string | null
+  auto_baseline_rank: number | null
+  auto_baseline_captured_at: string | null
   holding_mode: 'AUTO' | 'HOLD' | 'NO_HOLD'
   holding_fix: string | null
   holding_leave_at: string | null
@@ -256,6 +260,11 @@ export function installSharedAmanRuntime() {
   const workspaceWriteTimers = new Map<string, number>()
   const flightWriteTimers = new Map<string, number>()
   const localInteractionStart = new WeakMap<HTMLElement, number>()
+  const localAutoBaselines = new WeakMap<HTMLElement, {
+    tldt: string | null
+    runway: string | null
+    rank: number | null
+  }>()
   const identity = getAuthenticatedIdentity()
 
   const emitState = () => {
@@ -437,6 +446,7 @@ export function installSharedAmanRuntime() {
     const targetMs = currentTargetMs(row)
     const runway = rowRunway(row)
     if (!rowInfo || targetMs == null || !runway) return
+    const baseline = localAutoBaselines.get(row)
     try {
       const result = await writeSharedState({
         action: 'setManualTarget',
@@ -445,6 +455,9 @@ export function installSharedAmanRuntime() {
         callsign: rowInfo.callsign,
         manualTldt: new Date(targetMs).toISOString(),
         manualRunway: runway,
+        autoBaselineTldt: baseline?.tldt,
+        autoBaselineRunway: baseline?.runway,
+        autoBaselineRank: baseline?.rank,
       })
       mergeFlight(result.flightState)
       window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
@@ -514,6 +527,15 @@ export function installSharedAmanRuntime() {
     if (!row || (event.target instanceof Element && event.target.closest('select'))) return
     const targetMs = currentTargetMs(row)
     if (targetMs != null) localInteractionStart.set(row, targetMs)
+    const isManual = row.classList.contains('is-stable') || row.dataset.targetMode === 'MANUAL'
+    if (!isManual) {
+      const rank = Number(row.dataset.autoBaselineRank)
+      localAutoBaselines.set(row, {
+        tldt: row.dataset.autoBaselineTldt || (targetMs == null ? null : new Date(targetMs).toISOString()),
+        runway: row.dataset.autoBaselineRunway || rowRunway(row) || null,
+        rank: Number.isInteger(rank) && rank > 0 ? rank : null,
+      })
+    }
   }
 
   const onPointerUp = (event: PointerEvent) => {
