@@ -197,6 +197,16 @@ function rowAirport(id: string): AirportCode {
   return id.toUpperCase().includes('VTBS') ? 'VTBS' : 'VTBD'
 }
 
+export function mergeAirportRefresh<T>(
+  current: T[],
+  refreshed: T[],
+  refreshedAirports: AirportCode[],
+  airportOf: (item: T) => AirportCode,
+) {
+  const refreshedSet = new Set(refreshedAirports)
+  return [...current.filter((item) => !refreshedSet.has(airportOf(item))), ...refreshed]
+}
+
 function predictionFlightKey(prediction: Pick<AmanArrivalPrediction, 'id' | 'callsign'>) {
   return flightKey(rowAirport(prediction.id), prediction.callsign)
 }
@@ -620,12 +630,12 @@ export default function App() {
   const [livePredictions, setLivePredictions] = useState<AmanArrivalPrediction[]>([])
   const [canonicalEtaById, setCanonicalEtaById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [trafficError, setTrafficError] = useState<string | null>(null)
+  const [trafficErrorsByAirport, setTrafficErrorsByAirport] = useState<Partial<Record<AirportCode, string>>>({})
   const [operationalConfig, setOperationalConfig] = useState<OperationalConfigPayload | null>(null)
   const [operationalConfigError, setOperationalConfigError] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   const [demoMode, setDemoMode] = useState(false)
-  const [demoAnchor, setDemoAnchor] = useState<Date | null>(null)
+  const [demoAnchors, setDemoAnchors] = useState<Record<AirportCode, Date> | null>(null)
   const [manualTldt, setManualTldt] = useState<Record<string, string>>({})
   const [manualRunways, setManualRunways] = useState<Record<string, string>>({})
   const [stableIds, setStableIds] = useState<Record<string, true>>({})
@@ -640,6 +650,10 @@ export default function App() {
   const previousInboundRef = useRef<{ scope: AirportScope; ids: Set<string> } | null>(null)
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
+  const trafficError = airports
+    .map((airport) => trafficErrorsByAirport[airport] ? `${airport}: ${trafficErrorsByAirport[airport]}` : null)
+    .filter((value): value is string => Boolean(value))
+    .join(' · ') || null
   const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig), [operationalConfig])
   const operationalTimingCount = Object.values(operationalTimings).reduce((total, timings) => total + Object.keys(timings).length, 0)
   const ticks = useMemo(() => timelineTicks(now), [now])
@@ -760,9 +774,9 @@ export default function App() {
   }, [airports, liveSequencedPredictions, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoBaseSequence = useMemo(() => {
-    if (!demoMode || !demoAnchor) return []
+    if (!demoMode || !demoAnchors) return []
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
-      buildDemoPredictions(airport, demoAnchor, operationalTimings, hasOperationalWorkspace(operationalConfig, airport)),
+      buildDemoPredictions(airport, demoAnchors[airport], operationalTimings, hasOperationalWorkspace(operationalConfig, airport)),
       airport,
       runwayModes,
       spacingNm,
@@ -772,7 +786,7 @@ export default function App() {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, demoAnchor, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, demoAnchors, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoSequence = useMemo(
     () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}, autoReturnFloorTldt),
@@ -1011,9 +1025,9 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false
-    const loadTraffic = async () => {
-      setLoading(true)
-      const results = await Promise.all(airports.map(async (airport) => {
+    const loadTraffic = async (targetAirports: AirportCode[] = airports, announceAirport?: AirportCode) => {
+      if (!announceAirport) setLoading(true)
+      const results = await Promise.all(targetAirports.map(async (airport) => {
         try {
           const payload = await readIvaoTraffic(airport)
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
@@ -1054,34 +1068,88 @@ export default function App() {
       if (disposed) return
       const previews = results.flatMap((result) => result.resolved.map((item) => item.preview))
       const predictions = results.flatMap((result) => result.resolved.map((item) => item.prediction).filter((item): item is AmanArrivalPrediction => item !== null))
-      const errors = results.filter((result) => result.error).map((result) => `${result.airport}: ${result.error}`)
       const fetchedTimes = results.map((result) => result.payload?.fetchedAt).filter((value): value is string => Boolean(value)).sort()
 
-      setInbound(previews.sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
-      setLivePredictions(predictions)
-      setFetchedAt(fetchedTimes.at(-1) ?? null)
-      setTrafficError(errors.length ? errors.join(' · ') : null)
-      setLoading(false)
+      setInbound((current) => mergeAirportRefresh(current, previews, targetAirports, (item) => item.airport)
+        .sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
+      setLivePredictions((current) => mergeAirportRefresh(current, predictions, targetAirports, (item) => rowAirport(item.id)))
+      setTrafficErrorsByAirport((current) => {
+        const next = { ...current }
+        for (const result of results) {
+          if (result.error) next[result.airport] = result.error
+          else delete next[result.airport]
+        }
+        return next
+      })
+      setFetchedAt((current) => fetchedTimes.at(-1) ?? current)
+      if (!announceAirport) setLoading(false)
+      if (announceAirport) {
+        const error = results.find((result) => result.airport === announceAirport)?.error ?? null
+        window.dispatchEvent(new CustomEvent('aman:airport-recompute-finished', {
+          detail: { airport: announceAirport, ok: !error, error },
+        }))
+      }
     }
 
     void loadTraffic()
     const refresh = window.setInterval(() => void loadTraffic(), AMAN_ETA_FF_REFRESH_MS)
+    const onAirportRecompute = (event: Event) => {
+      const detail = (event as CustomEvent<{ airport?: AirportCode; demo?: boolean }>).detail
+      const airport = detail?.airport
+      if (detail?.demo || !airport || !airports.includes(airport)) return
+      for (const key of routeGeometryCache.keys()) {
+        if (key.includes(`|${airport}|`)) routeGeometryCache.delete(key)
+      }
+      setCanonicalEtaById((current) => Object.fromEntries(
+        Object.entries(current).filter(([id]) => rowAirport(id) !== airport),
+      ))
+      void loadTraffic([airport], airport)
+    }
+    window.addEventListener('aman:recompute-airport', onAirportRecompute)
     return () => {
       disposed = true
       window.clearInterval(refresh)
+      window.removeEventListener('aman:recompute-airport', onAirportRecompute)
     }
   }, [airports, operationalConfig, operationalTimings])
+
+  useEffect(() => {
+    if (!demoMode) return
+    const withoutAirport = <T,>(current: Record<string, T>, airport: AirportCode) => Object.fromEntries(
+      Object.entries(current).filter(([id]) => rowAirport(id) !== airport),
+    ) as Record<string, T>
+    const onDemoAirportRecompute = (event: Event) => {
+      const detail = (event as CustomEvent<{ airport?: AirportCode; demo?: boolean }>).detail
+      const airport = detail?.airport
+      if (!detail?.demo || !airport || !airports.includes(airport)) return
+
+      const anchor = new Date()
+      anchor.setUTCSeconds(0, 0)
+      setDemoAnchors((current) => current ? { ...current, [airport]: anchor } : current)
+      setManualTldt((current) => withoutAirport(current, airport))
+      setManualRunways((current) => withoutAirport(current, airport))
+      setStableIds((current) => withoutAirport(current, airport))
+      setAutoReturnFloorTldt((current) => withoutAirport(current, airport))
+      if (dragRef.current && rowAirport(dragRef.current.id) === airport) dragRef.current = null
+      setDraggingId((current) => current && rowAirport(current) === airport ? null : current)
+      window.dispatchEvent(new CustomEvent('aman:airport-recompute-finished', {
+        detail: { airport, ok: true, demo: true },
+      }))
+    }
+    window.addEventListener('aman:recompute-airport', onDemoAirportRecompute)
+    return () => window.removeEventListener('aman:recompute-airport', onDemoAirportRecompute)
+  }, [airports, demoMode])
 
   const toggleDemo = () => {
     resetManualState()
     if (demoMode) {
       setDemoMode(false)
-      setDemoAnchor(null)
+      setDemoAnchors(null)
       return
     }
     const anchor = new Date()
     anchor.setUTCSeconds(0, 0)
-    setDemoAnchor(anchor)
+    setDemoAnchors({ VTBD: anchor, VTBS: anchor })
     setDemoMode(true)
   }
 

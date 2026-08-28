@@ -207,20 +207,12 @@ async function showInformation(row: HTMLElement, identity: RowIdentity) {
   panel.appendChild(body)
 }
 
-function recompute(row: HTMLElement, identity: RowIdentity) {
+function recompute(identity: RowIdentity) {
   closeMenu()
-  if (identity.demo) {
-    const toggle = document.querySelector<HTMLButtonElement>('.aman-demo-toggle')
-    if (!toggle) return
-    toggle.click()
-    window.setTimeout(() => toggle.click(), 50)
-    showMessage(`${identity.callsign}: test traffic recomputed`)
-    return
-  }
-
-  showMessage(`${identity.callsign}: recomputing live ETA / sequence…`)
-  // Reload clears browser route/ETA caches and immediately rebuilds the current live view.
-  window.setTimeout(() => window.location.reload(), 120)
+  showMessage(`${identity.airport}: recomputing ${identity.demo ? 'test' : 'live'} traffic…`)
+  window.dispatchEvent(new CustomEvent('aman:recompute-airport', {
+    detail: { airport: identity.airport, demo: identity.demo },
+  }))
 }
 
 function returnAuto(row: HTMLElement) {
@@ -244,7 +236,7 @@ function buildMenu(row: HTMLElement, identity: RowIdentity, x: number, y: number
 
   menu.appendChild(section('FLIGHT'))
   menu.appendChild(button('Information', () => void showInformation(row, identity)))
-  menu.appendChild(button(identity.demo ? 'Recompute Test Traffic' : 'Recompute', () => recompute(row, identity)))
+  menu.appendChild(button(identity.demo ? `Recompute ${identity.airport} Test Traffic` : `Recompute ${identity.airport}`, () => recompute(identity)))
   menu.appendChild(button('Return to AUTO', () => returnAuto(row)))
 
   const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
@@ -326,9 +318,18 @@ export function installMaestroOpsMenuRuntime() {
     }
   }
 
+  const onRecomputeFinished = (event: Event) => {
+    const detail = (event as CustomEvent<{ airport?: string; ok?: boolean; error?: string | null; demo?: boolean }>).detail
+    if (!detail?.airport) return
+    showMessage(detail.ok
+      ? `${detail.airport}: ${detail.demo ? 'test traffic' : 'ETA / sequence'} recomputed`
+      : `${detail.airport}: recompute failed${detail.error ? ` · ${detail.error}` : ''}`)
+  }
+
   document.addEventListener('contextmenu', onContextMenu, true)
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('keydown', onKeyDown)
+  window.addEventListener('aman:airport-recompute-finished', onRecomputeFinished)
 
   return () => {
     closeMenu()
@@ -336,6 +337,7 @@ export function installMaestroOpsMenuRuntime() {
     document.removeEventListener('contextmenu', onContextMenu, true)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('aman:airport-recompute-finished', onRecomputeFinished)
     document.querySelector('.aman-runtime-toast')?.remove()
   }
 }
