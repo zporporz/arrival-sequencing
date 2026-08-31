@@ -15,6 +15,41 @@ afterEach(() => {
 })
 
 describe('shared runtime consolidation', () => {
+  it('saves a programmatic LAND SEP reset to the shared workspace', async () => {
+    const serviceDate = new Date().toISOString().slice(0, 10)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ serviceDate, workspaceStates: [], flightStates: [], sequenceOrders: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        workspaceState: {
+          service_date: serviceDate,
+          airport: 'VTBS',
+          profile_id: 'CUSTOM',
+          runway_modes: { '19': 'MIX', '20L': 'DEP', '20R': 'ARR' },
+          spacing_nm: { '19': 5.5, '20L': 8, '20R': 6 },
+          revision: 2,
+        },
+      }))
+    document.body.innerHTML = `
+      <div class="aman-runway-config-block">
+        <div class="aman-profile-select"><span>VTBS CONFIG</span><select><option selected>CUSTOM</option></select></div>
+        <div class="aman-runway-card"><b>19</b><select><option selected>MIX</option></select><input value="5.5"></div>
+        <div class="aman-runway-card"><b>20L</b><select><option selected>DEP</option></select><input value="8"></div>
+        <div class="aman-runway-card"><b>20R</b><select><option selected>ARR</option></select><input value="6"></div>
+      </div>`
+    const removeRuntime = installSharedAmanRuntime()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    window.dispatchEvent(new CustomEvent('aman:workspace-config-change', { detail: { airport: 'VTBS' } }))
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 1_000 })
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      action: 'syncWorkspace',
+      airport: 'VTBS',
+      spacingNm: { '19': 5.5, '20L': 8, '20R': 6 },
+    })
+    removeRuntime()
+  })
+
   it('restores a persisted MANUAL target when its live row renders after shared state', async () => {
     const serviceDate = new Date().toISOString().slice(0, 10)
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({

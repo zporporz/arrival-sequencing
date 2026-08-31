@@ -167,6 +167,14 @@ const DEFAULT_SPACING_NM: Record<string, number> = {
   'VTBS:20R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['20R'],
 }
 
+export function resetAirportSpacing(current: Record<string, number>, airport: AirportCode) {
+  const next = { ...current }
+  for (const runway of RUNWAYS[airport]) {
+    next[spacingKey(airport, runway)] = DEFAULT_SPACING_NM[spacingKey(airport, runway)]
+  }
+  return next
+}
+
 const DEMO_SPECS: Record<AirportCode, readonly DemoSpec[]> = {
   VTBD: [
     { callsign: 'THA101', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'WEHHA', naturalLandingOffsetMinutes: 8 },
@@ -1116,6 +1124,11 @@ export default function App() {
     }
   }
 
+  const resetRunwaySpacing = (airport: AirportCode) => {
+    setSpacingNm((current) => resetAirportSpacing(current, airport))
+    window.dispatchEvent(new CustomEvent('aman:workspace-config-change', { detail: { airport } }))
+  }
+
   const setOperationalState = (airport: AirportCode, callsign: string, state: OperationalState) => {
     const key = flightKey(airport, callsign)
     setOperationalStateByKey((current) => ({ ...current, [key]: state }))
@@ -1433,13 +1446,19 @@ export default function App() {
       </div>
       <div className="aman-runway-config-control">
         {airports.map((airport) => <div className="aman-runway-config-block" key={airport}>
-          <label className="aman-profile-select">
+          <div className="aman-profile-select">
             <span>{airport} CONFIG</span>
             <select value={profileByAirport[airport]} onChange={(event) => applyProfile(airport, event.target.value)}>
               {profileByAirport[airport] === 'CUSTOM' && <option value="CUSTOM">CUSTOM</option>}
               {RUNWAY_PROFILES[airport].map((profile) => <option key={profile.id} value={profile.id}>{profile.id}</option>)}
             </select>
-          </label>
+            <button
+              type="button"
+              className="aman-reset-spacing"
+              title={`Restore ${airport} LAND SEP defaults`}
+              onClick={() => resetRunwaySpacing(airport)}
+            >RESET LAND SEP</button>
+          </div>
           <div className="aman-runway-cards">
             {RUNWAYS[airport].map((runway) => {
               const mode = runwayModes[airport][runway]

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mergeAirportRefresh } from '../src/AppMaestroV24'
+import { mergeAirportRefresh, resetAirportSpacing } from '../src/AppMaestroV24'
 import { installMaestroOpsMenuRuntime } from '../src/maestroOpsMenuRuntime'
 
 afterEach(() => {
@@ -7,6 +7,24 @@ afterEach(() => {
 })
 
 describe('airport-scoped recompute', () => {
+  it('restores LAND SEP defaults for only the requested airport', () => {
+    const current = {
+      'VTBD:21R': 9,
+      'VTBD:21L': 9,
+      'VTBS:19': 10,
+      'VTBS:20L': 11,
+      'VTBS:20R': 12,
+    }
+
+    expect(resetAirportSpacing(current, 'VTBS')).toEqual({
+      'VTBD:21R': 9,
+      'VTBD:21L': 9,
+      'VTBS:19': 5.5,
+      'VTBS:20L': 8,
+      'VTBS:20R': 6,
+    })
+  })
+
   it('replaces only the requested airport data', () => {
     const current = [
       { airport: 'VTBD' as const, value: 'BD-old' },

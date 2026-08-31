@@ -564,6 +564,11 @@ export function installSharedAmanRuntime() {
     if (row && target.closest('.runway-assignment select')) queueManualTargetSave(row, 80)
   }
 
+  const onWorkspaceConfigChange = (event: Event) => {
+    const airport = String((event as CustomEvent<{ airport?: string }>).detail?.airport || '').trim().toUpperCase()
+    if (airport === 'VTBD' || airport === 'VTBS') queueWorkspaceSave(airport)
+  }
+
   const onPointerDown = (event: PointerEvent) => {
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>('.aman-flight-row') : null
     if (!row || (event.target instanceof Element && event.target.closest('select'))) return
@@ -704,6 +709,7 @@ export function installSharedAmanRuntime() {
   const onRealtimeSequenceOrder = (event: Event) => mergeSequenceOrder((event as CustomEvent<SequenceOrder>).detail)
 
   document.addEventListener('change', onChange)
+  window.addEventListener('aman:workspace-config-change', onWorkspaceConfigChange)
   document.addEventListener('pointerdown', onPointerDown)
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
@@ -735,6 +741,7 @@ export function installSharedAmanRuntime() {
     window.clearInterval(applyTimer)
     window.clearInterval(refreshTimer)
     document.removeEventListener('change', onChange)
+    window.removeEventListener('aman:workspace-config-change', onWorkspaceConfigChange)
     document.removeEventListener('pointerdown', onPointerDown)
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)

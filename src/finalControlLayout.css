@@ -166,6 +166,26 @@
   font-size: 11px;
 }
 
+.aman-reset-spacing {
+  width: 180px;
+  min-width: 180px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid #3b5570;
+  border-radius: 3px;
+  background: #0a1726;
+  color: #8fb0cf;
+  font: 900 8px/20px Consolas, monospace;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+
+.aman-reset-spacing:hover {
+  border-color: #6c94ba;
+  color: #e1effb;
+  background: #10243a;
+}
+
 .aman-runway-cards {
   flex: 0 0 auto;
   display: flex;
@@ -309,7 +329,8 @@
   }
 
   .aman-profile-select,
-  .aman-profile-select select {
+  .aman-profile-select select,
+  .aman-reset-spacing {
     flex-basis: 165px;
     width: 165px;
     min-width: 165px;
