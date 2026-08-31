@@ -17,6 +17,14 @@ const AIRPORT_REFERENCE = {
   VTBS: { lat: 13.6811, lon: 100.7473 },
 };
 
+const RUNWAY_FINAL_GEOMETRY = {
+  'VTBD:21R': { lat: 13 + 55 / 60 + 34.87 / 3600, lon: 100 + 36 / 60 + 44.62 / 3600, course: 209 },
+  'VTBD:21L': { lat: 13 + 55 / 60 + 28.33 / 3600, lon: 100 + 36 / 60 + 55.97 / 3600, course: 208 },
+  'VTBS:19': { lat: 13 + 41 / 60 + 30.17 / 3600, lon: 100 + 45 / 60 + 39.72 / 3600, course: 194.42 },
+  'VTBS:20L': { lat: 13 + 42 / 60 + 13.21 / 3600, lon: 100 + 44 / 60 + 35.44 / 3600, course: 194.42 },
+  'VTBS:20R': { lat: 13 + 42 / 60 + 0.68 / 3600, lon: 100 + 44 / 60 + 18.41 / 3600, course: 194 },
+};
+
 // If a pilot disconnects immediately after touchdown, IVAO can disappear before
 // the next Whazzup sample explicitly says LANDED/ON GROUND. In that case only
 // release the slot when the last position is very close to the airport and the
@@ -25,6 +33,18 @@ const AIRPORT_REFERENCE = {
 const LANDED_RELEASE_RADIUS_NM = 3.5;
 const LANDED_RELEASE_MAX_GS_KT = 90;
 const MISSED_REINSERT_RECENCY_MS = 2 * 60 * 1000;
+const GA_ARM_MAX_AGE_MS = 12 * 60 * 1000;
+const GA_ACTIVE_MAX_AGE_MS = 45 * 60 * 1000;
+const GA_DIRECT_INSERT_OFFSET_MS = 10 * 60 * 1000;
+const GA_TRACK_MAX_AGE_MS = 90 * 1000;
+const GA_MAX_AIRPORT_DISTANCE_NM = 15;
+const GA_MIN_CLIMB_FPM = 300;
+const GA_MIN_ALTITUDE_GAIN_FT = 80;
+const GA_REENTRY_MIN_AGE_MS = 60 * 1000;
+const GA_TERMINAL_GRACE_MS = 2 * 60 * 1000;
+const FINAL_ALONG_NM = 10;
+const FINAL_CROSS_NM = 1.5;
+const FINAL_HEADING_TOLERANCE_DEG = 35;
 
 function finite(value) {
   const number = Number(value);
@@ -66,6 +86,14 @@ function toRadians(value) {
   return value * Math.PI / 180;
 }
 
+function toDegrees(value) {
+  return value * 180 / Math.PI;
+}
+
+function angularDifference(a, b) {
+  return ((a - b + 540) % 360) - 180;
+}
+
 function distanceNm(lat1, lon1, lat2, lon2) {
   const earthRadiusNm = 3440.065;
   const dLat = toRadians(lat2 - lat1);
@@ -73,6 +101,85 @@ function distanceNm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat / 2) ** 2
     + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) ** 2;
   return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function initialBearing(lat1, lon1, lat2, lon2) {
+  const phi1 = toRadians(lat1);
+  const phi2 = toRadians(lat2);
+  const lambda = toRadians(lon2 - lon1);
+  const y = Math.sin(lambda) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambda);
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
+}
+
+export function evaluateFinalObservation(airport, flight) {
+  if (flight?.onGround !== false) return null;
+  const latitude = finite(flight?.latitude);
+  const longitude = finite(flight?.longitude);
+  const heading = finite(flight?.heading);
+  if (latitude == null || longitude == null || heading == null) return null;
+
+  let best = null;
+  for (const [key, geometry] of Object.entries(RUNWAY_FINAL_GEOMETRY)) {
+    const [geometryAirport, runway] = key.split(':');
+    if (geometryAirport !== airport) continue;
+    const direct = distanceNm(latitude, longitude, geometry.lat, geometry.lon);
+    const courseDelta = angularDifference(initialBearing(latitude, longitude, geometry.lat, geometry.lon), geometry.course);
+    const alongNm = direct * Math.cos(toRadians(courseDelta));
+    const crossNm = Math.abs(direct * Math.sin(toRadians(courseDelta)));
+    const headingDelta = Math.abs(angularDifference(heading, geometry.course));
+    if (alongNm < 0 || alongNm > FINAL_ALONG_NM || crossNm > FINAL_CROSS_NM || headingDelta > FINAL_HEADING_TOLERANCE_DEG) continue;
+    const candidate = { runway, alongNm, crossNm, headingDelta };
+    if (!best || candidate.crossNm < best.crossNm || (candidate.crossNm === best.crossNm && candidate.alongNm < best.alongNm)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function activeMissedApproach(record, nowMs) {
+  if (record?.missed_approach_active !== true) return false;
+  const detectedMs = toMillis(record?.missed_approach_detected_at, 0);
+  const expiresMs = toMillis(record?.missed_approach_expires_at, detectedMs + GA_ACTIVE_MAX_AGE_MS);
+  return detectedMs > 0 && nowMs <= expiresMs;
+}
+
+export function detectAutomaticMissedApproach(record, current, airport, nowMs) {
+  if (!record || activeMissedApproach(record, nowMs)) return null;
+  const armedMs = toMillis(record.ga_armed_at, 0);
+  if (armedMs <= 0 || nowMs - armedMs < 0 || nowMs - armedMs > GA_ARM_MAX_AGE_MS) return null;
+  const runway = cleanText(record.ga_armed_runway, 12)?.toUpperCase();
+  if (!runway || !RUNWAY_FINAL_GEOMETRY[`${airport}:${runway}`] || current?.onGround !== false) return null;
+
+  const trackMs = snapshotTimeMs(current, NaN);
+  if (!Number.isFinite(trackMs) || Math.abs(nowMs - trackMs) > GA_TRACK_MAX_AGE_MS) return null;
+  const latitude = finite(current?.latitude);
+  const longitude = finite(current?.longitude);
+  const reference = AIRPORT_REFERENCE[airport];
+  if (latitude == null || longitude == null || !reference
+    || distanceNm(reference.lat, reference.lon, latitude, longitude) > GA_MAX_AIRPORT_DISTANCE_NM) return null;
+
+  const state = String(current?.state || '').trim().toLowerCase();
+  const verticalSpeedFpm = finite(current?.verticalSpeedFpm);
+  const currentAltitude = finite(current?.altitude);
+  const armedAltitude = finite(record.ga_armed_altitude_ft);
+  const previousAltitude = finite(record?.snapshot?.altitude);
+  const altitudeReference = previousAltitude ?? armedAltitude;
+  const altitudeGain = currentAltitude != null && altitudeReference != null
+    ? currentAltitude - altitudeReference
+    : null;
+  const explicitClimb = state === 'initial climb' || state === 'departing';
+  const observedClimb = verticalSpeedFpm != null
+    && verticalSpeedFpm >= GA_MIN_CLIMB_FPM
+    && (altitudeGain == null || altitudeGain >= GA_MIN_ALTITUDE_GAIN_FT);
+  if (!explicitClimb && !observedClimb) return null;
+
+  return {
+    runway,
+    detectedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + GA_ACTIVE_MAX_AGE_MS).toISOString(),
+    targetTldt: new Date(nowMs + GA_DIRECT_INSERT_OFFSET_MS).toISOString(),
+  };
 }
 
 function snapshotTimeMs(flight, fallback) {
@@ -152,6 +259,8 @@ function hasActiveMissedReinsert(record, snapshot, nowMs) {
   if (String(record?.operational_state || 'NORMAL').trim().toUpperCase() !== 'NORMAL') return false;
   if (String(record?.target_mode || 'AUTO').trim().toUpperCase() !== 'MANUAL') return false;
 
+  if (activeMissedApproach(record, nowMs)) return true;
+
   const targetMs = toMillis(record?.manual_tldt);
   if (!Number.isFinite(targetMs) || targetMs <= nowMs) return false;
 
@@ -184,7 +293,88 @@ function sharedFields(record) {
     holdingMode: record?.holding_mode || 'AUTO',
     holdingFix: record?.holding_fix || null,
     holdingLeaveAt: record?.holding_leave_at || null,
+    missedApproachActive: record?.missed_approach_active === true,
+    missedApproachSource: record?.missed_approach_source || null,
+    missedApproachDetectedAt: record?.missed_approach_detected_at || null,
+    missedApproachExpiresAt: record?.missed_approach_expires_at || null,
   };
+}
+
+const EMPTY_GA_STATE = Object.freeze({
+  ga_armed_at: null,
+  ga_armed_runway: null,
+  ga_armed_altitude_ft: null,
+  ga_armed_track_at: null,
+  missed_approach_active: false,
+  missed_approach_source: null,
+  missed_approach_detected_at: null,
+  missed_approach_expires_at: null,
+});
+
+function gaStatePatch(record, snapshot, airport, nowMs, terminalNow) {
+  const finalObservation = evaluateFinalObservation(airport, snapshot);
+  const automatic = detectAutomaticMissedApproach(record, snapshot, airport, nowMs);
+  if (automatic) {
+    return {
+      ...EMPTY_GA_STATE,
+      missed_approach_active: true,
+      missed_approach_source: 'AUTO',
+      missed_approach_detected_at: automatic.detectedAt,
+      missed_approach_expires_at: automatic.expiresAt,
+      operational_state: 'NORMAL',
+      operational_updated_by_vid: null,
+      operational_updated_by_name: 'AMAN AUTO GA',
+      operational_updated_at: automatic.detectedAt,
+      target_mode: 'MANUAL',
+      manual_tldt: automatic.targetTldt,
+      manual_runway: automatic.runway,
+      manual_updated_by_vid: null,
+      manual_updated_by_name: 'AMAN AUTO GA',
+      manual_updated_at: automatic.detectedAt,
+      frozen_tldt: null,
+      frozen_runway: null,
+      frozen_approach_category: null,
+      frozen_distance_nm: null,
+      frozen_reference_speed_kt: null,
+      frozen_track_at: null,
+      frozen_captured_at: null,
+      frozen_captured_by_vid: null,
+      frozen_captured_by_name: null,
+    };
+  }
+
+  const active = activeMissedApproach(record, nowMs);
+  const detectedMs = toMillis(record?.missed_approach_detected_at, 0);
+  const currentState = String(snapshot?.state || '').trim().toLowerCase();
+  const currentVerticalSpeed = finite(snapshot?.verticalSpeedFpm);
+  const stillClimbingOut = currentState === 'initial climb'
+    || currentState === 'departing'
+    || (currentVerticalSpeed != null && currentVerticalSpeed >= GA_MIN_CLIMB_FPM);
+  const reenteredFinal = active
+    && finalObservation
+    && !stillClimbingOut
+    && nowMs - detectedMs >= GA_REENTRY_MIN_AGE_MS;
+  const completedLanding = active && terminalNow && nowMs - detectedMs >= GA_TERMINAL_GRACE_MS;
+  const expired = record?.missed_approach_active === true && !active;
+  const patch = !record ? { ...EMPTY_GA_STATE } : {};
+
+  if (reenteredFinal || completedLanding || expired) {
+    Object.assign(patch, {
+      missed_approach_active: false,
+      missed_approach_expires_at: null,
+    });
+  }
+
+  if (finalObservation && (!active || reenteredFinal)) {
+    Object.assign(patch, {
+      ga_armed_at: new Date(nowMs).toISOString(),
+      ga_armed_runway: finalObservation.runway,
+      ga_armed_altitude_ft: finite(snapshot?.altitude),
+      ga_armed_track_at: toIso(snapshot?.trackTimestamp) || new Date(nowMs).toISOString(),
+    });
+  }
+
+  return patch;
 }
 
 async function loadFlightStates(env, serviceDate, airport) {
@@ -277,6 +467,13 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
       rawSessionId,
     };
 
+    // ON BLOCKS / ON GROUND at the departure airport is a valid inbound that has
+    // not departed yet. Only suppress it once the same terminal indication is at
+    // the AMAN destination airport.
+    const terminalNow = snapshot.predepartureLocal !== true
+      && looksLandedAtAirport(snapshot, airport);
+    const gaPatch = gaStatePatch(record, snapshot, airport, fetchedMs, terminalNow);
+
     const write = {
       service_date: serviceDate,
       airport,
@@ -296,15 +493,12 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
       reconnect_at: reconnectAt,
       jump_nm: jumpNm,
       expected_nm: expectedNm,
+      ...gaPatch,
     };
     pendingRows.push(write);
 
-    // ON BLOCKS / ON GROUND at the departure airport is a valid inbound that has
-    // not departed yet. Only suppress it once the same terminal indication is at
-    // the AMAN destination airport.
-    const terminalNow = snapshot.predepartureLocal !== true
-      && looksLandedAtAirport(snapshot, airport);
-    const missedReinsert = terminalNow && hasActiveMissedReinsert(record, snapshot, fetchedMs);
+    const effectiveRecord = { ...(record || {}), ...gaPatch };
+    const missedReinsert = terminalNow && hasActiveMissedReinsert(effectiveRecord, snapshot, fetchedMs);
     if (terminalNow && !missedReinsert) continue;
 
     // While IVAO is still stale at LANDED after a controller-triggered GA, expose a
@@ -318,7 +512,7 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
       callsign,
       flight: {
         ...sequencingSnapshot,
-        ...sharedFields(recordForOutput(record, {
+        ...sharedFields(recordForOutput(effectiveRecord, {
           connection_phase: connectionPhase,
           reconnect_at: reconnectAt,
           jump_nm: jumpNm,

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { looksLandedAtAirport, reconcileAmanFlights, utcServiceDate } from '../functions/_lib/amanSharedState.js'
+import {
+  detectAutomaticMissedApproach,
+  evaluateFinalObservation,
+  looksLandedAtAirport,
+  reconcileAmanFlights,
+  utcServiceDate,
+} from '../functions/_lib/amanSharedState.js'
 import { isLocalPredeparturePilot } from '../functions/api/sequence/ivao-traffic.js'
 import { secondsOfDayToNearestUtc } from '../src/core/arrivalEta'
 import { installSharedAmanRuntime } from '../src/sharedAmanRuntime'
@@ -21,6 +27,24 @@ function mockFlightStateApi(existing = []) {
     if (!options.method || options.method === 'GET') return jsonResponse(existing)
     return jsonResponse(JSON.parse(String(options.body || '[]')))
   })
+}
+
+function mockMutableFlightStateApi(initial = []) {
+  const rows = initial.map((row) => ({ ...row }))
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options = {}) => {
+    if (!options.method || options.method === 'GET') return jsonResponse(rows)
+    const writes = JSON.parse(String(options.body || '[]'))
+    const result = writes.map((write) => {
+      const index = rows.findIndex((row) => row.service_date === write.service_date
+        && row.airport === write.airport && row.callsign === write.callsign)
+      const merged = { ...(index >= 0 ? rows[index] : {}), ...write }
+      if (index >= 0) rows[index] = merged
+      else rows.push(merged)
+      return merged
+    })
+    return jsonResponse(result)
+  })
+  return rows
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -162,6 +186,112 @@ describe('terminal flight protection', () => {
     }], '2026-08-25T10:00:10.000Z')
 
     expect(flights).toEqual([])
+  })
+
+  it('keeps a centrally marked GA visible while IVAO is briefly still LANDED', async () => {
+    mockMutableFlightStateApi([{
+      service_date: '2026-08-25',
+      airport: 'VTBS',
+      callsign: 'THA777',
+      canonical_session_id: 'canonical-session',
+      raw_session_id: 'raw-session',
+      operational_state: 'NORMAL',
+      target_mode: 'MANUAL',
+      manual_tldt: '2026-08-25T10:10:00.000Z',
+      manual_runway: '19',
+      manual_updated_at: '2026-08-25T10:00:00.000Z',
+      missed_approach_active: true,
+      missed_approach_source: 'MANUAL',
+      missed_approach_detected_at: '2026-08-25T10:00:00.000Z',
+      missed_approach_expires_at: '2026-08-25T10:45:00.000Z',
+      last_seen_at: '2026-08-25T09:59:45.000Z',
+      snapshot: { state: 'landed', onGround: true, trackTimestamp: '2026-08-25T09:59:45.000Z' },
+    }])
+
+    const flights = await reconcileAmanFlights(env, 'VTBS', [{
+      callsign: 'THA777',
+      sessionId: 'raw-session',
+      state: 'landed',
+      onGround: true,
+      arrival: 'VTBS',
+      latitude: 13.6811,
+      longitude: 100.7473,
+      groundSpeed: 0,
+      trackTimestamp: '2026-08-25T10:00:20.000Z',
+    }], '2026-08-25T10:00:30.000Z')
+
+    expect(flights).toHaveLength(1)
+    expect(flights[0]).toMatchObject({
+      callsign: 'THA777',
+      state: 'initial climb',
+      onGround: false,
+      operationalReinsert: true,
+      targetMode: 'MANUAL',
+      manualTldt: '2026-08-25T10:10:00.000Z',
+      missedApproachActive: true,
+    })
+  })
+})
+
+describe('automatic go-around detection', () => {
+  const finalTrack = {
+    callsign: 'THA456',
+    sessionId: 'raw-session',
+    arrival: 'VTBS',
+    state: 'approach',
+    onGround: false,
+    latitude: 13.772,
+    longitude: 100.781,
+    heading: 194.42,
+    altitude: 1_000,
+    verticalSpeedFpm: -600,
+    groundSpeed: 150,
+    trackTimestamp: '2026-08-25T10:00:00.000Z',
+  }
+
+  it('recognizes an aligned VTBS final and rejects an ordinary descent as GA', () => {
+    expect(evaluateFinalObservation('VTBS', finalTrack)).toMatchObject({ runway: '19' })
+    expect(detectAutomaticMissedApproach({
+      ga_armed_at: '2026-08-25T10:00:00.000Z',
+      ga_armed_runway: '19',
+      ga_armed_altitude_ft: 1_000,
+      snapshot: finalTrack,
+    }, {
+      ...finalTrack,
+      trackTimestamp: '2026-08-25T10:00:15.000Z',
+      altitude: 900,
+      verticalSpeedFpm: -500,
+    }, 'VTBS', Date.parse('2026-08-25T10:00:15.000Z'))).toBeNull()
+  })
+
+  it('arms on final, then persists a climbing transition as a shared AUTO GA target', async () => {
+    const rows = mockMutableFlightStateApi()
+    await reconcileAmanFlights(env, 'VTBS', [finalTrack], '2026-08-25T10:00:05.000Z')
+    expect(rows[0]).toMatchObject({ ga_armed_runway: '19', missed_approach_active: false })
+
+    const flights = await reconcileAmanFlights(env, 'VTBS', [{
+      ...finalTrack,
+      state: 'initial climb',
+      altitude: 1_200,
+      verticalSpeedFpm: 900,
+      trackTimestamp: '2026-08-25T10:00:20.000Z',
+    }], '2026-08-25T10:00:25.000Z')
+
+    expect(rows[0]).toMatchObject({
+      missed_approach_active: true,
+      missed_approach_source: 'AUTO',
+      target_mode: 'MANUAL',
+      manual_tldt: '2026-08-25T10:10:25.000Z',
+      manual_runway: '19',
+      frozen_tldt: null,
+    })
+    expect(flights[0]).toMatchObject({
+      callsign: 'THA456',
+      targetMode: 'MANUAL',
+      manualTldt: '2026-08-25T10:10:25.000Z',
+      missedApproachActive: true,
+      missedApproachSource: 'AUTO',
+    })
   })
 })
 

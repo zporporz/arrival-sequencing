@@ -42,6 +42,10 @@ type FlightState = {
   frozen_reference_speed_kt: number | null
   frozen_track_at: string | null
   frozen_captured_at: string | null
+  missed_approach_active: boolean
+  missed_approach_source: 'MANUAL' | 'AUTO' | null
+  missed_approach_detected_at: string | null
+  missed_approach_expires_at: string | null
   holding_mode: 'AUTO' | 'HOLD' | 'NO_HOLD'
   holding_fix: string | null
   holding_leave_at: string | null

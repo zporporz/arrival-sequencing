@@ -100,6 +100,10 @@ type SharedOperationalFlight = {
   frozen_reference_speed_kt?: number | null
   frozen_track_at?: string | null
   frozen_captured_at?: string | null
+  missed_approach_active?: boolean | null
+  missed_approach_source?: 'MANUAL' | 'AUTO' | null
+  missed_approach_detected_at?: string | null
+  missed_approach_expires_at?: string | null
   operational_state?: OperationalState | null
   reserved_gap_seconds?: number | null
 }
@@ -1453,6 +1457,7 @@ export default function App() {
                 data-performance-category={row.performanceCategory || undefined}
                 data-frozen-tldt={sharedFlight?.frozen_tldt || undefined}
                 data-frozen-approach-category={sharedFlight?.frozen_approach_category || undefined}
+                data-missed-approach-active={sharedFlight?.missed_approach_active ? 'true' : undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}

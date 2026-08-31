@@ -16,6 +16,8 @@ const DEFAULT_WORKSPACE_SETTINGS = {
   vtbsArrivalCapacityMaxPerHour: 37,
 };
 
+const MISSED_APPROACH_ACTIVE_MS = 45 * 60 * 1000;
+
 export const APPROACH_CATEGORY_REFERENCE_SPEED_KT = Object.freeze({
   A: 90,
   B: 120,
@@ -386,6 +388,7 @@ export async function onRequestPost(context) {
       const suppliedRunway = cleanText(payload.manualRunway, 12)?.toUpperCase() || null;
       const manualRunway = suppliedRunway || existing?.manual_runway || null;
       const updatedAt = new Date().toISOString();
+      const expiresAt = new Date(new Date(updatedAt).getTime() + MISSED_APPROACH_ACTIVE_MS).toISOString();
 
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
@@ -394,6 +397,10 @@ export async function onRequestPost(context) {
         // the missed-approach protection; landed-history capture suppresses it until
         // that target has passed, so the aircraft cannot instantly become LANDED again.
         operational_state: 'NORMAL',
+        missed_approach_active: true,
+        missed_approach_source: 'MANUAL',
+        missed_approach_detected_at: updatedAt,
+        missed_approach_expires_at: expiresAt,
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
         manual_runway: manualRunway,
@@ -415,6 +422,8 @@ export async function onRequestPost(context) {
       if (!autoReturnRunway) throw new Error('Current AUTO runway is required');
       const row = await patchFlightState(context.env, serviceDate, airport, callsign, {
         target_mode: 'AUTO',
+        missed_approach_active: false,
+        missed_approach_expires_at: null,
         manual_tldt: null,
         manual_runway: null,
         manual_updated_by_vid: auth.vid,
@@ -456,6 +465,10 @@ export async function onRequestPost(context) {
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
         ...(operationalState === 'MISSED_APPROACH' ? EMPTY_FROZEN_TARGET : {}),
+        ...(operationalState === 'NORMAL' ? {} : {
+          missed_approach_active: false,
+          missed_approach_expires_at: null,
+        }),
         operational_state: operationalState,
         operational_updated_by_vid: auth.vid,
         operational_updated_by_name: auth.name,

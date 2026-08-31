@@ -77,8 +77,9 @@ async function postAman(body: Record<string, unknown>) {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ serviceDate: new Date().toISOString().slice(0, 10), ...body }),
   })
-  const payload = await response.json().catch(() => ({})) as { error?: string }
+  const payload = await response.json().catch(() => ({})) as { error?: string; flightState?: unknown }
   if (!response.ok) throw new Error(payload.error || `AMAN API returned ${response.status}`)
+  return payload
 }
 
 async function dismissLanded(airport: AirportCode, callsign: string) {
@@ -182,13 +183,18 @@ async function directInsert(identity: ActiveIdentity, fromLanded: boolean) {
   const { airport, callsign, runway } = identity
   if (fromLanded) await verifyActiveLandedGoAround(identity as LandedIdentity)
   const targetMs = Date.now() + DIRECT_INSERT_OFFSET_MS
-  await postAman({
+  const result = await postAman({
     action: 'setMissedApproachTarget',
     airport,
     callsign,
     manualTldt: new Date(targetMs).toISOString(),
     manualRunway: runway,
   })
+  if (result.flightState) {
+    window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+      detail: { airport, flightState: result.flightState },
+    }))
+  }
   if (fromLanded) await dismissLanded(airport, callsign)
   showMessage(`${callsign}: GA/MISSED inserted ${formatHm(targetMs)}Z (+10M)`)
 
