@@ -10,7 +10,10 @@ const FROZEN_BEFORE_TLDT_MINUTES = 4
 // authoritative for downstream separation, including SUPERSTABLE/FROZEN followers.
 const lockedEtaFfByKey = new Map<string, number>()
 const frozenStatusByKey = new Set<string>()
+const frozenTargetRequestAtByKey = new Map<string, number>()
 let immediateRefreshQueued = false
+
+const FROZEN_TARGET_RETRY_MS = 5_000
 
 function parseClock(value: string) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
@@ -95,6 +98,46 @@ function applyStatusClass(element: HTMLElement, status: AmanFlightStatus) {
   element.classList.remove('status-unstable', 'status-stable', 'status-superstable', 'status-frozen')
   element.classList.add(className)
   element.dataset.flightStatus = status
+}
+
+function rowRunway(row: HTMLElement) {
+  const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
+  if (select?.value) return select.value.trim().toUpperCase()
+  const title = row.getAttribute('title') || ''
+  return title.match(/RWY\s+([A-Z0-9]+)/i)?.[1]?.toUpperCase() || ''
+}
+
+function requestFrozenTarget(row: HTMLElement, key: string, nowMs: number) {
+  if (row.dataset.frozenTldt) return
+  const previousRequestAt = frozenTargetRequestAtByKey.get(key)
+  if (previousRequestAt != null && nowMs - previousRequestAt < FROZEN_TARGET_RETRY_MS) return
+
+  const approachCategory = String(row.dataset.performanceCategory || '').trim().toUpperCase()
+  const distanceNm = Number(row.dataset.finalAlongNm)
+  const trackAtMs = new Date(row.dataset.finalTrackAt || '').getTime()
+  const airport = rowAirport(row)
+  const callsign = rowCallsign(row)
+  const runway = rowRunway(row)
+  if (!['A', 'B', 'C', 'D', 'E', 'H'].includes(approachCategory)
+    || !Number.isFinite(distanceNm)
+    || distanceNm < 0
+    || distanceNm > 10
+    || !Number.isFinite(trackAtMs)
+    || !airport
+    || !callsign
+    || !runway) return
+
+  frozenTargetRequestAtByKey.set(key, nowMs)
+  window.dispatchEvent(new CustomEvent('aman:frozen-target-request', {
+    detail: {
+      airport,
+      callsign,
+      runway,
+      approachCategory,
+      distanceNm,
+      trackAt: new Date(trackAtMs).toISOString(),
+    },
+  }))
 }
 
 export function resolveFrozenTrigger(input: {
@@ -188,7 +231,10 @@ function refreshRows() {
     applyStatusClass(row, status)
 
     delete row.dataset.superstableTldt
-    delete row.dataset.frozenTldt
+
+    if (status === 'FROZEN' && row.dataset.frozenTrigger === '10NM_FINAL') {
+      requestFrozenTarget(row, key, now.getTime())
+    }
 
     const callsign = rowCallsign(row)
     if (callsign) statusByCallsign.set(callsign, status)
@@ -222,7 +268,10 @@ function refreshRows() {
     if (!activeKeys.has(key)) lockedEtaFfByKey.delete(key)
   }
   for (const key of frozenStatusByKey) {
-    if (!activeKeys.has(key)) frozenStatusByKey.delete(key)
+    if (!activeKeys.has(key)) {
+      frozenStatusByKey.delete(key)
+      frozenTargetRequestAtByKey.delete(key)
+    }
   }
 }
 
@@ -259,5 +308,6 @@ export function installEtaFfLifecycleRuntime() {
     immediateRefreshQueued = false
     lockedEtaFfByKey.clear()
     frozenStatusByKey.clear()
+    frozenTargetRequestAtByKey.clear()
   }
 }

@@ -125,6 +125,61 @@ describe('FROZEN detection', () => {
       nowMs: now,
     })).toBe('10NM_FINAL')
   })
+
+  it('requests one category target capture when live final geometry enters FROZEN', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    document.body.innerHTML = `
+      <div class="aman-flight-row" data-final-geometry-available="true" data-final-ten-nm="true"
+        data-final-along-nm="9.8" data-final-track-at="2026-08-25T10:00:00.000Z"
+        data-performance-category="C"
+        title="ETA-FF 09:45:00Z · STA/TLDT 10:10:00Z · STA-FF/TTO 09:45:00Z · VTBS RWY 19">
+        <span></span><strong>THA123</strong><span></span><span></span><span>09:45</span>
+        <em class="runway-assignment">19</em>
+      </div>
+    `
+    const requests: unknown[] = []
+    const onRequest = (event: Event) => requests.push((event as CustomEvent).detail)
+    window.addEventListener('aman:frozen-target-request', onRequest)
+
+    const removeRuntime = installEtaFfLifecycleRuntime()
+    vi.advanceTimersByTime(1_000)
+
+    expect(document.querySelector<HTMLElement>('.aman-flight-row')?.dataset.flightStatus).toBe('FROZEN')
+    expect(requests).toEqual([{
+      airport: 'VTBS',
+      callsign: 'THA123',
+      runway: '19',
+      approachCategory: 'C',
+      distanceNm: 9.8,
+      trackAt: '2026-08-25T10:00:00.000Z',
+    }])
+
+    removeRuntime()
+    window.removeEventListener('aman:frozen-target-request', onRequest)
+    vi.useRealTimers()
+  })
+
+  it('does not category-recompute the four-minute fallback without final geometry', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    document.body.innerHTML = `
+      <div class="aman-flight-row" data-final-geometry-available="false" data-final-ten-nm="false"
+        data-performance-category="C"
+        title="ETA-FF 09:45:00Z · STA/TLDT 10:04:00Z · STA-FF/TTO 09:45:00Z · VTBS RWY 19">
+        <span></span><strong>THA123</strong><span></span><span></span><span>09:45</span>
+      </div>
+    `
+    const onRequest = vi.fn()
+    window.addEventListener('aman:frozen-target-request', onRequest)
+    const removeRuntime = installEtaFfLifecycleRuntime()
+    vi.advanceTimersByTime(1_000)
+    expect(document.querySelector<HTMLElement>('.aman-flight-row')?.dataset.frozenTrigger).toBe('TLDT_4MIN_FALLBACK')
+    expect(onRequest).not.toHaveBeenCalled()
+    removeRuntime()
+    window.removeEventListener('aman:frozen-target-request', onRequest)
+    vi.useRealTimers()
+  })
 })
 
 describe('STABLE ETA lock', () => {

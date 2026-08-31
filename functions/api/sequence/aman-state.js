@@ -16,6 +16,15 @@ const DEFAULT_WORKSPACE_SETTINGS = {
   vtbsArrivalCapacityMaxPerHour: 37,
 };
 
+export const APPROACH_CATEGORY_REFERENCE_SPEED_KT = Object.freeze({
+  A: 90,
+  B: 120,
+  C: 140,
+  D: 165,
+  E: 210,
+  H: 90,
+});
+
 function cleanText(value, max = 500) {
   const text = String(value ?? '').trim();
   return text ? text.slice(0, max) : null;
@@ -71,6 +80,39 @@ function cleanPositiveInteger(value) {
   if (!Number.isInteger(number) || number <= 0) throw new Error('AUTO baseline rank must be a positive integer');
   return number;
 }
+
+export function frozenTargetForApproachCategory(input) {
+  const approachCategory = String(input?.approachCategory || '').trim().toUpperCase();
+  const referenceSpeedKt = APPROACH_CATEGORY_REFERENCE_SPEED_KT[approachCategory];
+  const distanceNm = Number(input?.distanceNm);
+  const trackAtMs = new Date(String(input?.trackAt || '')).getTime();
+  if (!referenceSpeedKt) throw new Error('Valid approach category is required');
+  if (!Number.isFinite(distanceNm) || distanceNm < 0 || distanceNm > 10) {
+    throw new Error('Final distance must be between 0 and 10 NM');
+  }
+  if (!Number.isFinite(trackAtMs)) throw new Error('Valid final track time is required');
+
+  const targetMs = trackAtMs + distanceNm / referenceSpeedKt * 3_600_000;
+  return {
+    approachCategory,
+    distanceNm,
+    referenceSpeedKt,
+    trackAt: new Date(trackAtMs).toISOString(),
+    frozenTldt: new Date(targetMs).toISOString(),
+  };
+}
+
+const EMPTY_FROZEN_TARGET = Object.freeze({
+  frozen_tldt: null,
+  frozen_runway: null,
+  frozen_approach_category: null,
+  frozen_distance_nm: null,
+  frozen_reference_speed_kt: null,
+  frozen_track_at: null,
+  frozen_captured_at: null,
+  frozen_captured_by_vid: null,
+  frozen_captured_by_name: null,
+});
 
 export function autoBaselineForManualTarget(existing, payload, capturedAt = new Date().toISOString()) {
   if (String(existing?.target_mode || '').toUpperCase() === 'MANUAL') {
@@ -136,6 +178,32 @@ async function patchFlightState(env, serviceDate, airport, callsign, patch) {
       method: 'PATCH',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify(patch),
+    },
+  );
+  return result.data?.[0] || null;
+}
+
+async function patchUnfrozenFlightState(env, serviceDate, airport, callsign, patch) {
+  const result = await supabaseAdminRequest(
+    env,
+    `aman_flight_states?service_date=eq.${encodeURIComponent(serviceDate)}&airport=eq.${encodeURIComponent(airport)}&callsign=eq.${encodeURIComponent(callsign)}&frozen_tldt=is.null&select=*`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(patch),
+    },
+  );
+  return result.data?.[0] || null;
+}
+
+async function insertFrozenFlightState(env, row) {
+  const result = await supabaseAdminRequest(
+    env,
+    'aman_flight_states?on_conflict=service_date,airport,callsign&select=*',
+    {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify([row]),
     },
   );
   return result.data?.[0] || null;
@@ -258,6 +326,43 @@ export async function onRequestPost(context) {
     if (!airport || !callsign) throw new Error('Airport and callsign are required');
     const existing = await getFlightState(context.env, serviceDate, airport, callsign);
 
+    if (action === 'setFrozenTarget') {
+      if (existing?.frozen_tldt) return json({ ok: true, flightState: existing });
+      const runway = cleanRunway(payload.runway);
+      if (!runway) throw new Error('Landing runway is required');
+      const calculated = frozenTargetForApproachCategory(payload);
+      const serverNow = Date.now();
+      const trackAtMs = new Date(calculated.trackAt).getTime();
+      if (trackAtMs < serverNow - 3 * 60_000 || trackAtMs > serverNow + 30_000) {
+        throw new Error('Final track sample is stale');
+      }
+      const capturedAt = new Date().toISOString();
+      const frozenPatch = {
+        frozen_tldt: calculated.frozenTldt,
+        frozen_runway: runway,
+        frozen_approach_category: calculated.approachCategory,
+        frozen_distance_nm: calculated.distanceNm,
+        frozen_reference_speed_kt: calculated.referenceSpeedKt,
+        frozen_track_at: calculated.trackAt,
+        frozen_captured_at: capturedAt,
+        frozen_captured_by_vid: auth.vid,
+        frozen_captured_by_name: auth.name,
+      };
+
+      let row = await patchUnfrozenFlightState(context.env, serviceDate, airport, callsign, frozenPatch);
+      if (!row && !existing) {
+        row = await insertFrozenFlightState(context.env, {
+          ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+          ...frozenPatch,
+        });
+      }
+      // Two controllers can detect the same 10 NM crossing together. The conditional
+      // PATCH makes the first accepted value canonical; always return that stored row.
+      row = row || await getFlightState(context.env, serviceDate, airport, callsign);
+      if (!row?.frozen_tldt) throw new Error('Could not capture FROZEN target');
+      return json({ ok: true, flightState: row });
+    }
+
     if (action === 'setManualTarget') {
       const manualTldt = cleanIso(payload.manualTldt, true);
       const manualRunway = cleanText(payload.manualRunway, 12)?.toUpperCase();
@@ -284,6 +389,7 @@ export async function onRequestPost(context) {
 
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        ...EMPTY_FROZEN_TARGET,
         // Reinsert immediately into the active sequence. The future MANUAL target is
         // the missed-approach protection; landed-history capture suppresses it until
         // that target has passed, so the aircraft cannot instantly become LANDED again.
@@ -349,6 +455,7 @@ export async function onRequestPost(context) {
       }
       const row = await upsertFlightState(context.env, {
         ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+        ...(operationalState === 'MISSED_APPROACH' ? EMPTY_FROZEN_TARGET : {}),
         operational_state: operationalState,
         operational_updated_by_vid: auth.vid,
         operational_updated_by_name: auth.name,

@@ -93,6 +93,13 @@ type SharedOperationalFlight = {
   auto_return_floor_tldt?: string | null
   auto_return_runway?: string | null
   auto_returned_at?: string | null
+  frozen_tldt?: string | null
+  frozen_runway?: string | null
+  frozen_approach_category?: string | null
+  frozen_distance_nm?: number | null
+  frozen_reference_speed_kt?: number | null
+  frozen_track_at?: string | null
+  frozen_captured_at?: string | null
   operational_state?: OperationalState | null
   reserved_gap_seconds?: number | null
 }
@@ -612,6 +619,13 @@ export function currentSharedAutoReturnOverrides(
   for (const prediction of predictions) {
     const state = byFlight.get(predictionFlightKey(prediction))
     if (state?.target_mode !== 'AUTO') continue
+    const frozenTargetMs = new Date(state.frozen_tldt || '').getTime()
+    const frozenRunway = String(state.frozen_runway || '').trim().toUpperCase()
+    if (Number.isFinite(frozenTargetMs)) {
+      tldtById[prediction.id] = new Date(frozenTargetMs).toISOString()
+      if (frozenRunway) runwayById[prediction.id] = frozenRunway
+      continue
+    }
     const targetMs = new Date(state.auto_return_tldt || '').getTime()
     const floorMs = new Date(state.auto_return_floor_tldt || '').getTime()
     const returnedAtMs = new Date(state.auto_returned_at || '').getTime()
@@ -744,6 +758,10 @@ export default function App() {
   const sharedAutoReturnOverrides = useMemo(
     () => currentSharedAutoReturnOverrides(effectiveLivePredictions, sharedOperationalFlights, now.getTime()),
     [effectiveLivePredictions, now, sharedOperationalFlights],
+  )
+  const sharedOperationalFlightByKey = useMemo(
+    () => new Map(sharedOperationalFlights.map((state) => [flightKey(state.airport, state.callsign), state])),
+    [sharedOperationalFlights],
   )
   const effectiveLiveRunways = useMemo(
     () => ({ ...sharedAutoReturnOverrides.runwayById, ...manualRunways }),
@@ -1421,6 +1439,7 @@ export default function App() {
               const gapSeconds = Math.max(0, gapAfterSecondsById[row.id] ?? 0)
               const autoBaselineRow = (demoMode ? demoBaseSequence : liveBaseSequence)
                 .find((candidate) => candidate.id === row.id)
+              const sharedFlight = sharedOperationalFlightByKey.get(flightKey(airport, row.callsign))
 
               return <div
                 key={row.id}
@@ -1431,6 +1450,9 @@ export default function App() {
                 data-auto-baseline-tldt={autoBaselineRow?.tldt}
                 data-auto-baseline-runway={autoBaselineRow?.runway}
                 data-auto-baseline-rank={autoBaselineRow?.sequenceIndex}
+                data-performance-category={row.performanceCategory || undefined}
+                data-frozen-tldt={sharedFlight?.frozen_tldt || undefined}
+                data-frozen-approach-category={sharedFlight?.frozen_approach_category || undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}

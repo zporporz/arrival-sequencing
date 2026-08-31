@@ -35,6 +35,13 @@ type FlightState = {
   auto_returned_at: string | null
   auto_returned_by_vid: string | null
   auto_returned_by_name: string | null
+  frozen_tldt: string | null
+  frozen_runway: string | null
+  frozen_approach_category: string | null
+  frozen_distance_nm: number | null
+  frozen_reference_speed_kt: number | null
+  frozen_track_at: string | null
+  frozen_captured_at: string | null
   holding_mode: 'AUTO' | 'HOLD' | 'NO_HOLD'
   holding_fix: string | null
   holding_leave_at: string | null
@@ -62,6 +69,15 @@ type RealtimeManualRelease = {
   originalTargetAt?: string | null
   originalRunway?: string
   originalWasManual?: boolean
+}
+
+type FrozenTargetRequest = {
+  airport?: string
+  callsign?: string
+  runway?: string
+  approachCategory?: string
+  distanceNm?: number
+  trackAt?: string
 }
 
 type SharedStatePayload = {
@@ -635,6 +651,41 @@ export function installSharedAmanRuntime() {
   }
 
   const onForceRefresh = () => void refresh()
+  const onFrozenTargetRequest = (event: Event) => {
+    const detail = (event as CustomEvent<FrozenTargetRequest>).detail
+    const airport = String(detail?.airport || '').trim().toUpperCase()
+    const callsign = String(detail?.callsign || '').trim().toUpperCase()
+    const runway = String(detail?.runway || '').trim().toUpperCase()
+    const approachCategory = String(detail?.approachCategory || '').trim().toUpperCase()
+    const distanceNm = Number(detail?.distanceNm)
+    const trackAt = String(detail?.trackAt || '')
+    if (!airport || !callsign || !runway || !approachCategory || !Number.isFinite(distanceNm) || !trackAt) return
+
+    void (async () => {
+      try {
+        const result = await writeSharedState({
+          action: 'setFrozenTarget',
+          serviceDate,
+          airport,
+          callsign,
+          runway,
+          approachCategory,
+          distanceNm,
+          trackAt,
+        })
+        if (result.flightState) {
+          mergeFlight(result.flightState)
+          applyFlight(result.flightState)
+          window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+            detail: { airport, flightState: result.flightState },
+          }))
+        }
+        setSharedHealth('LIVE')
+      } catch (error) {
+        setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
+      }
+    })()
+  }
   const onRealtimeFlightState = (event: Event) => {
     const state = (event as CustomEvent<FlightState>).detail
     releaseOriginals.forEach((original, previewId) => {
@@ -653,6 +704,7 @@ export function installSharedAmanRuntime() {
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
   window.addEventListener('aman:force-shared-refresh', onForceRefresh)
+  window.addEventListener('aman:frozen-target-request', onFrozenTargetRequest)
   window.addEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
   window.addEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
   window.addEventListener('aman:realtime-flight-state', onRealtimeFlightState)
@@ -683,6 +735,7 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
+    window.removeEventListener('aman:frozen-target-request', onFrozenTargetRequest)
     window.removeEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
     window.removeEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
     window.removeEventListener('aman:realtime-flight-state', onRealtimeFlightState)

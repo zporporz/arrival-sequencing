@@ -135,6 +135,7 @@ function applyToRows() {
       row.dataset.finalTenNm = 'false'
       delete row.dataset.finalAlongNm
       delete row.dataset.finalCrossNm
+      delete row.dataset.finalTrackAt
       return
     }
 
@@ -146,9 +147,11 @@ function applyToRows() {
       row.dataset.finalTenNm = 'false'
       delete row.dataset.finalAlongNm
       delete row.dataset.finalCrossNm
+      delete row.dataset.finalTrackAt
       return
     }
-    const result = evaluateFinalTenNm(airport, runway, latestFlights.get(`${airport}:${callsign}`))
+    const flight = latestFlights.get(`${airport}:${callsign}`)
+    const result = evaluateFinalTenNm(airport, runway, flight)
 
     row.dataset.finalGeometryAvailable = result.available ? 'true' : 'false'
     row.dataset.finalTenNm = result.final ? 'true' : 'false'
@@ -156,6 +159,8 @@ function applyToRows() {
     else delete row.dataset.finalAlongNm
     if (result.cross != null) row.dataset.finalCrossNm = result.cross.toFixed(1)
     else delete row.dataset.finalCrossNm
+    if (result.available && flight?.trackTimestamp) row.dataset.finalTrackAt = flight.trackTimestamp
+    else delete row.dataset.finalTrackAt
   })
 }
 

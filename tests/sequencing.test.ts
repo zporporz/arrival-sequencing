@@ -485,6 +485,39 @@ describe('shared sequence reload', () => {
 })
 
 describe('authoritative current AUTO return', () => {
+  it('uses a persisted FROZEN target as the durable AUTO value for every browser', () => {
+    const arrival = prediction('THA123', 'C', '2026-08-31T10:10:00.000Z')
+    const result = currentSharedAutoReturnOverrides([arrival], [{
+      airport: 'VTBS',
+      callsign: 'THA123',
+      target_mode: 'AUTO',
+      frozen_tldt: '2026-08-31T10:14:17.143Z',
+      frozen_runway: '19',
+      frozen_approach_category: 'C',
+      frozen_distance_nm: 10,
+      frozen_reference_speed_kt: 140,
+      frozen_track_at: '2026-08-31T10:10:00.000Z',
+      frozen_captured_at: '2026-08-31T10:10:01.000Z',
+    }], Date.parse('2026-08-31T12:00:00.000Z'))
+
+    expect(result).toEqual({
+      tldtById: { [arrival.id]: '2026-08-31T10:14:17.143Z' },
+      floorById: {},
+      runwayById: { [arrival.id]: '19' },
+    })
+  })
+
+  it('does not apply a persisted FROZEN AUTO value over a MANUAL target', () => {
+    const arrival = prediction('THA123', 'C', '2026-08-31T10:10:00.000Z')
+    expect(currentSharedAutoReturnOverrides([arrival], [{
+      airport: 'VTBS',
+      callsign: 'THA123',
+      target_mode: 'MANUAL',
+      frozen_tldt: '2026-08-31T10:14:17.143Z',
+      frozen_runway: '19',
+    }])).toEqual({ tldtById: {}, floorById: {}, runwayById: {} })
+  })
+
   it('maps a fresh shared AUTO result onto the matching live session id', () => {
     const now = Date.parse('2026-08-31T10:00:30.000Z')
     const arrival = prediction('THA123', 'C', '2026-08-31T10:10:00.000Z')
