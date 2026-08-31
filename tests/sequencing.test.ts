@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyManualTargetsWithCascade, currentSharedAutoReturnOverrides } from '../src/AppMaestroV24'
+import { applyManualTargetsWithCascade, currentSharedAutoReturnOverrides, defaultArrivalRunway } from '../src/AppMaestroV24'
 import {
   autoSequenceUnstableArrivals,
   resolveAmanPairwiseSeparationSeconds,
@@ -21,13 +21,50 @@ import {
   sequenceTargetChangesOrder,
   shouldCommitSequenceReorder,
 } from '../src/manualSequenceReorderRuntime'
-import { installTimelineDisplayScaleRuntime } from '../src/timelineDisplayScaleRuntime'
+import { installTimelineDisplayScaleRuntime, packTimelineDisplayOffsets } from '../src/timelineDisplayScaleRuntime'
 import type { AircraftPerformanceCategory } from '../src/core/api'
 
 const BASE_SECONDS = 150
 const sevenNmSeconds = 7 / 140 * 3600
 const twelveNmSeconds = 12 / 140 * 3600
 const categories: AircraftPerformanceCategory[] = ['A', 'B', 'C', 'D', 'E', 'H']
+
+describe('VTBS runway assignment and display packing', () => {
+  it('uses runway 19 as the AUTO runway while it is available', () => {
+    expect(defaultArrivalRunway('VTBS', ['19', '20R'], 'THA123')).toBe('19')
+    expect(defaultArrivalRunway('VTBS', ['20L', '20R'], 'THA123')).toBe('20L')
+  })
+
+  it('packs one-minute cross-runway strips so their labels touch instead of overlap', () => {
+    const packed = packTimelineDisplayOffsets([
+      { key: 'VTBS:THA1', idealOffsetPx: 0 },
+      { key: 'VTBS:THA2', idealOffsetPx: 9 },
+      { key: 'VTBS:THA3', idealOffsetPx: 30 },
+    ], 12)
+
+    expect(Object.fromEntries(packed)).toEqual({
+      'VTBS:THA1': 0,
+      'VTBS:THA2': 12,
+      'VTBS:THA3': 30,
+    })
+  })
+
+  it('applies packed positions to close labels on the same display side', () => {
+    document.body.innerHTML = `
+      <div class="aman-flight-row" data-display-side="RIGHT" style="--offset-px: 0px" title="VTBS RWY 19"><strong>THA1</strong></div>
+      <div class="aman-flight-row" data-display-side="RIGHT" style="--offset-px: 10px" title="VTBS RWY 20R"><strong>THA2</strong></div>`
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
+    rows.forEach((row) => Object.defineProperty(row, 'getBoundingClientRect', {
+      value: () => ({ left: 0, right: 100, top: 0, bottom: 12, width: 100, height: 12, x: 0, y: 0, toJSON: () => ({}) }),
+      configurable: true,
+    }))
+
+    const removeRuntime = installTimelineDisplayScaleRuntime()
+    expect(rows[0].style.getPropertyValue('--display-offset-px')).toBe('0px')
+    expect(rows[1].style.getPropertyValue('--display-offset-px')).toBe('12px')
+    removeRuntime()
+  })
+})
 
 function prediction(
   callsign: string,

@@ -263,6 +263,15 @@ function vtbdDefaultRunway(callsign: string) {
   return VTBD_21L_CALLSIGN_PREFIXES.some((prefix) => normalized.startsWith(prefix)) ? '21L' : '21R'
 }
 
+export function defaultArrivalRunway(airport: AirportCode, activeRunways: string[], callsign: string) {
+  if (airport === 'VTBS' && activeRunways.includes('19')) return '19'
+  if (airport === 'VTBD') {
+    const preferred = vtbdDefaultRunway(callsign)
+    if (activeRunways.includes(preferred)) return preferred
+  }
+  return activeRunways[0] ?? null
+}
+
 function formatUtc(date: Date) {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}:${String(date.getUTCSeconds()).padStart(2, '0')}Z`
 }
@@ -454,82 +463,21 @@ function crossRunwayLandingSeparationSeconds(
   return pairwiseLandingSeparationSeconds(leader, follower, baseSeconds)
 }
 
-function candidateLandingTime(
-  airport: AirportCode,
-  runway: string,
-  prediction: AmanArrivalPrediction,
-  naturalMs: number,
-  lastTargetByRunway: Map<string, number>,
-  lastPredictionByRunway: Map<string, AmanArrivalPrediction>,
-  spacingNm: Record<string, number>,
-) {
-  const runwayBaseSeconds = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5) * 60
-  let candidate = naturalMs
-  const previousSameRunway = lastTargetByRunway.get(runway)
-  const previousPrediction = lastPredictionByRunway.get(runway)
-  if (previousSameRunway != null) {
-    const requiredSeconds = previousPrediction
-      ? pairwiseLandingSeparationSeconds(previousPrediction, prediction, runwayBaseSeconds)
-      : followerLandingSeparationSeconds(prediction, runwayBaseSeconds)
-    candidate = Math.max(candidate, previousSameRunway + requiredSeconds * 1000)
-  }
-
-  if (airport === 'VTBS') {
-    for (const [otherRunway, previousOtherRunway] of lastTargetByRunway.entries()) {
-      if (otherRunway === runway) continue
-      const otherPrediction = lastPredictionByRunway.get(otherRunway)
-      const requiredSeconds = otherPrediction
-        ? pairwiseLandingSeparationSeconds(otherPrediction, prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
-        : followerLandingSeparationSeconds(prediction, VTBS_CROSS_RUNWAY_STAGGER_SECONDS)
-      candidate = Math.max(candidate, previousOtherRunway + requiredSeconds * 1000)
-    }
-  }
-
-  return candidate
-}
-
 function assignPredictionsToRunways(
   predictions: AmanArrivalPrediction[],
   airport: AirportCode,
   runwayModes: Record<AirportCode, Record<string, RunwayMode>>,
-  spacingNm: Record<string, number>,
   manualRunways: Record<string, string>,
 ) {
   const activeRunways = activeRunwaysForAirport(airport, runwayModes)
   if (!activeRunways.length) return []
 
-  const lastTargetByRunway = new Map<string, number>()
-  const lastPredictionByRunway = new Map<string, AmanArrivalPrediction>()
-  const loadByRunway = new Map<string, number>()
   const ordered = [...predictions].sort((a, b) => naturalLandingTimeMs(a) - naturalLandingTimeMs(b) || a.callsign.localeCompare(b.callsign))
 
   return ordered.map((prediction) => {
-    const naturalMs = naturalLandingTimeMs(prediction)
     const requestedRunway = manualRunways[prediction.id]
     const forcedRunway = requestedRunway && activeRunways.includes(requestedRunway) ? requestedRunway : null
-    const vtbdPreferredRunway = airport === 'VTBD' ? vtbdDefaultRunway(prediction.callsign) : null
-    const preferredActiveRunway = vtbdPreferredRunway && activeRunways.includes(vtbdPreferredRunway) ? vtbdPreferredRunway : null
-
-    let bestRunway = forcedRunway ?? preferredActiveRunway ?? activeRunways[0]
-    let bestTarget = candidateLandingTime(airport, bestRunway, prediction, naturalMs, lastTargetByRunway, lastPredictionByRunway, spacingNm)
-    let bestLoad = loadByRunway.get(bestRunway) ?? 0
-
-    if (!forcedRunway && airport !== 'VTBD') {
-      for (const runway of activeRunways.slice(1)) {
-        const candidate = candidateLandingTime(airport, runway, prediction, naturalMs, lastTargetByRunway, lastPredictionByRunway, spacingNm)
-        const load = loadByRunway.get(runway) ?? 0
-        if (candidate < bestTarget - 500 || (Math.abs(candidate - bestTarget) <= 500 && load < bestLoad)) {
-          bestRunway = runway
-          bestTarget = candidate
-          bestLoad = load
-        }
-      }
-    }
-
-    lastTargetByRunway.set(bestRunway, bestTarget)
-    lastPredictionByRunway.set(bestRunway, prediction)
-    loadByRunway.set(bestRunway, bestLoad + 1)
-    return { ...prediction, runway: bestRunway }
+    return { ...prediction, runway: forcedRunway ?? defaultArrivalRunway(airport, activeRunways, prediction.callsign) ?? activeRunways[0] }
   })
 }
 
@@ -873,14 +821,13 @@ export default function App() {
       liveSequencedPredictions.filter((prediction) => rowAirport(prediction.id) === airport),
       airport,
       runwayModes,
-      spacingNm,
       effectiveLiveRunways,
     ))
     return autoSequenceUnstableArrivals(assigned, {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, effectiveLiveRunways, liveSequencedPredictions, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, effectiveLiveRunways, liveSequencedPredictions, runwayModes, runwaySpacingSeconds])
 
   const provisionalSequence = useMemo(() => {
     if (demoMode) return []
@@ -895,7 +842,6 @@ export default function App() {
       provisional.filter((prediction) => rowAirport(prediction.id) === airport),
       airport,
       runwayModes,
-      spacingNm,
       effectiveLiveRunways,
     ))
     return assigned
@@ -904,7 +850,7 @@ export default function App() {
         return { ...calculateArrivalMetrics(prediction, naturalTldt, naturalTldt), sequenceIndex: -1, autoShiftSeconds: 0 }
       })
       .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime())
-  }, [airports, demoMode, effectiveLivePredictions, effectiveLiveRunways, livePhaseById, operationalStateByKey, processingNowMs, runwayModes, spacingNm])
+  }, [airports, demoMode, effectiveLivePredictions, effectiveLiveRunways, livePhaseById, operationalStateByKey, processingNowMs, runwayModes])
 
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchors) return []
@@ -912,14 +858,13 @@ export default function App() {
       buildDemoPredictions(airport, demoAnchors[airport], operationalTimings, hasOperationalWorkspace(operationalConfig, airport)),
       airport,
       runwayModes,
-      spacingNm,
       manualRunways,
     ))
     return autoSequenceUnstableArrivals(assigned, {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, demoAnchors, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, demoAnchors, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds])
 
   const demoSequence = useMemo(
     () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}, autoReturnFloorTldt),
@@ -1366,7 +1311,26 @@ export default function App() {
 
   const resetRow = (row: AmanSequenceRow, floorAtCurrentTime = true) => {
     const floorMs = Math.ceil(Date.now() / DRAG_SNAP_MS) * DRAG_SNAP_MS
-    const autoBaseRow = (demoMode ? demoBaseSequence : liveBaseSequence).find((candidate) => candidate.id === row.id)
+    const runwayOverrides = { ...(demoMode ? manualRunways : effectiveLiveRunways) }
+    delete runwayOverrides[row.id]
+    const resetPredictions = demoMode && demoAnchors
+      ? airports.flatMap((airport) => buildDemoPredictions(
+          airport,
+          demoAnchors[airport],
+          operationalTimings,
+          hasOperationalWorkspace(operationalConfig, airport),
+        ))
+      : liveSequencedPredictions
+    const resetAssigned = airports.flatMap((airport) => assignPredictionsToRunways(
+      resetPredictions.filter((prediction) => rowAirport(prediction.id) === airport),
+      airport,
+      runwayModes,
+      runwayOverrides,
+    ))
+    const autoBaseRow = autoSequenceUnstableArrivals(resetAssigned, {
+      runwaySpacingSeconds,
+      pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
+    }).find((candidate) => candidate.id === row.id)
     const autoBaseMs = autoBaseRow ? new Date(autoBaseRow.tldt).getTime() : NaN
     const autoTargetMs = floorAtCurrentTime
       ? Math.max(floorMs, Number.isFinite(autoBaseMs) ? autoBaseMs : floorMs)
@@ -1386,7 +1350,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('aman:return-flight-auto', {
         detail: {
           airport,
-          runway: row.runway,
+          runway: autoBaseRow?.runway ?? row.runway,
           identity: amanSequenceOrderIdentity(airport, row.callsign),
           autoTldt: new Date(autoTargetMs).toISOString(),
           autoFloorTldt: new Date(floorMs).toISOString(),

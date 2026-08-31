@@ -33,8 +33,26 @@ type ReorderDetail = {
   identities?: string[]
 }
 
-// Visual offsets exist only during a drag and its short render handoff. Every strip
-// still settles on its true TLDT so neighbouring strips cannot remain coupled.
+export type TimelinePackItem = {
+  key: string
+  idealOffsetPx: number
+}
+
+export function packTimelineDisplayOffsets(items: TimelinePackItem[], minimumGapPx: number) {
+  const gap = Math.max(0, minimumGapPx)
+  const ordered = [...items].sort((a, b) => a.idealOffsetPx - b.idealOffsetPx || a.key.localeCompare(b.key))
+  const packed = new Map<string, number>()
+  let previous: number | null = null
+  for (const item of ordered) {
+    const display: number = previous == null ? item.idealOffsetPx : Math.max(item.idealOffsetPx, previous + gap)
+    packed.set(item.key, display)
+    previous = display
+  }
+  return packed
+}
+
+// Visual offsets keep close cross-runway strips readable without changing TLDT.
+// Drag handoff also uses the same map briefly so a released strip never flashes.
 const visualResidualByKey = new Map<string, number>()
 const releaseHoldKeys = new Set<string>()
 
@@ -59,12 +77,6 @@ function rowKey(row: HTMLElement) {
   const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   return airport && callsign ? `${airport}:${callsign}` : ''
-}
-
-function rowIsManual(row: HTMLElement) {
-  return row.classList.contains('is-stable')
-    || row.dataset.targetMode === 'MANUAL'
-    || row.querySelector('.runway-assignment.is-manual') != null
 }
 
 function rowIdealDisplayOffset(row: HTMLElement) {
@@ -102,21 +114,29 @@ function findRow(key: string) {
 
 function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
   const activeKeys = new Set<string>()
+  const groups = new Map<string, Array<{ row: HTMLElement; key: string; idealOffsetPx: number; height: number }>>()
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
     const key = rowKey(row)
     const ideal = rowIdealDisplayOffset(row)
     if (!key || ideal == null) return
     activeKeys.add(key)
-
-    // Returning a flight to AUTO must also return its strip to the true timeline
-    // position. A presentation-only close-gap offset must never survive AUTO reset.
-    if (!rowIsManual(row) && visualResidualByKey.has(key)) {
-      visualResidualByKey.delete(key)
-    }
-
-    if (row === exceptRow || releaseHoldKeys.has(key)) return
-    setDisplayOffset(row, ideal + (visualResidualByKey.get(key) ?? 0), ideal)
+    const side = row.dataset.displaySide === 'LEFT' || row.classList.contains('display-left') ? 'LEFT' : 'RIGHT'
+    const bucket = groups.get(side) ?? []
+    const rectHeight = row.getBoundingClientRect().height
+    bucket.push({ row, key, idealOffsetPx: ideal, height: rectHeight > 0 ? rectHeight : 12 })
+    groups.set(side, bucket)
   })
+
+  for (const rows of groups.values()) {
+    const minimumGap = Math.max(12, ...rows.map((item) => Math.ceil(item.height)))
+    const packed = packTimelineDisplayOffsets(rows, minimumGap)
+    for (const item of rows) {
+      const display = packed.get(item.key) ?? item.idealOffsetPx
+      visualResidualByKey.set(item.key, display - item.idealOffsetPx)
+      if (item.row === exceptRow || releaseHoldKeys.has(item.key)) continue
+      setDisplayOffset(item.row, display, item.idealOffsetPx)
+    }
+  }
 
   for (const key of visualResidualByKey.keys()) {
     if (!activeKeys.has(key)) visualResidualByKey.delete(key)
