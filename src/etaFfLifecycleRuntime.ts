@@ -1,3 +1,5 @@
+import { formatRoundedHmUtc } from './core/minuteRounding'
+
 type AmanFlightStatus = 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE' | 'FROZEN'
 
 const REFRESH_MS = 250
@@ -34,12 +36,6 @@ function parseHmNearNow(value: string, now: Date) {
   if (delta < -12 * 60 * 60 * 1000) candidate.setUTCDate(candidate.getUTCDate() + 1)
   if (delta > 12 * 60 * 60 * 1000) candidate.setUTCDate(candidate.getUTCDate() - 1)
   return candidate.getTime()
-}
-
-function formatHm(valueMs: number) {
-  const date = new Date(valueMs)
-  if (!Number.isFinite(date.getTime())) return '--:--'
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
 }
 
 function rowAirport(row: HTMLElement) {
@@ -244,7 +240,7 @@ function refreshRows() {
 
     const cell = etaCell(row)
     if (cell) {
-      const next = formatHm(resolved.display)
+      const next = formatRoundedHmUtc(resolved.display)
       if (cell.textContent?.trim() !== next) cell.textContent = next
       cell.dataset.etaFf = next
       cell.dataset.etaFfLocked = resolved.locked ? 'true' : 'false'
@@ -252,9 +248,9 @@ function refreshRows() {
       cell.setAttribute('aria-label', `ETA-FF ${next} ${status}${resolved.locked ? ' locked' : ' live'}`)
     }
 
-    row.dataset.etaFfDisplay = formatHm(resolved.display)
+    row.dataset.etaFfDisplay = formatRoundedHmUtc(resolved.display)
     row.dataset.etaFfLocked = resolved.locked ? 'true' : 'false'
-    row.dataset.etaFfLive = resolved.liveEta == null ? '' : formatHm(resolved.liveEta)
+    row.dataset.etaFfLive = resolved.liveEta == null ? '' : formatRoundedHmUtc(resolved.liveEta)
   })
 
   document.querySelectorAll<HTMLElement>('.aman-inbound-row').forEach((row) => {

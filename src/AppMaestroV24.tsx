@@ -23,6 +23,7 @@ import {
   splitAmanDelay,
 } from './core/amanConstants'
 import { readAircraftPerformance, readIvaoTraffic, readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { formatRoundedHmUtc } from './core/minuteRounding'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
   amanSequenceOrderIdentity,
@@ -238,11 +239,7 @@ function formatUtc(date: Date) {
 }
 
 function formatHm(value: string | null) {
-  if (!value) return '--:--'
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return '--:--'
-  const roundedDate = new Date(date.getTime() + 30_000)
-  return `${String(roundedDate.getUTCHours()).padStart(2, '0')}:${String(roundedDate.getUTCMinutes()).padStart(2, '0')}`
+  return formatRoundedHmUtc(value)
 }
 
 function formatHms(value: string | null) {
