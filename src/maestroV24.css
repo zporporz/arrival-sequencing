@@ -16,6 +16,53 @@
   box-shadow: inset 0 -2px 0 rgba(220, 67, 54, .65);
 }
 
+@keyframes aman-ga-flash {
+  0%, 45% { opacity: 1; box-shadow: 0 0 12px rgba(255, 45, 55, .78); }
+  50%, 95% { opacity: .34; box-shadow: none; }
+}
+
+.aman-panel-meta .aman-ga-alert,
+.aman-ga-badge {
+  border: 1px solid #ff3d48 !important;
+  background: #5a080e !important;
+  color: #fff !important;
+  animation: aman-ga-flash 1s steps(1, end) infinite;
+}
+
+.aman-panel-meta .aman-ga-alert {
+  font-weight: 950;
+  letter-spacing: .12em;
+}
+
+.aman-flight-row.is-missed-approach,
+.aman-flight-row[data-display-side="LEFT"].is-missed-approach {
+  border-color: #ff3d48 !important;
+  background: linear-gradient(90deg, rgba(116, 8, 16, .42), rgba(8, 17, 31, .96)) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 61, 72, .42), 0 0 10px rgba(255, 40, 50, .24) !important;
+}
+
+.aman-flight-row.is-missed-approach > strong {
+  color: #ff737b !important;
+}
+
+.aman-ga-badge {
+  display: inline-flex;
+  margin-left: 7px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font: 950 9px/1 Consolas, monospace;
+  vertical-align: middle;
+}
+
+.aman-flight-row.is-missed-approach > b[data-advisory-kind="ga"]::after {
+  color: #ff666f !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aman-panel-meta .aman-ga-alert,
+  .aman-ga-badge { animation: none; }
+}
+
 /* Flight row remains one operational line, but the delay cell can carry
    TDLY plus EDLY/ADLY and the quick-reference action without 7px text. */
 .aman-flight-row {

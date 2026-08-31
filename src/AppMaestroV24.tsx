@@ -899,6 +899,10 @@ export default function App() {
 
   const capacityOverload = airports.some((airport) => demandByAirport[airport] > capacityByAirport[airport] && capacityByAirport[airport] > 0)
   const matrixOverloadCount = activeSequence.filter((row) => getAmanOperationalMatrixAdvice(row.delayMinutes).band === 'OVERLOAD').length
+  const activeGaCount = activeSequence.filter((row) => {
+    const airport = rowAirport(row.id)
+    return sharedOperationalFlightByKey.get(flightKey(airport, row.callsign))?.missed_approach_active === true
+  }).length
   const capacitySummary = airports.map((airport) => `${airport === 'VTBD' ? 'BD' : 'BS'} ${demandByAirport[airport]}/${capacityByAirport[airport] || '--'}`).join(' · ')
 
   const separationConflictIds = useMemo(() => {
@@ -1413,6 +1417,7 @@ export default function App() {
             <span>ETA-FF {AMAN_ETA_FF_REFRESH_SECONDS} SEC</span>
             <label className="aman-history-control"><span>HISTORY</span><select value={historyMinutes} onChange={(event) => setHistoryMinutes(Number(event.target.value))}>{AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES.map((value) => <option key={value} value={value}>{value} MIN</option>)}</select></label>
             {(capacityOverload || matrixOverloadCount > 0) && <span className="aman-capacity-alert">OVERLOAD</span>}
+            {activeGaCount > 0 && <span className="aman-ga-alert">GA {activeGaCount}</span>}
             <span className="aman-capacity-chip">AAR {capacitySummary}</span>
             <span className="is-drag-enabled">DRAG = SET TARGET · DBL CLICK = RETURN AUTO · RIGHT CLICK = OPS</span>
             <button type="button" className={`aman-demo-toggle ${demoMode ? 'is-active' : ''}`} onClick={toggleDemo}>{demoMode ? 'TEST TRAFFIC ON' : 'TEST TRAFFIC'}</button>
@@ -1441,10 +1446,11 @@ export default function App() {
               const autoBaselineRow = (demoMode ? demoBaseSequence : liveBaseSequence)
                 .find((candidate) => candidate.id === row.id)
               const sharedFlight = sharedOperationalFlightByKey.get(flightKey(airport, row.callsign))
+              const isMissedApproach = sharedFlight?.missed_approach_active === true
 
               return <div
                 key={row.id}
-                className={`aman-flight-row action-${row.delayAction.toLowerCase()} matrix-${matrixClass}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}`}
+                className={`aman-flight-row action-${row.delayAction.toLowerCase()} matrix-${matrixClass}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}${isMissedApproach ? ' is-missed-approach' : ''}`}
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
                 data-target-mode={isStable ? 'MANUAL' : 'AUTO'}
@@ -1454,7 +1460,7 @@ export default function App() {
                 data-performance-category={row.performanceCategory || undefined}
                 data-frozen-tldt={sharedFlight?.frozen_tldt || undefined}
                 data-frozen-approach-category={sharedFlight?.frozen_approach_category || undefined}
-                data-missed-approach-active={sharedFlight?.missed_approach_active ? 'true' : undefined}
+                data-missed-approach-active={isMissedApproach ? 'true' : undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
@@ -1468,7 +1474,7 @@ export default function App() {
                 }}
               >
                 <span className="tldt">{formatHms(row.tldt)}</span>
-                <strong>{row.callsign}</strong>
+                <strong>{row.callsign}{isMissedApproach && <small className="aman-ga-badge">GA</small>}</strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
                 <span>{formatHm(row.tto)}</span>

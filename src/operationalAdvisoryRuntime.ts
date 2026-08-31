@@ -16,6 +16,7 @@ type SharedFlightState = {
   holding_mode: HoldingMode
   holding_fix: string | null
   holding_leave_at: string | null
+  missed_approach_active?: boolean | null
 }
 
 type SharedWorkspaceState = {
@@ -254,7 +255,12 @@ export function installOperationalAdvisoryRuntime() {
       const matrix = getAmanOperationalMatrixAdvice(delayMinutes)
       const autoHolding = row.classList.contains('action-holding') || delayMinutes >= holdingThreshold
       const holdingMode = state?.holding_mode || 'AUTO'
-      const holdingActive = holdingMode === 'HOLD' || (holdingMode === 'AUTO' && autoHolding)
+      const missedApproachActive = state?.missed_approach_active === true
+        || row.dataset.missedApproachActive === 'true'
+      // A missed approach is a reinserted arrival, not a holding instruction.
+      // GA must take precedence even when its NOW+10 target creates a large TDLY.
+      const holdingActive = !missedApproachActive
+        && (holdingMode === 'HOLD' || (holdingMode === 'AUTO' && autoHolding))
       const fullFix = state?.holding_fix || rowFullFix(row, identity.airport)
       const ttoMs = rowTtoMs(row)
       const leaveAtMs = state?.holding_leave_at ? new Date(state.holding_leave_at).getTime() : ttoMs
@@ -275,7 +281,10 @@ export function installOperationalAdvisoryRuntime() {
 
       if (matrix.band === 'OVERLOAD') overloadCount += 1
 
-      if (holdingActive) {
+      if (missedApproachActive) {
+        delayCell.dataset.advisory = 'GO AROUND'
+        delayCell.dataset.advisoryKind = 'ga'
+      } else if (holdingActive) {
         holdingCount += 1
         row.dataset.holdingActive = 'true'
         delayCell.dataset.advisory = `LEAVE ${formatHm(Number.isFinite(leaveAtMs) ? leaveAtMs : null)}`

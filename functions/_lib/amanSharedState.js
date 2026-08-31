@@ -146,9 +146,16 @@ function activeMissedApproach(record, nowMs) {
 
 export function detectAutomaticMissedApproach(record, current, airport, nowMs) {
   if (!record || activeMissedApproach(record, nowMs)) return null;
-  const armedMs = toMillis(record.ga_armed_at, 0);
+  // The normal path is armed by a live 10 NM final observation.  A controller
+  // can also open the page after the aircraft has already started the missed
+  // approach; in that case a recent centrally persisted FROZEN capture is the
+  // proof that this was an arrival, not an ordinary departure.
+  const armedMs = toMillis(
+    record.ga_armed_at || record.frozen_captured_at || record.frozen_track_at,
+    0,
+  );
   if (armedMs <= 0 || nowMs - armedMs < 0 || nowMs - armedMs > GA_ARM_MAX_AGE_MS) return null;
-  const runway = cleanText(record.ga_armed_runway, 12)?.toUpperCase();
+  const runway = cleanText(record.ga_armed_runway || record.frozen_runway, 12)?.toUpperCase();
   if (!runway || !RUNWAY_FINAL_GEOMETRY[`${airport}:${runway}`] || current?.onGround !== false) return null;
 
   const trackMs = snapshotTimeMs(current, NaN);
@@ -387,16 +394,32 @@ async function loadFlightStates(env, serviceDate, airport) {
 
 async function writeFlightStates(env, rows) {
   if (!rows.length) return [];
-  const result = await supabaseAdminRequest(
-    env,
-    'aman_flight_states?on_conflict=service_date,airport,callsign&select=*',
-    {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-      body: JSON.stringify(rows),
-    },
-  );
-  return Array.isArray(result.data) ? result.data : [];
+  // PostgREST bulk inserts require every object in one JSON array to expose the
+  // same columns. A reconciliation contains full live rows as well as partial
+  // GHOST/EXPIRED patches, so submit one batch per exact column shape. This
+  // preserves merge semantics without filling omitted fields with null.
+  const groups = new Map();
+  for (const row of rows) {
+    const signature = Object.keys(row).sort().join('\u001f');
+    const group = groups.get(signature) || [];
+    group.push(row);
+    groups.set(signature, group);
+  }
+
+  const written = [];
+  for (const group of groups.values()) {
+    const result = await supabaseAdminRequest(
+      env,
+      'aman_flight_states?on_conflict=service_date,airport,callsign&select=*',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(group),
+      },
+    );
+    if (Array.isArray(result.data)) written.push(...result.data);
+  }
+  return written;
 }
 
 function recordForOutput(record, fallback) {

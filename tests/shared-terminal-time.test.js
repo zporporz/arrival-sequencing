@@ -293,6 +293,55 @@ describe('automatic go-around detection', () => {
       missedApproachSource: 'AUTO',
     })
   })
+
+  it('uses a recent shared FROZEN capture when the controller opens after the climb started', () => {
+    expect(detectAutomaticMissedApproach({
+      frozen_captured_at: '2026-08-25T10:00:00.000Z',
+      frozen_track_at: '2026-08-25T10:00:00.000Z',
+      frozen_runway: '19',
+      snapshot: { ...finalTrack, altitude: 950 },
+    }, {
+      ...finalTrack,
+      state: 'initial climb',
+      altitude: 1_250,
+      verticalSpeedFpm: 1_000,
+      trackTimestamp: '2026-08-25T10:01:00.000Z',
+    }, 'VTBS', Date.parse('2026-08-25T10:01:05.000Z'))).toMatchObject({ runway: '19' })
+  })
+
+  it('writes full live rows and partial ghost rows in separate uniform batches', async () => {
+    const existing = [{
+      service_date: '2026-08-25',
+      airport: 'VTBS',
+      callsign: 'OLD123',
+      canonical_session_id: 'old-canonical',
+      raw_session_id: 'old-raw',
+      last_seen_at: '2026-08-25T09:59:50.000Z',
+      connection_phase: 'LIVE',
+      snapshot: {
+        state: 'en route',
+        onGround: false,
+        latitude: 14.5,
+        longitude: 100.7,
+        groundSpeed: 300,
+        trackTimestamp: '2026-08-25T09:59:50.000Z',
+      },
+    }]
+    const postBodies = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options = {}) => {
+      if (!options.method || options.method === 'GET') return jsonResponse(existing)
+      const writes = JSON.parse(String(options.body || '[]'))
+      postBodies.push(writes)
+      const signatures = new Set(writes.map((row) => Object.keys(row).sort().join('|')))
+      if (signatures.size !== 1) return new Response(JSON.stringify({ message: 'All object keys must match' }), { status: 400 })
+      return jsonResponse(writes)
+    })
+
+    await expect(reconcileAmanFlights(env, 'VTBS', [finalTrack], '2026-08-25T10:00:05.000Z'))
+      .resolves.toHaveLength(2)
+    expect(postBodies).toHaveLength(2)
+    expect(postBodies.every((batch) => new Set(batch.map((row) => Object.keys(row).sort().join('|'))).size === 1)).toBe(true)
+  })
 })
 
 describe('UTC midnight rollover', () => {
