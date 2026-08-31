@@ -1,6 +1,14 @@
 type CanonicalArrival = { id: string; predictedIawpAt: string }
 type LocalAutoSnapshotDetail = { predictions?: CanonicalArrival[] }
 type RealtimeCommitDetail = { airport?: string; flightState?: unknown; sequenceOrder?: unknown }
+type FinishedDrag = {
+  airport: string
+  callsign: string
+  previewId: string
+  lastSentAt: number
+  pointerId: number
+  row: HTMLElement
+}
 
 const AIRPORTS = ['VTBD', 'VTBS'] as const
 const PX_PER_MINUTE = 10
@@ -63,14 +71,7 @@ export function installRealtimeAmanRuntime() {
   const previewSubjects = new Map<string, string>()
   const previewCancelTimers = new Map<string, number>()
   const lockTimers = new Map<string, number>()
-  let activeDrag: {
-    airport: string
-    callsign: string
-    previewId: string
-    lastSentAt: number
-    pointerId: number
-    row: HTMLElement
-  } | null = null
+  let activeDrag: FinishedDrag | null = null
   let disposed = false
   let activeServiceDate = realtimeUtcServiceDate()
   let serviceDateTimer: number | null = null
@@ -326,6 +327,29 @@ export function installRealtimeAmanRuntime() {
       const previewId = String(message.previewId || '')
       clearPreview(previewId)
       clearPreviewCancelTimer(previewId)
+      window.dispatchEvent(new CustomEvent('aman:realtime-manual-release-cancel', {
+        detail: { airport: room.airport, previewId },
+      }))
+      return
+    }
+    if (message?.type === 'drag_release') {
+      const previewId = String(message.previewId || '')
+      const airport = String(message.airport || '').toUpperCase()
+      const callsign = String(message.callsign || '').toUpperCase()
+      const row = findRow(airport, callsign)
+      const original = row ? previewOriginals.get(previewId)?.get(row) : null
+      const originalOffset = Number.parseFloat(original?.offset || '')
+      const originalTargetAt = Number.isFinite(originalOffset)
+        ? new Date(Date.now() - originalOffset / PX_PER_MINUTE * 60_000).toISOString()
+        : null
+      window.dispatchEvent(new CustomEvent('aman:realtime-manual-release', {
+        detail: {
+          ...message,
+          originalTargetAt,
+          originalRunway: row ? rowInfo(row)?.runway || '' : '',
+          originalWasManual: row?.classList.contains('is-stable') || row?.dataset.targetMode === 'MANUAL',
+        },
+      }))
       return
     }
     if (message?.type === 'flight_commit') {
@@ -443,7 +467,13 @@ export function installRealtimeAmanRuntime() {
     const detail = (event as CustomEvent<RealtimeCommitDetail>).detail
     const airport = String(detail?.airport || '').toUpperCase()
     if (!airport) return
-    if (detail.flightState) send(airport, { type: 'flight_commit', flightState: detail.flightState })
+    if (detail.flightState) {
+      const callsign = String((detail.flightState as { callsign?: string }).callsign || '').toUpperCase()
+      previewSubjects.forEach((subject, previewId) => {
+        if (subject === `${airport}:${callsign}`) clearPreviewCancelTimer(previewId)
+      })
+      send(airport, { type: 'flight_commit', flightState: detail.flightState })
+    }
     if (detail.sequenceOrder) send(airport, { type: 'sequence_commit', sequenceOrder: detail.sequenceOrder })
   }
 
@@ -493,6 +523,20 @@ export function installRealtimeAmanRuntime() {
     activeDrag.lastSentAt = performance.now()
   }
 
+  const publishDragRelease = (finished: FinishedDrag) => {
+    const row = findRow(finished.airport, finished.callsign) ?? finished.row
+    const info = rowInfo(row)
+    const valueMs = targetMs(row)
+    if (!info || info.airport !== finished.airport || info.callsign !== finished.callsign || valueMs == null) return
+    send(finished.airport, {
+      type: 'drag_release',
+      callsign: finished.callsign,
+      previewId: finished.previewId,
+      targetAt: new Date(valueMs).toISOString(),
+      runway: info.runway,
+    })
+  }
+
   const onPointerMove = () => {
     if (!activeDrag || performance.now() - activeDrag.lastSentAt < PREVIEW_INTERVAL_MS) return
     window.requestAnimationFrame(publishDragPreview)
@@ -509,6 +553,9 @@ export function installRealtimeAmanRuntime() {
     const finished = activeDrag
     activeDrag = null
     if (!cancel) {
+      // Capture the final React/cascade position after all pointer-up handlers
+      // finish, without waiting for the Supabase write response.
+      window.setTimeout(() => publishDragRelease(finished), 0)
       clearPreviewCancelTimer(finished.previewId)
       previewCancelTimers.set(finished.previewId, window.setTimeout(() => {
         previewCancelTimers.delete(finished.previewId)

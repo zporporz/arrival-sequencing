@@ -200,4 +200,63 @@ describe('realtime AMAN coordination', () => {
     socket.dispose()
     document.body.innerHTML = ''
   })
+
+  it('publishes the released manual target without waiting for the database write', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-25T10:00:00.000Z')
+
+    class FakeWebSocket extends EventTarget {
+      static OPEN = 1
+      static CLOSED = 3
+      static instances: FakeWebSocket[] = []
+      readyState = FakeWebSocket.OPEN
+      sent: string[] = []
+
+      constructor(readonly url: string) {
+        super()
+        FakeWebSocket.instances.push(this)
+      }
+
+      send(payload: string) { this.sent.push(payload) }
+      close() { this.readyState = FakeWebSocket.CLOSED }
+    }
+
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    document.body.innerHTML = `
+      <div class="aman-flight-row is-stable" title="VTBS RWY 19" style="--offset-px:-100px">
+        <strong>THA123</strong>
+        <span class="runway-assignment">BS/19</span>
+        <span class="tldt">10:10:00</span>
+      </div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    const dispose = installRealtimeAmanRuntime()
+    const socket = FakeWebSocket.instances.find((item) => item.url.includes('airport=VTBS'))!
+    const pointerDown = new Event('pointerdown', { bubbles: true })
+    Object.defineProperty(pointerDown, 'pointerId', { value: 17 })
+    row.dispatchEvent(pointerDown)
+    row.style.setProperty('--offset-px', '-200px')
+    const pointerUp = new Event('pointerup', { bubbles: true })
+    Object.defineProperty(pointerUp, 'pointerId', { value: 17 })
+    row.dispatchEvent(pointerUp)
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    const sentAfterRelease = socket.sent.map((payload) => JSON.parse(payload))
+    expect(sentAfterRelease).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'drag_release', callsign: 'THA123', runway: '19', targetAt: '2026-08-25T10:20:00.000Z',
+      }),
+    ]))
+    const release = sentAfterRelease.find((payload) => payload.type === 'drag_release')
+    window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+      detail: { airport: 'VTBS', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 2 } },
+    }))
+    await vi.advanceTimersByTimeAsync(4_100)
+    expect(socket.sent.map((payload) => JSON.parse(payload)).some((payload) =>
+      payload.type === 'drag_cancel' && payload.previewId === release.previewId)).toBe(false)
+
+    dispose()
+    document.body.innerHTML = ''
+  })
 })

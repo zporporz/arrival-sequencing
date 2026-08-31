@@ -131,6 +131,55 @@ describe('shared runtime consolidation', () => {
     removeRuntime()
   })
 
+  it('applies a realtime drag release before the persisted revision arrives', async () => {
+    const serviceDate = new Date().toISOString().slice(0, 10)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      serviceDate,
+      workspaceStates: [],
+      flightStates: [],
+      sequenceOrders: [],
+    }))
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+
+    const pointerDown = vi.fn()
+    const pointerMove = vi.fn()
+    const pointerUp = vi.fn()
+    const row = document.createElement('div')
+    row.className = 'aman-flight-row'
+    row.title = 'VTBS RWY 19'
+    row.style.setProperty('--offset-px', '0px')
+    row.innerHTML = `
+      <span class="tldt">10:00</span><strong>THA123</strong>
+      <em class="runway-assignment"><select><option selected>19</option></select></em>
+    `
+    Object.defineProperty(row, '__reactProps$test', {
+      value: { onPointerDown: pointerDown, onPointerMove: pointerMove, onPointerUp: pointerUp },
+      enumerable: true,
+    })
+    document.body.appendChild(row)
+
+    const removeRuntime = installSharedAmanRuntime()
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    window.dispatchEvent(new CustomEvent('aman:realtime-manual-release', {
+      detail: {
+        airport: 'VTBS', callsign: 'THA123', previewId: 'preview-one', runway: '19',
+        targetAt: new Date(Date.now() + 7 * 60_000).toISOString(),
+        originalTargetAt: new Date().toISOString(), originalRunway: '19', originalWasManual: false,
+      },
+    }))
+
+    expect(pointerDown).toHaveBeenCalledTimes(1)
+    expect(pointerMove).toHaveBeenCalledTimes(1)
+    expect(pointerUp).toHaveBeenCalledTimes(1)
+    expect(row.dataset.targetMode).toBe('MANUAL')
+    expect(row.dataset.realtimeReleasePreview).toBe('preview-one')
+
+    removeRuntime()
+  })
+
   it('keeps minute-only TLDT formatting without the compatibility runtime', () => {
     document.body.innerHTML = `
       <div class="aman-flight-row" title="STA/TLDT 10:20:31Z">

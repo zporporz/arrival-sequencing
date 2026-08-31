@@ -90,6 +90,23 @@ describe('AMAN realtime Durable Object coordination', () => {
     })
   })
 
+  it('broadcasts a validated drag release before persistence completes', async () => {
+    const { room, sockets } = setupRoom()
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
+    }))
+
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_release', callsign: 'THA123', previewId: 'preview-one',
+      targetAt: '2026-08-25T10:20:00.000Z', runway: '19',
+    }))
+
+    expect(sockets[1].sent.find((message) => message.type === 'drag_release')).toMatchObject({
+      airport: 'VTBS', callsign: 'THA123', previewId: 'preview-one',
+      targetAt: '2026-08-25T10:20:00.000Z', runway: '19',
+    })
+  })
+
   it('keeps a newer sequence commit when an older revision arrives late', async () => {
     const { room, sockets, storage } = setupRoom()
     const current = { airport: 'VTBS', runway: '19', ordered_callsigns: ['A', 'B'], revision: 8 }

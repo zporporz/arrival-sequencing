@@ -53,6 +53,17 @@ type SequenceOrder = {
   updated_at: string
 }
 
+type RealtimeManualRelease = {
+  airport?: string
+  callsign?: string
+  previewId?: string
+  targetAt?: string
+  runway?: string
+  originalTargetAt?: string | null
+  originalRunway?: string
+  originalWasManual?: boolean
+}
+
 type SharedStatePayload = {
   serviceDate: string
   workspaceStates: WorkspaceState[]
@@ -361,6 +372,7 @@ export function installSharedAmanRuntime() {
       row.dataset.targetMode = 'AUTO'
       row.dataset.sharedRevision = String(state.revision)
       delete row.dataset.sharedActor
+      delete row.dataset.realtimeReleasePreview
       return
     }
 
@@ -382,6 +394,7 @@ export function installSharedAmanRuntime() {
       currentRow.dataset.targetMode = 'MANUAL'
       currentRow.dataset.sharedRevision = String(state.revision)
       currentRow.dataset.sharedActor = state.manual_updated_by_name || state.manual_updated_by_vid || 'IVAO'
+      delete currentRow.dataset.realtimeReleasePreview
       const title = currentRow.getAttribute('title') || ''
       if (!title.includes('SHARED MANUAL')) {
         currentRow.setAttribute('title', `${title} · SHARED MANUAL by ${currentRow.dataset.sharedActor}`)
@@ -561,9 +574,71 @@ export function installSharedAmanRuntime() {
     void clearManualTarget(row)
   }
 
+  const releaseOriginals = new Map<string, {
+    airport: string
+    callsign: string
+    targetMs: number
+    runway: string
+    wasManual: boolean
+  }>()
+
+  const onRealtimeManualRelease = (event: Event) => {
+    const detail = (event as CustomEvent<RealtimeManualRelease>).detail
+    const airport = String(detail?.airport || '').trim().toUpperCase()
+    const callsign = String(detail?.callsign || '').trim().toUpperCase()
+    const previewId = String(detail?.previewId || '')
+    const runway = String(detail?.runway || '').trim().toUpperCase()
+    const releasedMs = finiteTime(detail?.targetAt)
+    const row = findFlightRow(airport, callsign)
+    if (!airport || !callsign || !previewId || !runway || releasedMs == null || !row || row.classList.contains('is-dragging')) return
+
+    if (!releaseOriginals.has(previewId)) {
+      const originalMs = finiteTime(detail?.originalTargetAt) ?? currentTargetMs(row)
+      if (originalMs == null) return
+      releaseOriginals.set(previewId, {
+        airport,
+        callsign,
+        targetMs: originalMs,
+        runway: String(detail?.originalRunway || rowRunway(row)).trim().toUpperCase(),
+        wasManual: detail?.originalWasManual === true,
+      })
+    }
+
+    const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
+    if (runwaySelect && runwaySelect.value !== runway) invokeReactChange(runwaySelect, runway)
+    window.requestAnimationFrame(() => {
+      const currentRow = findFlightRow(airport, callsign)
+      if (!currentRow) return
+      applyTargetThroughReact(currentRow, releasedMs)
+      currentRow.dataset.targetMode = 'MANUAL'
+      currentRow.dataset.realtimeReleasePreview = previewId
+    })
+  }
+
+  const onRealtimeManualReleaseCancel = (event: Event) => {
+    const previewId = String((event as CustomEvent<{ previewId?: string }>).detail?.previewId || '')
+    const original = releaseOriginals.get(previewId)
+    releaseOriginals.delete(previewId)
+    if (!original) return
+    const row = findFlightRow(original.airport, original.callsign)
+    if (!row) return
+    const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
+    if (runwaySelect && original.runway && runwaySelect.value !== original.runway) invokeReactChange(runwaySelect, original.runway)
+    window.requestAnimationFrame(() => {
+      const currentRow = findFlightRow(original.airport, original.callsign)
+      if (!currentRow) return
+      applyTargetThroughReact(currentRow, original.targetMs)
+      if (!original.wasManual) clearTargetThroughReact(currentRow)
+      delete currentRow.dataset.realtimeReleasePreview
+    })
+  }
+
   const onForceRefresh = () => void refresh()
   const onRealtimeFlightState = (event: Event) => {
     const state = (event as CustomEvent<FlightState>).detail
+    releaseOriginals.forEach((original, previewId) => {
+      if (original.airport === state?.airport && original.callsign === state?.callsign) releaseOriginals.delete(previewId)
+    })
     // A remote drag preview is restored as soon as its committed flight state
     // arrives. Apply the accepted MANUAL/AUTO state in the same event turn so
     // the other controller does not fall back to the pre-drag row while waiting
@@ -577,6 +652,8 @@ export function installSharedAmanRuntime() {
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
   window.addEventListener('aman:force-shared-refresh', onForceRefresh)
+  window.addEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
+  window.addEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
   window.addEventListener('aman:realtime-flight-state', onRealtimeFlightState)
   window.addEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
 
@@ -605,6 +682,8 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
+    window.removeEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
+    window.removeEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
     window.removeEventListener('aman:realtime-flight-state', onRealtimeFlightState)
     window.removeEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
   }

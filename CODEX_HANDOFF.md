@@ -278,7 +278,8 @@ If touching this area, inspect current code first because older commits may stil
 
 Newest behavioural work at handoff time (newest first):
 
-- Current uncommitted fix — make repeated realtime drags commit once, scope each commit/cancel to its own preview, and keep the released preview visible until authoritative React state applies (prevents a late first-drag commit from flickering or reverting the second drag on another screen)
+- Current uncommitted fix — broadcast an authenticated `drag_release` immediately after pointer-up so the second screen applies MANUAL React state, delay colour and cascade before the Supabase write returns; the persisted revision remains authoritative and failed writes still cancel/revert the provisional release
+- `1eec4f9` — make repeated realtime drags commit once, scope each commit/cancel to its own preview, and keep the released preview visible until authoritative React state applies
 - `b17bdbc` — apply accepted realtime MANUAL commits immediately across screens
 - `cbd104f` — consolidate shared MANUAL/AUTO application into one runtime
 - `6fac586` — persist and broadcast authoritative current AUTO returns
@@ -300,7 +301,7 @@ Earlier drag/lifecycle foundations that must remain intact include `777e3b1`, `7
 
 As of this handoff:
 
-- Vitest: 15 files, 127 tests passing
+- Vitest: 15 files, 130 tests passing
 - TypeScript build: passing
 - Vite production build: passing
 - Realtime Worker Wrangler dry-run: passing

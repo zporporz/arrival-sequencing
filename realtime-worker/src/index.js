@@ -255,6 +255,20 @@ export class AmanRealtimeRoom {
       return;
     }
 
+    if (payload?.type === 'drag_release') {
+      const previewId = cleanText(payload.previewId, 80);
+      const callsign = cleanText(payload.callsign, 20).toUpperCase();
+      const targetAt = cleanIso(payload.targetAt);
+      const runway = cleanText(payload.runway, 12).toUpperCase();
+      if (!previewId || !callsign || !targetAt || !runway) return;
+      const lock = await this.ctx.storage.get(this.lockKey(callsign));
+      if (lock?.clientId !== meta.clientId || lock?.previewId !== previewId) return;
+      this.broadcast({
+        type: 'drag_release', airport: meta.airport, callsign, previewId, targetAt, runway,
+      }, meta.clientId);
+      return;
+    }
+
     if (payload?.type === 'flight_commit' && payload.flightState) {
       const state = payload.flightState;
       const callsign = cleanText(state.callsign, 20).toUpperCase();
