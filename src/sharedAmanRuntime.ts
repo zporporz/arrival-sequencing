@@ -73,6 +73,7 @@ type ReactRowProps = {
 }
 
 type FakePointerEvent = {
+  button: number
   preventDefault: () => void
   currentTarget: {
     setPointerCapture: (pointerId: number) => void
@@ -152,6 +153,7 @@ function rowRunway(row: HTMLElement) {
 
 function fakePointer(clientY: number): FakePointerEvent {
   return {
+    button: 0,
     preventDefault: () => {},
     currentTarget: {
       setPointerCapture: () => {},
@@ -293,12 +295,13 @@ export function installSharedAmanRuntime() {
   }
 
   const mergeFlight = (state: FlightState | null | undefined) => {
-    if (!state || state.service_date !== serviceDate || !state.airport || !state.callsign) return
+    if (!state || state.service_date !== serviceDate || !state.airport || !state.callsign) return false
     const key = flightKey(state.airport, state.callsign)
     const current = flightStates.get(key)
-    if (current && Number(state.revision) < Number(current.revision)) return
+    if (current && Number(state.revision) < Number(current.revision)) return false
     flightStates.set(key, state)
     emitState()
+    return true
   }
 
   const mergeSequenceOrder = (state: SequenceOrder | null | undefined) => {
@@ -583,7 +586,14 @@ export function installSharedAmanRuntime() {
   }
 
   const onForceRefresh = () => void refresh()
-  const onRealtimeFlightState = (event: Event) => mergeFlight((event as CustomEvent<FlightState>).detail)
+  const onRealtimeFlightState = (event: Event) => {
+    const state = (event as CustomEvent<FlightState>).detail
+    // A remote drag preview is restored as soon as its committed flight state
+    // arrives. Apply the accepted MANUAL/AUTO state in the same event turn so
+    // the other controller does not fall back to the pre-drag row while waiting
+    // for the one-second recovery timer.
+    if (mergeFlight(state)) applyFlight(state)
+  }
   const onRealtimeSequenceOrder = (event: Event) => mergeSequenceOrder((event as CustomEvent<SequenceOrder>).detail)
 
   document.addEventListener('change', onChange)

@@ -1,6 +1,6 @@
 # Codex Handoff — ATC Arrival Sequencing / Thailand AMAN
 
-Last updated: 2026-08-25
+Last updated: 2026-08-31
 Repository: `zporporz/arrival-sequencing`
 Production: `https://atc-sequence.pages.dev`
 Supabase project: `jamwzmqcerkivkgpezfh`
@@ -10,6 +10,8 @@ Supabase project: `jamwzmqcerkivkgpezfh`
 Before changing anything, inspect current `main`. This handoff describes the intended behaviour and the latest work, but current code is the source of truth for exact implementation details.
 
 Do not delete or reset shared operational data, especially `aman_flight_states`.
+
+The production app requires an authenticated IVAO session. Admin navigation and admin APIs are Thailand-staff-only. Successful IVAO logins are audited for staff review.
 
 ## Terminology that must stay consistent
 
@@ -147,9 +149,9 @@ The runtime currently latches an explicit order in `groupOrders` at pointerdown 
 
 Shared-state sync must not overwrite an already-latched complete order merely from `manual_tldt` values.
 
-### High-risk area to verify before future reorder changes
+### Sequence-rank invariant
 
-`applyManualTargetsWithCascade()` in `src/AppMaestroV24.tsx` historically finishes by sorting rows by TLDT and assigning `sequenceIndex = index + 1`. This can conceptually conflict with the rule above. Inspect current behaviour carefully before editing. If this still causes hidden order changes, fix the distinction between render chronology and explicit sequence rank rather than deriving rank from TLDT.
+`applyManualTargetsWithCascade()` may sort its returned rows by TLDT for timeline rendering, but it explicitly preserves each row's existing `sequenceIndex`. Do not reintroduce `sequenceIndex = index + 1` from TLDT chronology. Regression tests cover TLDT crossing while rank remains unchanged.
 
 ## Current cascade behaviour
 
@@ -170,6 +172,53 @@ TEST TRAFFIC is used heavily to verify lifecycle and drag behaviour when live IV
 Do not assume a bug is demo-only without checking whether the same React/runtime path is shared with live traffic.
 
 The recent ETO flicker bug was visible in TEST because React changed the timeline time during TLDT drag before lifecycle code restored the locked value.
+
+## Shared state / multi-controller / Return AUTO
+
+Supabase is the durable shared operational store. The Cloudflare Realtime Worker broadcasts low-latency flight/sequence updates; the authenticated shared-state API and a 5-second poll remain the fallback/recovery path.
+
+Important current rules:
+
+- `src/sharedAmanRuntime.ts` is the only runtime that applies persisted MANUAL/AUTO flight targets to React rows.
+- The old `manualTargetSyncCompatRuntime.ts` was removed. Do not recreate a second flight-target applier.
+- `src/timelineReadableRuntime.ts` owns minute-only TLDT display formatting.
+- Realtime revisions reject older updates and concurrent drags use a lease/ownership guard.
+- A committed remote MANUAL/AUTO state is applied to React immediately in the same event turn; its synthetic pointer event must include `button: 0` so React accepts it as a left-button drag. Do not restore the preview and wait for the one-second recovery timer.
+- A shared state received before its traffic row renders is retained and retried; reload/late-open behaviour has regression coverage.
+- `aman:force-shared-refresh` triggers an immediate shared refresh after GA/reinsert and other explicit recompute paths.
+
+Return AUTO means **current AUTO from one authoritative calculation**, not undoing to the exact pre-drag screen position:
+
+- The browser performing Return AUTO calculates current AUTO TLDT, floor and runway.
+- The result is persisted in `aman_flight_states` and broadcast so other/late-opening browsers use the same result.
+- The fresh exact AUTO override expires after 60 seconds; the persisted floor remains to prevent returning into the past.
+- Pre-MANUAL AUTO baseline fields remain available for audit/reference and are not the operational Return AUTO target.
+
+Known deferred reliability issue: the local row currently changes to AUTO before the API write is confirmed. If the API fails, the display can temporarily disagree with the database until recovery. A future fix should show a pending state and either confirm on success or immediately restore MANUAL on failure.
+
+## Traffic admission / lifecycle edge cases
+
+- New eligible connected inbound flights are admitted automatically; no manual Insert should be required.
+- IVAO phase updates can lag during pushback, so local movement/track evidence may infer departure before IVAO changes the phase label.
+- Predeparture flights away from the destination remain visible, including same-airport flights before their first takeoff.
+- Same-airport flights are considered completed only after track history proves takeoff and return/landing.
+- Terminal LANDED / ON GROUND / ON BLOCKS flights must not be reinserted.
+- Landed history deduplicates repeated observations while preserving the first ALDT.
+- Final-approach/live state is isolated per airport so VTBD data cannot suppress or alter VTBS traffic and vice versa.
+
+## Airport scope — EXPANSION PARKED
+
+The production operational workspace currently supports VTBD and VTBS. Several frontend/runtime paths intentionally still use this two-airport scope.
+
+Admin master data can create draft airports, runway flows and STAR mappings, but that does **not** make a new airport fully operational in AMAN. Full dynamic-airport support would require coordinated changes to frontend selection, shared/realtime rooms, landing history, runway geometry, flow/timing validation and tests.
+
+The user explicitly parked this expansion on 2026-08-31. Do not generalize to every airport unless explicitly requested later.
+
+## Responsive layout
+
+- The timeline remains the primary surface on tablets, portrait/short screens and narrow desktop emulation.
+- Inbound traffic is available through a compact/collapsible drawer on smaller displays, including iPad portrait and landscape breakpoints.
+- Drag release keeps the strip at the release position until React commits the new TLDT, preventing the one-frame jump back to the old position.
 
 ## VTBS STAR nominal timing note
 
@@ -227,23 +276,43 @@ If touching this area, inspect current code first because older commits may stil
 
 ## Recent commits relevant to current handoff
 
-Newest behavioural work at handoff time:
+Newest behavioural work at handoff time (newest first):
 
-- `777e3b1c7c3d3296ada07126cbf0486ecfd824ba` — move cascaded flight boxes during live drag
-- `758cdf389b8e3f338d2d75f36655b358298da8ee` — upward TLDT drag is live push-only; downward keeps replace
-- `32ac6f19160deb12d43763ff51de8aff53aa6758` — prevent locked ETO flicker during TLDT drag
-- `e72e7fba24d48a0de8eb82d9f250500e1cd3e028` — install 10 NM final runtime
-- `cd6ada018bd5e2cbcffac9ae47465cb1cd347744` — Frozen uses 10 NM final with 4-min fallback
-- `898a7d8399868ac85d2afaeb1d507119aa26aa22` — live 10 NM final detector
-- `2cc154892519a7224d55ac66a28c226e2f27063e` — latch sequence order / upward preview-era fix
-- `c0e7c04dc786d2b20b096b38ea0ded469154fa93` — remove TLDT hard locks from lifecycle
-- `3457590308e8ea3a0c9e455eb32a37b0ea13d693` — pointer-capture cleanup after reorder
-- `6ea3b645b36faf8dbbd90e099009eec48662d7b6` — latch DEPARTING stage until airborne
+- `cbd104f` — consolidate shared MANUAL/AUTO application into one runtime
+- `6fac586` — persist and broadcast authoritative current AUTO returns
+- `804f3f9` — persist the pre-MANUAL AUTO baseline for audit/reference
+- `dd6dbce` — recompute traffic by selected airport instead of globally
+- `2ae3a54` — prevent the one-frame drag-release jump/flicker
+- `c4a6783` / `6196bb4` — keep timeline primary and add compact inbound handling on small screens
+- `805af1c` — infer pushback/departure before delayed IVAO phase updates
+- `7be011c` / `88d3944` — handle same-airport lifecycle and retain predeparture inbound flights
+- `63ebbc0` — isolate final-approach data by airport
+- `3309d58` / `1734230` — protect realtime revisions/concurrent drags and reconnect at UTC rollover
+- `4fc2bdf` / `eddc65a` — lock stable ETA, deduplicate landed history and exclude automatic ETA shifts from controller delay
+- `41c8ec4` — auto-admit new inbound traffic
+- `e46e8a0` / `dcd5a0b` — immediate AUTO reset broadcast and realtime multi-controller synchronization
+
+Earlier drag/lifecycle foundations that must remain intact include `777e3b1`, `758cdf3`, `32ac6f1`, `e72e7fb`, `cd6ada0`, `898a7d8`, `c0e7c04`, `3457590` and `6ea3b64`.
+
+## Verification status and deferred work
+
+As of this handoff:
+
+- Vitest: 15 files, 125 tests passing
+- TypeScript build: passing
+- Vite production build: passing
+- `main` was clean and synchronized with `origin/main` before this documentation edit
+
+Deferred by user:
+
+1. Return AUTO API-failure pending/rollback behaviour.
+2. Real browser E2E coverage (two controllers, late open, reconnect, mouse/touch and responsive devices).
+3. Full operational support for airports beyond VTBD/VTBS.
 
 ## What to do when continuing in Codex
 
 First prompt recommendation:
 
-> Read `CODEX_HANDOFF.md`, inspect current `main`, especially `src/AppMaestroV24.tsx`, `src/manualSequenceReorderRuntime.ts`, `src/timelineDisplayScaleRuntime.ts`, `src/etaFfLifecycleRuntime.ts`, and `src/finalTenNmRuntime.ts`. Preserve all stated operational semantics. Before editing, tell me what behaviour the current code actually implements and identify any mismatch with the handoff.
+> Read `CODEX_HANDOFF.md`, inspect current `main`, especially `src/AppMaestroV24.tsx`, `src/sharedAmanRuntime.ts`, `src/realtimeAmanRuntime.ts`, `src/interactionGuardRuntime.ts`, `src/manualSequenceReorderRuntime.ts`, `src/timelineDisplayScaleRuntime.ts`, `src/etaFfLifecycleRuntime.ts`, and `src/finalTenNmRuntime.ts`. Preserve all stated operational semantics. Before editing, tell me what behaviour the current code actually implements and identify any mismatch with the handoff.
 
 For code changes, prefer small targeted edits and verify the actual runtime path. Avoid broad refactors unless required.

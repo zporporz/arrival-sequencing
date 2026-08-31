@@ -70,6 +70,67 @@ describe('shared runtime consolidation', () => {
     removeRuntime()
   })
 
+  it('applies a realtime MANUAL commit immediately and only once', async () => {
+    const serviceDate = new Date().toISOString().slice(0, 10)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      serviceDate,
+      workspaceStates: [],
+      flightStates: [],
+      sequenceOrders: [],
+    }))
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+
+    const pointerDown = vi.fn()
+    const pointerMove = vi.fn()
+    const pointerUp = vi.fn()
+    const row = document.createElement('div')
+    row.className = 'aman-flight-row'
+    row.title = 'VTBS RWY 19'
+    row.style.setProperty('--offset-px', '0px')
+    row.innerHTML = `
+      <span class="tldt">10:00</span><strong>THA123</strong>
+      <em class="runway-assignment"><select><option selected>19</option></select></em>
+    `
+    Object.defineProperty(row, '__reactProps$test', {
+      value: { onPointerDown: pointerDown, onPointerMove: pointerMove, onPointerUp: pointerUp },
+      enumerable: true,
+    })
+    document.body.appendChild(row)
+
+    const removeRuntime = installSharedAmanRuntime()
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+
+    const committedState = {
+      service_date: serviceDate,
+      airport: 'VTBS',
+      callsign: 'THA123',
+      connection_phase: 'ACTIVE',
+      target_mode: 'MANUAL',
+      manual_tldt: new Date(Date.now() + 7 * 60_000).toISOString(),
+      manual_runway: '19',
+      revision: 8,
+    }
+    window.dispatchEvent(new CustomEvent('aman:realtime-flight-state', { detail: committedState }))
+
+    expect(pointerDown).toHaveBeenCalledTimes(1)
+    expect(pointerMove).toHaveBeenCalledTimes(1)
+    expect(pointerUp).toHaveBeenCalledTimes(1)
+    expect(pointerDown.mock.calls[0]?.[0]).toMatchObject({ button: 0 })
+    expect(row.dataset.sharedRevision).toBe('8')
+    expect(row.dataset.targetMode).toBe('MANUAL')
+
+    window.dispatchEvent(new CustomEvent('aman:realtime-flight-state', {
+      detail: { ...committedState, revision: 7 },
+    }))
+
+    expect(pointerUp).toHaveBeenCalledTimes(1)
+
+    removeRuntime()
+  })
+
   it('keeps minute-only TLDT formatting without the compatibility runtime', () => {
     document.body.innerHTML = `
       <div class="aman-flight-row" title="STA/TLDT 10:20:31Z">
