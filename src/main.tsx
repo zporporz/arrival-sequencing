@@ -47,7 +47,6 @@ import { installMaestroV24CompatRuntime } from './maestroV24CompatRuntime'
 import { installManualSequenceReorderRuntime } from './manualSequenceReorderRuntime'
 import { installTimelineReadableRuntime } from './timelineReadableRuntime'
 import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntime'
-import { installManualTargetSyncCompatRuntime } from './manualTargetSyncCompatRuntime'
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
@@ -88,7 +87,6 @@ function AppWithRuntime() {
     const removeRealtimeAmanRuntime = installRealtimeAmanRuntime()
     const removeManualSequenceReorderRuntime = installManualSequenceReorderRuntime()
     const removeTimelineDisplayScaleRuntime = installTimelineDisplayScaleRuntime()
-    const removeManualTargetSyncCompatRuntime = installManualTargetSyncCompatRuntime()
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
@@ -115,7 +113,6 @@ function AppWithRuntime() {
       removeRealtimeAmanRuntime()
       removeManualSequenceReorderRuntime()
       removeTimelineDisplayScaleRuntime()
-      removeManualTargetSyncCompatRuntime()
       removeMonitoredTimelineRuntime()
       removeMaestroOpsMenuRuntime()
       removeLandedHistoryRuntime()
