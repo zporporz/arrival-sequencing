@@ -60,6 +60,8 @@ export function installRealtimeAmanRuntime() {
 
   const rooms = new Map<string, Room>()
   const previewOriginals = new Map<string, Map<HTMLElement, { offset: string; tldt: string }>>()
+  const previewSubjects = new Map<string, string>()
+  const previewCancelTimers = new Map<string, number>()
   const lockTimers = new Map<string, number>()
   let activeDrag: {
     airport: string
@@ -107,15 +109,54 @@ export function installRealtimeAmanRuntime() {
 
   const clearPreview = (previewId: string) => {
     const originals = previewOriginals.get(previewId)
-    if (!originals) return
-    originals.forEach((original, row) => {
-      if (!row.isConnected) return
-      row.style.setProperty('--offset-px', original.offset)
-      const label = row.querySelector<HTMLElement>('.tldt')
-      if (label) label.textContent = original.tldt
-      delete row.dataset.realtimePreview
+    originals?.forEach((original, row) => {
+      if (row.isConnected) {
+        row.style.setProperty('--offset-px', original.offset)
+        const label = row.querySelector<HTMLElement>('.tldt')
+        if (label) label.textContent = original.tldt
+        delete row.dataset.realtimePreview
+      }
     })
     previewOriginals.delete(previewId)
+    previewSubjects.delete(previewId)
+  }
+
+  const acceptPreview = (previewId: string) => {
+    previewOriginals.get(previewId)?.forEach((_original, row) => {
+      if (row.dataset.realtimePreview === previewId) delete row.dataset.realtimePreview
+    })
+    previewOriginals.delete(previewId)
+    previewSubjects.delete(previewId)
+  }
+
+  const clearPreviewCancelTimer = (previewId: string) => {
+    const timer = previewCancelTimers.get(previewId)
+    if (timer != null) window.clearTimeout(timer)
+    previewCancelTimers.delete(previewId)
+  }
+
+  const clearCommittedPreview = (message: { airport?: string; previewId?: string; flightState?: { callsign?: string } }) => {
+    const previewId = String(message.previewId || '')
+    if (previewId) {
+      // The preview already shows the released position. Adopt it until React
+      // applies the authoritative commit on the next animation frame; restoring
+      // the pre-drag DOM here creates a visible one-frame jump.
+      acceptPreview(previewId)
+      clearPreviewCancelTimer(previewId)
+      return
+    }
+
+    // Backward compatibility while an older worker version is still active:
+    // only restore previews containing the committed flight, never every drag
+    // that happens to be visible in this browser.
+    const airport = String(message.airport || '').toUpperCase()
+    const callsign = String(message.flightState?.callsign || '').toUpperCase()
+    if (!airport || !callsign) return
+    previewSubjects.forEach((subject, candidatePreviewId) => {
+      if (subject !== `${airport}:${callsign}`) return
+      acceptPreview(candidatePreviewId)
+      clearPreviewCancelTimer(candidatePreviewId)
+    })
   }
 
   const findRow = (airport: string, callsign: string) => Array.from(
@@ -178,10 +219,17 @@ export function installRealtimeAmanRuntime() {
     }, Math.max(0, expiresAt - Date.now()) + 20))
   }
 
-  const applyPreview = (message: { airport?: string; previewId?: string; rows?: Array<{ callsign?: string; targetAt?: string }> }) => {
+  const applyPreview = (message: {
+    airport?: string
+    callsign?: string
+    previewId?: string
+    rows?: Array<{ callsign?: string; targetAt?: string }>
+  }) => {
     const airport = String(message.airport || '').toUpperCase()
+    const subjectCallsign = String(message.callsign || '').toUpperCase()
     const previewId = String(message.previewId || '')
     if (!airport || !previewId || !Array.isArray(message.rows)) return
+    if (subjectCallsign) previewSubjects.set(previewId, `${airport}:${subjectCallsign}`)
     const originals = previewOriginals.get(previewId) ?? new Map()
     previewOriginals.set(previewId, originals)
 
@@ -275,11 +323,13 @@ export function installRealtimeAmanRuntime() {
       return
     }
     if (message?.type === 'drag_cancel') {
-      clearPreview(String(message.previewId || ''))
+      const previewId = String(message.previewId || '')
+      clearPreview(previewId)
+      clearPreviewCancelTimer(previewId)
       return
     }
     if (message?.type === 'flight_commit') {
-      previewOriginals.forEach((_value, key) => clearPreview(key))
+      clearCommittedPreview(message)
       dispatchFlightState(message.flightState)
       return
     }
@@ -416,6 +466,7 @@ export function installRealtimeAmanRuntime() {
       pointerId: event.pointerId,
       row,
     }
+    previewSubjects.set(activeDrag.previewId, `${info.airport}:${info.callsign}`)
     send(info.airport, {
       type: 'drag_begin',
       callsign: info.callsign,
@@ -450,11 +501,19 @@ export function installRealtimeAmanRuntime() {
   const finishDrag = (cancel: boolean) => {
     if (!activeDrag) return
     if (!cancel) publishDragPreview()
-    else send(activeDrag.airport, { type: 'drag_cancel', previewId: activeDrag.previewId })
+    else {
+      send(activeDrag.airport, { type: 'drag_cancel', previewId: activeDrag.previewId })
+      clearPreview(activeDrag.previewId)
+      clearPreviewCancelTimer(activeDrag.previewId)
+    }
     const finished = activeDrag
     activeDrag = null
     if (!cancel) {
-      window.setTimeout(() => send(finished.airport, { type: 'drag_cancel', previewId: finished.previewId }), 4_000)
+      clearPreviewCancelTimer(finished.previewId)
+      previewCancelTimers.set(finished.previewId, window.setTimeout(() => {
+        previewCancelTimers.delete(finished.previewId)
+        send(finished.airport, { type: 'drag_cancel', previewId: finished.previewId })
+      }, 4_000))
     }
   }
 
@@ -484,6 +543,8 @@ export function installRealtimeAmanRuntime() {
       room.socket?.close(1000, 'runtime disposed')
     })
     previewOriginals.forEach((_value, key) => clearPreview(key))
+    previewCancelTimers.forEach((timer) => window.clearTimeout(timer))
+    previewCancelTimers.clear()
     lockTimers.forEach((timer) => window.clearTimeout(timer))
     document.querySelectorAll<HTMLElement>('.aman-flight-row.is-realtime-locked').forEach((row) => {
       row.classList.remove('is-realtime-locked')

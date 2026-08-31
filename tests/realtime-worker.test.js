@@ -75,6 +75,21 @@ describe('AMAN realtime Durable Object coordination', () => {
     })
   })
 
+  it('identifies which drag preview produced a flight commit', async () => {
+    const { room, sockets } = setupRoom()
+    const state = { airport: 'VTBS', callsign: 'THA123', revision: 1 }
+
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
+    }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'flight_commit', flightState: state }))
+
+    expect(sockets[1].sent.find((message) => message.type === 'flight_commit')).toMatchObject({
+      previewId: 'preview-one',
+      flightState: state,
+    })
+  })
+
   it('keeps a newer sequence commit when an older revision arrives late', async () => {
     const { room, sockets, storage } = setupRoom()
     const current = { airport: 'VTBS', runway: '19', ordered_callsigns: ['A', 'B'], revision: 8 }

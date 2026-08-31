@@ -265,9 +265,10 @@ export class AmanRealtimeRoom {
         this.rejectStaleCommit(socket, 'flight', current);
         return;
       }
+      const previewId = cleanText(meta.previewId, 80);
       await this.ctx.storage.put(key, state);
       await this.releaseDragLock(socket, meta);
-      this.broadcast({ type: 'flight_commit', airport: meta.airport, flightState: state });
+      this.broadcast({ type: 'flight_commit', airport: meta.airport, previewId, flightState: state });
       return;
     }
 

@@ -561,30 +561,6 @@ export function installSharedAmanRuntime() {
     void clearManualTarget(row)
   }
 
-  const onSequenceReordered = (event: Event) => {
-    const detail = (event as CustomEvent<{
-      airport?: string
-      identities?: string[]
-      manualIdentity?: string
-      preview?: boolean
-      returnAuto?: boolean
-    }>).detail
-    if (detail?.preview || detail?.returnAuto) return
-    const airport = String(detail?.airport || '').trim().toUpperCase()
-    const persistedIdentities = detail?.manualIdentity ? [detail.manualIdentity] : detail?.identities || []
-    const callsigns = new Set(persistedIdentities.map((value) =>
-      String(value).slice(String(value).indexOf(':') + 1).trim().toUpperCase(),
-    ))
-    if (!airport || !callsigns.size) return
-
-    window.setTimeout(() => {
-      callsigns.forEach((callsign) => {
-        const row = findFlightRow(airport, callsign)
-        if (row) queueManualTargetSave(row, 0)
-      })
-    }, 120)
-  }
-
   const onForceRefresh = () => void refresh()
   const onRealtimeFlightState = (event: Event) => {
     const state = (event as CustomEvent<FlightState>).detail
@@ -600,7 +576,6 @@ export function installSharedAmanRuntime() {
   document.addEventListener('pointerdown', onPointerDown)
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
-  window.addEventListener('aman:sequence-reordered', onSequenceReordered)
   window.addEventListener('aman:force-shared-refresh', onForceRefresh)
   window.addEventListener('aman:realtime-flight-state', onRealtimeFlightState)
   window.addEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
@@ -629,7 +604,6 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('pointerdown', onPointerDown)
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)
-    window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
     window.removeEventListener('aman:realtime-flight-state', onRealtimeFlightState)
     window.removeEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)

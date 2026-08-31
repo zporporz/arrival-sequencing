@@ -135,4 +135,69 @@ describe('realtime AMAN coordination', () => {
     dispose()
     document.body.innerHTML = ''
   })
+
+  it('does not let a late commit from the prior drag clear the next drag preview', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-25T10:00:00.000Z')
+
+    class FakeWebSocket extends EventTarget {
+      static OPEN = 1
+      static CLOSED = 3
+      static instances: FakeWebSocket[] = []
+      readyState = FakeWebSocket.OPEN
+      sent: string[] = []
+
+      constructor(readonly url: string) {
+        super()
+        FakeWebSocket.instances.push(this)
+      }
+
+      send(payload: string) { this.sent.push(payload) }
+      close() { this.readyState = FakeWebSocket.CLOSED }
+    }
+
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    document.body.innerHTML = `
+      <div class="aman-flight-row" title="VTBS RWY 19" style="--offset-px:-100px">
+        <strong>THA123</strong>
+        <span class="runway-assignment">BS/19</span>
+        <span class="tldt">10:20:00</span>
+      </div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    const socket = (() => {
+      const dispose = installRealtimeAmanRuntime()
+      return { dispose, value: FakeWebSocket.instances.find((item) => item.url.includes('airport=VTBS'))! }
+    })()
+    const receive = (message: unknown) => socket.value.dispatchEvent(new MessageEvent('message', {
+      data: JSON.stringify(message),
+    }))
+
+    receive({
+      type: 'drag_preview', airport: 'VTBS', callsign: 'THA123', previewId: 'preview-one',
+      actor: { name: 'ONE' }, expiresAt: Date.now() + 5_000,
+      rows: [{ callsign: 'THA123', targetAt: '2026-08-25T10:30:00.000Z' }],
+    })
+    receive({
+      type: 'flight_commit', airport: 'VTBS', previewId: 'preview-one',
+      flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1 },
+    })
+    receive({
+      type: 'drag_preview', airport: 'VTBS', callsign: 'THA123', previewId: 'preview-two',
+      actor: { name: 'TWO' }, expiresAt: Date.now() + 5_000,
+      rows: [{ callsign: 'THA123', targetAt: '2026-08-25T10:40:00.000Z' }],
+    })
+    const secondOffset = row.style.getPropertyValue('--offset-px')
+
+    receive({
+      type: 'flight_commit', airport: 'VTBS', previewId: 'preview-one',
+      flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1 },
+    })
+
+    expect(row.dataset.realtimePreview).toBe('preview-two')
+    expect(row.style.getPropertyValue('--offset-px')).toBe(secondOffset)
+
+    socket.dispose()
+    document.body.innerHTML = ''
+  })
 })
