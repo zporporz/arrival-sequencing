@@ -29,6 +29,12 @@ type FlightState = {
   auto_baseline_runway: string | null
   auto_baseline_rank: number | null
   auto_baseline_captured_at: string | null
+  auto_return_tldt: string | null
+  auto_return_floor_tldt: string | null
+  auto_return_runway: string | null
+  auto_returned_at: string | null
+  auto_returned_by_vid: string | null
+  auto_returned_by_name: string | null
   holding_mode: 'AUTO' | 'HOLD' | 'NO_HOLD'
   holding_fix: string | null
   holding_leave_at: string | null

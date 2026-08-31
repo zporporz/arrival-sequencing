@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyManualTargetsWithCascade } from '../src/AppMaestroV24'
+import { applyManualTargetsWithCascade, currentSharedAutoReturnOverrides } from '../src/AppMaestroV24'
 import {
   autoSequenceUnstableArrivals,
   resolveAmanPairwiseSeparationSeconds,
@@ -480,6 +480,52 @@ describe('shared sequence reload', () => {
     expect(ranks).toEqual({
       THA101: 2,
       RTAF202: 1,
+    })
+  })
+})
+
+describe('authoritative current AUTO return', () => {
+  it('maps a fresh shared AUTO result onto the matching live session id', () => {
+    const now = Date.parse('2026-08-31T10:00:30.000Z')
+    const arrival = prediction('THA123', 'C', '2026-08-31T10:10:00.000Z')
+    const result = currentSharedAutoReturnOverrides([arrival], [{
+      airport: 'VTBS',
+      callsign: 'THA123',
+      target_mode: 'AUTO',
+      auto_return_tldt: '2026-08-31T10:20:00.000Z',
+      auto_return_floor_tldt: '2026-08-31T10:00:00.000Z',
+      auto_return_runway: '20R',
+      auto_returned_at: '2026-08-31T10:00:00.000Z',
+    }], now)
+
+    expect(result).toEqual({
+      tldtById: { [arrival.id]: '2026-08-31T10:20:00.000Z' },
+      floorById: { [arrival.id]: '2026-08-31T10:00:00.000Z' },
+      runwayById: { [arrival.id]: '20R' },
+    })
+  })
+
+  it('uses the shared current AUTO target, then lets the override expire', () => {
+    const arrival = prediction('THA123', 'C', '2026-08-31T10:10:00.000Z')
+    const base = autoSequenceUnstableArrivals([arrival], { runwaySpacingSeconds: { '19': 120 } })
+    const sharedTarget = '2026-08-31T10:20:00.000Z'
+    const applied = applyManualTargetsWithCascade(base, {}, { '19': 120 }, {}, {}, {
+      [arrival.id]: sharedTarget,
+    })
+
+    expect(applied[0].tldt).toBe(sharedTarget)
+    expect(currentSharedAutoReturnOverrides([arrival], [{
+      airport: 'VTBS',
+      callsign: 'THA123',
+      target_mode: 'AUTO',
+      auto_return_tldt: sharedTarget,
+      auto_return_floor_tldt: '2026-08-31T10:00:00.000Z',
+      auto_return_runway: '19',
+      auto_returned_at: '2026-08-31T10:00:00.000Z',
+    }], Date.parse('2026-08-31T10:02:00.000Z'))).toEqual({
+      tldtById: {},
+      floorById: { [arrival.id]: '2026-08-31T10:00:00.000Z' },
+      runwayById: {},
     })
   })
 })

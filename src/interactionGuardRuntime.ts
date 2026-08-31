@@ -2,6 +2,14 @@ type ReactRowProps = {
   onDoubleClick?: () => void
 }
 
+type AutoReturnDetail = {
+  airport?: string
+  runway?: string
+  identity?: string
+  autoTldt?: string
+  autoFloorTldt?: string
+}
+
 type DragGuard = {
   row: HTMLElement
   pointerId: number
@@ -37,7 +45,7 @@ function clearLegacyGainLimit(row: HTMLElement) {
   row.title = row.title.replace(/ · MAX GAIN .*$/i, '')
 }
 
-async function clearSharedTarget(airport: string, callsign: string) {
+async function clearSharedTarget(airport: string, callsign: string, autoTldt: string, autoFloorTldt: string, autoRunway: string) {
   const response = await fetch('/api/sequence/aman-state', {
     method: 'POST',
     credentials: 'same-origin',
@@ -48,6 +56,9 @@ async function clearSharedTarget(airport: string, callsign: string) {
       serviceDate: new Date().toISOString().slice(0, 10),
       airport,
       callsign,
+      autoTldt,
+      autoFloorTldt,
+      autoRunway,
     }),
   })
   const payload = await response.json() as { error?: string; flightState?: unknown }
@@ -58,6 +69,7 @@ async function clearSharedTarget(airport: string, callsign: string) {
 export function installInteractionGuardRuntime() {
   let drag: DragGuard | null = null
   const resetPending = new Set<string>()
+  const currentAutoReturns = new Map<string, { autoTldt: string; autoFloorTldt: string; autoRunway: string }>()
 
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach(clearLegacyGainLimit)
 
@@ -123,6 +135,8 @@ export function installInteractionGuardRuntime() {
     const oldSharedRevision = row.dataset.sharedRevision
     row.dataset.resetPending = 'true'
     reactProps<ReactRowProps>(row)?.onDoubleClick?.()
+    const currentAuto = currentAutoReturns.get(identity.key)
+    currentAutoReturns.delete(identity.key)
 
     window.requestAnimationFrame(() => {
       const current = findRow(identity.airport, identity.callsign)
@@ -131,7 +145,11 @@ export function installInteractionGuardRuntime() {
       if (oldSharedRevision) current.dataset.sharedRevision = oldSharedRevision
     })
 
-    void clearSharedTarget(identity.airport, identity.callsign)
+    const clearRequest = currentAuto
+      ? clearSharedTarget(identity.airport, identity.callsign, currentAuto.autoTldt, currentAuto.autoFloorTldt, currentAuto.autoRunway)
+      : Promise.reject(new Error('Current AUTO target was not calculated'))
+
+    void clearRequest
       .then((flightState) => {
         if (!flightState) return
         // The capture-phase interaction guard owns this dblclick, so the shared
@@ -155,11 +173,29 @@ export function installInteractionGuardRuntime() {
       })
   }
 
+  const onReturnFlightAuto = (event: Event) => {
+    const detail = (event as CustomEvent<AutoReturnDetail>).detail
+    const airport = String(detail?.airport || '').trim().toUpperCase()
+    const identity = String(detail?.identity || '').trim().toUpperCase()
+    const autoRunway = String(detail?.runway || '').trim().toUpperCase()
+    const autoTldt = String(detail?.autoTldt || '')
+    const autoFloorTldt = String(detail?.autoFloorTldt || '')
+    const autoMs = new Date(autoTldt).getTime()
+    const floorMs = new Date(autoFloorTldt).getTime()
+    if (!airport || !identity || !autoRunway || !Number.isFinite(autoMs) || !Number.isFinite(floorMs)) return
+    currentAutoReturns.set(identity, {
+      autoTldt: new Date(autoMs).toISOString(),
+      autoFloorTldt: new Date(floorMs).toISOString(),
+      autoRunway,
+    })
+  }
+
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('pointercancel', clearDrag, true)
   document.addEventListener('dblclick', onDoubleClick, true)
+  window.addEventListener('aman:return-flight-auto', onReturnFlightAuto)
 
   return () => {
     document.removeEventListener('pointerdown', onPointerDown, true)
@@ -167,5 +203,7 @@ export function installInteractionGuardRuntime() {
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('pointercancel', clearDrag, true)
     document.removeEventListener('dblclick', onDoubleClick, true)
+    window.removeEventListener('aman:return-flight-auto', onReturnFlightAuto)
+    currentAutoReturns.clear()
   }
 }

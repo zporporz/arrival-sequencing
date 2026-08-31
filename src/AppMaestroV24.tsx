@@ -88,6 +88,11 @@ type RunwayProfile = {
 type SharedOperationalFlight = {
   airport: string
   callsign: string
+  target_mode?: 'AUTO' | 'MANUAL' | null
+  auto_return_tldt?: string | null
+  auto_return_floor_tldt?: string | null
+  auto_return_runway?: string | null
+  auto_returned_at?: string | null
   operational_state?: OperationalState | null
   reserved_gap_seconds?: number | null
 }
@@ -176,6 +181,7 @@ const PX_PER_MINUTE = 10
 const TIMELINE_PAST_MINUTES = 22
 const TIMELINE_FUTURE_MINUTES = 58
 const DRAG_SNAP_MS = 15_000
+const AUTHORITATIVE_AUTO_RETURN_MAX_AGE_MS = 60_000
 const UNKNOWN_DISTANCE_FALLBACK_MINUTES = 45
 const VTBS_CROSS_RUNWAY_STAGGER_SECONDS = 60
 const VTBD_21L_CALLSIGN_PREFIXES = ['LKY', 'RTN', 'WHK', 'RTAF', 'VMS'] as const
@@ -496,13 +502,14 @@ export function applyManualTargetsWithCascade(
   runwaySpacingSeconds: Record<string, number>,
   gapAfterSeconds: Record<string, number>,
   autoReturnFloorTldt: Record<string, string> = {},
+  authoritativeAutoTldt: Record<string, string> = {},
 ) {
   const targetById = new Map<string, number>()
   const controllerAffectedIds = new Set<string>()
   rows.forEach((row) => {
     const manualTarget = manualTldt[row.id]
     if (manualTarget) controllerAffectedIds.add(row.id)
-    const baseTargetMs = new Date(manualTarget ?? row.tldt).getTime()
+    const baseTargetMs = new Date(manualTarget ?? authoritativeAutoTldt[row.id] ?? row.tldt).getTime()
     const autoFloorMs = manualTarget ? NaN : new Date(autoReturnFloorTldt[row.id] ?? '').getTime()
     targetById.set(row.id, Number.isFinite(autoFloorMs) ? Math.max(baseTargetMs, autoFloorMs) : baseTargetMs)
   })
@@ -592,6 +599,34 @@ export function applyManualTargetsWithCascade(
     .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime() || a.callsign.localeCompare(b.callsign))
 }
 
+export function currentSharedAutoReturnOverrides(
+  predictions: Array<Pick<AmanArrivalPrediction, 'id' | 'callsign'>>,
+  states: SharedOperationalFlight[],
+  nowMs = Date.now(),
+) {
+  const byFlight = new Map(states.map((state) => [flightKey(state.airport, state.callsign), state]))
+  const tldtById: Record<string, string> = {}
+  const floorById: Record<string, string> = {}
+  const runwayById: Record<string, string> = {}
+
+  for (const prediction of predictions) {
+    const state = byFlight.get(predictionFlightKey(prediction))
+    if (state?.target_mode !== 'AUTO') continue
+    const targetMs = new Date(state.auto_return_tldt || '').getTime()
+    const floorMs = new Date(state.auto_return_floor_tldt || '').getTime()
+    const returnedAtMs = new Date(state.auto_returned_at || '').getTime()
+    const runway = String(state.auto_return_runway || '').trim().toUpperCase()
+    const ageMs = nowMs - returnedAtMs
+    if (Number.isFinite(floorMs)) floorById[prediction.id] = new Date(floorMs).toISOString()
+    if (!Number.isFinite(targetMs) || !Number.isFinite(returnedAtMs) || !runway) continue
+    if (ageMs < -10_000 || ageMs > AUTHORITATIVE_AUTO_RETURN_MAX_AGE_MS) continue
+    tldtById[prediction.id] = new Date(targetMs).toISOString()
+    runwayById[prediction.id] = runway
+  }
+
+  return { tldtById, floorById, runwayById }
+}
+
 function configuredAirportCapacityPerHour(
   airport: AirportCode,
   runwayModes: Record<AirportCode, Record<string, RunwayMode>>,
@@ -642,6 +677,7 @@ export default function App() {
   const [autoReturnFloorTldt, setAutoReturnFloorTldt] = useState<Record<string, string>>({})
   const [operationalStateByKey, setOperationalStateByKey] = useState<Record<string, OperationalState>>({})
   const [reservedGapSecondsByKey, setReservedGapSecondsByKey] = useState<Record<string, number>>({})
+  const [sharedOperationalFlights, setSharedOperationalFlights] = useState<SharedOperationalFlight[]>([])
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [opsMenu, setOpsMenu] = useState<OpsMenuState | null>(null)
   const [mobileInboundOpen, setMobileInboundOpen] = useState(false)
@@ -705,10 +741,24 @@ export default function App() {
     return canonical ? { ...prediction, predictedIawpAt: canonical } : prediction
   }), [canonicalEtaById, livePredictions])
 
+  const sharedAutoReturnOverrides = useMemo(
+    () => currentSharedAutoReturnOverrides(effectiveLivePredictions, sharedOperationalFlights, now.getTime()),
+    [effectiveLivePredictions, now, sharedOperationalFlights],
+  )
+  const effectiveLiveRunways = useMemo(
+    () => ({ ...sharedAutoReturnOverrides.runwayById, ...manualRunways }),
+    [manualRunways, sharedAutoReturnOverrides.runwayById],
+  )
+  const effectiveAutoReturnFloorTldt = useMemo(
+    () => ({ ...autoReturnFloorTldt, ...sharedAutoReturnOverrides.floorById }),
+    [autoReturnFloorTldt, sharedAutoReturnOverrides.floorById],
+  )
+
   useEffect(() => {
     const onSharedState = (event: Event) => {
       const detail = (event as CustomEvent<SharedStateDetail>).detail
       if (!detail?.flightStates) return
+      setSharedOperationalFlights(detail.flightStates)
       const nextStates: Record<string, OperationalState> = {}
       const nextGaps: Record<string, number> = {}
       for (const state of detail.flightStates) {
@@ -765,13 +815,13 @@ export default function App() {
       airport,
       runwayModes,
       spacingNm,
-      manualRunways,
+      effectiveLiveRunways,
     ))
     return autoSequenceUnstableArrivals(assigned, {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, liveSequencedPredictions, manualRunways, runwayModes, runwaySpacingSeconds, spacingNm])
+  }, [airports, effectiveLiveRunways, liveSequencedPredictions, runwayModes, runwaySpacingSeconds, spacingNm])
 
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchors) return []
@@ -793,8 +843,15 @@ export default function App() {
     [autoReturnFloorTldt, demoBaseSequence, manualTldt, runwaySpacingSeconds],
   )
   const liveSequence = useMemo(
-    () => applyManualTargetsWithCascade(liveBaseSequence, manualTldt, runwaySpacingSeconds, gapAfterSecondsById, autoReturnFloorTldt),
-    [autoReturnFloorTldt, gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds],
+    () => applyManualTargetsWithCascade(
+      liveBaseSequence,
+      manualTldt,
+      runwaySpacingSeconds,
+      gapAfterSecondsById,
+      effectiveAutoReturnFloorTldt,
+      sharedAutoReturnOverrides.tldtById,
+    ),
+    [effectiveAutoReturnFloorTldt, gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds, sharedAutoReturnOverrides.tldtById],
   )
   const activeSequence = demoMode ? demoSequence : liveSequence
   const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE').length, [inbound])
@@ -1229,6 +1286,7 @@ export default function App() {
           runway: row.runway,
           identity: amanSequenceOrderIdentity(airport, row.callsign),
           autoTldt: new Date(autoTargetMs).toISOString(),
+          autoFloorTldt: new Date(floorMs).toISOString(),
         },
       }))
     }

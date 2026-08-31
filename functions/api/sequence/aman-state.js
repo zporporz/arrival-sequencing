@@ -303,6 +303,10 @@ export async function onRequestPost(context) {
 
     if (action === 'clearManualTarget') {
       if (!existing) return json({ ok: true, flightState: null });
+      const autoReturnTldt = cleanIso(payload.autoTldt, true);
+      const autoReturnFloorTldt = cleanIso(payload.autoFloorTldt, true);
+      const autoReturnRunway = cleanRunway(payload.autoRunway);
+      if (!autoReturnRunway) throw new Error('Current AUTO runway is required');
       const row = await patchFlightState(context.env, serviceDate, airport, callsign, {
         target_mode: 'AUTO',
         manual_tldt: null,
@@ -310,6 +314,12 @@ export async function onRequestPost(context) {
         manual_updated_by_vid: auth.vid,
         manual_updated_by_name: auth.name,
         manual_updated_at: new Date().toISOString(),
+        auto_return_tldt: autoReturnTldt,
+        auto_return_floor_tldt: autoReturnFloorTldt,
+        auto_return_runway: autoReturnRunway,
+        auto_returned_at: new Date().toISOString(),
+        auto_returned_by_vid: auth.vid,
+        auto_returned_by_name: auth.name,
       });
       return json({ ok: true, flightState: row });
     }
