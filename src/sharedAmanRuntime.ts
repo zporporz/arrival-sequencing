@@ -176,8 +176,8 @@ function fakePointer(clientY: number): FakePointerEvent {
   }
 }
 
-function applyTargetThroughReact(row: HTMLElement, targetMs: number) {
-  const currentMs = currentTargetMs(row)
+function applyTargetThroughReact(row: HTMLElement, targetMs: number, baseTargetMs?: number) {
+  const currentMs = Number.isFinite(baseTargetMs) ? baseTargetMs! : currentTargetMs(row)
   const props = reactProps<ReactRowProps>(row)
   if (currentMs == null || !props?.onPointerDown || !props.onPointerMove || !props.onPointerUp) return false
 
@@ -609,7 +609,8 @@ export function installSharedAmanRuntime() {
     window.requestAnimationFrame(() => {
       const currentRow = findFlightRow(airport, callsign)
       if (!currentRow) return
-      applyTargetThroughReact(currentRow, releasedMs)
+      const original = releaseOriginals.get(previewId)
+      applyTargetThroughReact(currentRow, releasedMs, original?.targetMs)
       currentRow.dataset.targetMode = 'MANUAL'
       currentRow.dataset.realtimeReleasePreview = previewId
     })

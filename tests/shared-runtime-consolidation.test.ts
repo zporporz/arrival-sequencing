@@ -150,7 +150,10 @@ describe('shared runtime consolidation', () => {
     const row = document.createElement('div')
     row.className = 'aman-flight-row'
     row.title = 'VTBS RWY 19'
-    row.style.setProperty('--offset-px', '0px')
+    // Realtime preview has already moved the DOM to the released position.
+    // React still owns the original target, so the release must use the
+    // pre-preview target as its drag baseline instead of reading this offset.
+    row.style.setProperty('--offset-px', '-70px')
     row.innerHTML = `
       <span class="tldt">10:00</span><strong>THA123</strong>
       <em class="runway-assignment"><select><option selected>19</option></select></em>
@@ -174,6 +177,8 @@ describe('shared runtime consolidation', () => {
     expect(pointerDown).toHaveBeenCalledTimes(1)
     expect(pointerMove).toHaveBeenCalledTimes(1)
     expect(pointerUp).toHaveBeenCalledTimes(1)
+    expect(pointerMove.mock.calls[0]?.[0]?.clientY).toBeCloseTo(-70, 0)
+    expect(pointerUp.mock.calls[0]?.[0]?.clientY).toBeCloseTo(-70, 0)
     expect(row.dataset.targetMode).toBe('MANUAL')
     expect(row.dataset.realtimeReleasePreview).toBe('preview-one')
 
