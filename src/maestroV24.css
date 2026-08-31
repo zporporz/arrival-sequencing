@@ -74,6 +74,40 @@
   grid-template-columns: 68px 118px 66px 34px 58px minmax(116px, 1.35fr) 66px;
 }
 
+/* Ground departures are useful planning context, but remain deliberately
+   outside the operational sequence until takeoff is confirmed. */
+.aman-provisional-row {
+  position: absolute;
+  left: calc(50% + 28px);
+  top: var(--now-line);
+  width: calc(50% - 40px);
+  min-height: 42px;
+  transform: translateY(calc(var(--offset-px) - 50%));
+  display: grid;
+  grid-template-columns: 66px minmax(116px, 1.35fr) 58px 34px 66px 70px 68px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border: 1px dashed rgba(142, 162, 182, .58);
+  border-left: 3px dashed #8798a9;
+  background: rgba(9, 19, 31, .68);
+  color: #8fa2b5;
+  opacity: .62;
+  font: 800 11px/1.1 Consolas, monospace;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.aman-provisional-row strong { color: #b6c3cf; }
+.aman-provisional-row strong small {
+  display: block;
+  margin-top: 3px;
+  color: #90a0af;
+  font-size: 8px;
+}
+.aman-provisional-row b { color: #d0aa62; }
+.aman-provisional-row em { color: #8fb3bb; font-style: normal; }
+
 .aman-delay-stack {
   min-width: 0;
   display: flex;
@@ -170,6 +204,12 @@
 .aman-inbound-row.planning-removed {
   background: rgba(31, 30, 59, .34);
 }
+
+.aman-inbound-row.planning-boarding { opacity: .68; }
+.aman-inbound-row.planning-departing,
+.aman-inbound-row.planning-takeoff_est { background: rgba(73, 63, 34, .2); }
+.aman-planning-badge.is-boarding { color: #8fa0af; border-color: #465665; }
+.aman-planning-badge.is-departing { color: #e1bb72; border-color: #7a6034; }
 
 .aman-inbound-row.planning-missed .aman-inbound-acid > strong {
   color: #ffaf82 !important;
@@ -282,6 +322,11 @@
 
   .aman-flight-row[data-display-side="LEFT"] {
     grid-template-columns: 56px 96px 55px 28px 48px minmax(90px, 1.2fr) 54px;
+  }
+
+  .aman-provisional-row {
+    grid-template-columns: 54px minmax(90px, 1.2fr) 48px 28px 55px 56px 56px;
+    min-height: 40px;
   }
 
   .aman-delay-stack > span { font-size: 12px; }

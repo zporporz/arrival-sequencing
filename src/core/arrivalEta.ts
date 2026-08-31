@@ -32,6 +32,8 @@ type EtaStageState = {
   stableEtaMs: number | null
   iawpCrossingMs: number | null
   iawpFix: string | null
+  provisionalTakeoffMs: number | null
+  stableTakeoffConfirmed: boolean
   touchedAtMs: number
 }
 
@@ -90,6 +92,8 @@ function loadPersistedStageState(key: string, nowMs: number): EtaStageState | nu
       stableEtaMs: finite(parsed.stableEtaMs) ? parsed.stableEtaMs : null,
       iawpCrossingMs: finite(parsed.iawpCrossingMs) ? parsed.iawpCrossingMs : null,
       iawpFix: typeof parsed.iawpFix === 'string' ? parsed.iawpFix : null,
+      provisionalTakeoffMs: finite(parsed.provisionalTakeoffMs) ? parsed.provisionalTakeoffMs : null,
+      stableTakeoffConfirmed: parsed.stableTakeoffConfirmed === true,
       touchedAtMs: parsed.touchedAtMs,
     }
   } catch {
@@ -287,6 +291,8 @@ export function estimateIawpArrival(
       stableEtaMs: null,
       iawpCrossingMs: null,
       iawpFix: null,
+      provisionalTakeoffMs: null,
+      stableTakeoffConfirmed: false,
       touchedAtMs: nowMs,
     }
   existing.touchedAtMs = nowMs
@@ -300,11 +306,57 @@ export function estimateIawpArrival(
     return estimateIawpArrivalLegacy(flight, geometry, refFix, nominalStarSeconds, fetchedAt, performance)
   }
 
-  const legacy = estimateIawpArrivalLegacy(flight, geometry, refFix, nominalStarSeconds, fetchedAt, performance)
+  let legacy = estimateIawpArrivalLegacy(flight, geometry, refFix, nominalStarSeconds, fetchedAt, performance)
   const referenceIso = flight.connectedAt || fetchedAt
   const takeoffBaselineMs = estimateFromTakeoff(flight, nominalStarSeconds, referenceIso)
+  if (takeoffBaselineMs != null) {
+    // Replace the temporary first-track/ETOT baseline as soon as IVAO exposes
+    // Actual Departure. Otherwise the pre-cruise monotonic guard can preserve an
+    // optimistic provisional ETA even though the real takeoff occurred later.
+    if (existing.provisionalTakeoffMs != null) existing.displayedMs = null
+    existing.provisionalTakeoffMs = null
+  } else {
+    // IVAO can mark the aircraft airborne before its detailed flight plan exposes
+    // Actual Departure. Never fall back to raw EOBT at this point: retain the
+    // departing ETOT when this browser observed pushback, otherwise use the first
+    // airborne track as a conservative temporary takeoff time.
+    if (existing.provisionalTakeoffMs == null) {
+      const observedAirborneMs = safeTime(flight.trackTimestamp) ?? nowMs
+      const taxiMinutes = standardTaxiOutMinutes(flight.departure)
+      const departingEtotMs = existing.offBlockMs != null && taxiMinutes != null
+        ? existing.offBlockMs + taxiMinutes * 60_000
+        : null
+      existing.provisionalTakeoffMs = departingEtotMs == null
+        ? observedAirborneMs
+        : Math.min(observedAirborneMs, departingEtotMs)
+    }
+    if (legacy.source === 'FILED_EOBT_EET'
+      && existing.provisionalTakeoffMs != null
+      && finite(flight.filedEetSeconds)
+      && flight.filedEetSeconds > 0) {
+      const provisionalIawpMs = existing.provisionalTakeoffMs
+        + Math.max(0, flight.filedEetSeconds - nominalStarSeconds) * 1000
+      legacy = {
+        ...legacy,
+        source: 'TRACKED_TAKEOFF_EET',
+        predictedIawpAt: new Date(provisionalIawpMs).toISOString(),
+        reason: `ETA STAGE AIRBORNE · ACTUAL TAKEOFF PENDING · TEMP TRACK ${new Date(existing.provisionalTakeoffMs).toISOString()}`,
+      }
+    }
+  }
   const legacyMs = safeTime(legacy.predictedIawpAt)
   const normalizedRefFix = refFix.trim().toUpperCase()
+
+  // Versions before the takeoff guard could freeze an EOBT-based estimate while
+  // Actual Departure was still missing. Once real takeoff evidence arrives,
+  // release that stale time lock and recompute from the current stage.
+  if (takeoffBaselineMs != null
+    && existing.stableEtaMs != null
+    && existing.iawpCrossingMs == null
+    && !existing.stableTakeoffConfirmed) {
+    existing.stableEtaMs = null
+    existing.iawpFix = null
+  }
 
   // ETA-FF stops being an estimate once the aircraft has crossed the feeder fix.
   // The legacy route model can back-estimate that crossing on every refresh, but
@@ -329,6 +381,7 @@ export function estimateIawpArrival(
     existing.iawpCrossingMs = legacyMs
     existing.stableEtaMs = legacyMs
     existing.iawpFix = normalizedRefFix
+    existing.stableTakeoffConfirmed = true
   }
   if (existing.iawpCrossingMs != null && existing.iawpFix === normalizedRefFix) {
     existing.phase = 'AIRBORNE'
@@ -389,9 +442,12 @@ export function estimateIawpArrival(
       : Math.min(existing.displayedMs, candidateMs)
   }
 
-  if (existing.displayedMs != null && existing.displayedMs - nowMs <= STABLE_ETA_LOCK_WINDOW_MS) {
+  if (takeoffBaselineMs != null
+    && existing.displayedMs != null
+    && existing.displayedMs - nowMs <= STABLE_ETA_LOCK_WINDOW_MS) {
     existing.stableEtaMs = existing.displayedMs
     existing.iawpFix = normalizedRefFix
+    existing.stableTakeoffConfirmed = true
   }
   persistStageState(key, existing)
 

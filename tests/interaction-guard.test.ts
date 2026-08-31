@@ -7,6 +7,24 @@ afterEach(() => {
 })
 
 describe('return to AUTO interaction guard', () => {
+  it('does not interpret a normal click as return to AUTO', () => {
+    document.body.innerHTML = '<div class="aman-flight-row" data-target-mode="AUTO" title="VTBS RWY 19"><strong>THA321</strong></div>'
+    const row = document.querySelector<HTMLElement>('.aman-flight-row')!
+    const reset = vi.fn()
+    Object.defineProperty(row, '__reactProps$test', {
+      value: { onDoubleClick: reset },
+      configurable: true,
+      enumerable: true,
+    })
+    const remove = installInteractionGuardRuntime()
+
+    row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7, clientY: 100 }))
+    row.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, clientY: 100 }))
+
+    expect(reset).not.toHaveBeenCalled()
+    remove()
+  })
+
   it('updates locally once and publishes the saved AUTO state without waiting for polling', async () => {
     const flightState = {
       service_date: '2026-08-25',

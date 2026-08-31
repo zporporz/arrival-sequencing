@@ -40,7 +40,7 @@ type AirportCode = 'VTBD' | 'VTBS'
 type AirportScope = AirportCode | 'BOTH'
 type RunwayMode = 'ARR' | 'DEP' | 'MIX' | 'CLOSED'
 type OperationalState = 'NORMAL' | 'MISSED_APPROACH' | 'DESEQUENCED' | 'REMOVED'
-type PlanningState = 'SEQUENCED' | 'MONITORED' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
+type PlanningState = 'BOARDING' | 'DEPARTING' | 'TAKEOFF_EST' | 'SEQUENCED' | 'MONITORED' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
 
 type InboundPreview = {
   airport: AirportCode
@@ -79,6 +79,7 @@ type DragState = {
   pointerId: number
   startY: number
   startTldtMs: number
+  moved: boolean
 }
 
 type RunwayProfile = {
@@ -213,6 +214,26 @@ function flightKey(airport: string, callsign: string) {
 
 function rowAirport(id: string): AirportCode {
   return id.toUpperCase().includes('VTBS') ? 'VTBS' : 'VTBD'
+}
+
+function normalizedFlightState(flight: IvaoArrivalTrafficFlight) {
+  return String(flight.state || '').trim().toLowerCase()
+}
+
+function airborneFlight(flight: IvaoArrivalTrafficFlight) {
+  return flight.onGround === false || ['initial climb', 'en route', 'approach'].includes(normalizedFlightState(flight))
+}
+
+function confirmedTakeoff(flight: IvaoArrivalTrafficFlight) {
+  return flight.actualDepartureTimeSeconds != null || Boolean(flight.trackedTakeoffAt)
+}
+
+function previewGroundPhase(item: InboundPreview) {
+  if (airborneFlight(item.flight)) return confirmedTakeoff(item.flight) || item.flight.isDomesticThailand !== true
+    ? 'AIRBORNE'
+    : 'TAKEOFF_EST'
+  if (normalizedFlightState(item.flight) === 'departing' || /ETA STAGE DEPARTING/i.test(item.reason || '')) return 'DEPARTING'
+  return 'BOARDING'
 }
 
 export function mergeAirportRefresh<T>(
@@ -742,14 +763,23 @@ export default function App() {
     return () => window.removeEventListener('aman:canonical-auto-snapshot', onCanonicalSnapshot)
   }, [])
 
+  const livePhaseById = useMemo(
+    () => new Map(inbound.map((item) => [item.id, previewGroundPhase(item)])),
+    [inbound],
+  )
+
   useEffect(() => {
     const publish = () => window.dispatchEvent(new CustomEvent('aman:local-auto-snapshot', {
-      detail: { predictions: livePredictions.map(({ id, predictedIawpAt }) => ({ id, predictedIawpAt })) },
+      detail: {
+        predictions: livePredictions
+          .filter((prediction) => livePhaseById.get(prediction.id) === 'AIRBORNE')
+          .map(({ id, predictedIawpAt }) => ({ id, predictedIawpAt })),
+      },
     }))
     publish()
     window.addEventListener('aman:realtime-health', publish)
     return () => window.removeEventListener('aman:realtime-health', publish)
-  }, [livePredictions])
+  }, [livePhaseById, livePredictions])
 
   const effectiveLivePredictions = useMemo(() => livePredictions.map((prediction) => {
     const canonical = canonicalEtaById[prediction.id]
@@ -816,8 +846,10 @@ export default function App() {
 
   const liveSequencedPredictions = useMemo(() => effectiveLivePredictions.filter((prediction) => {
     const state = operationalStateByKey[predictionFlightKey(prediction)] ?? 'NORMAL'
-    return state === 'NORMAL' && isWithinProcessingRadius(prediction, processingNowMs)
-  }), [effectiveLivePredictions, operationalStateByKey, processingNowMs])
+    return state === 'NORMAL'
+      && livePhaseById.get(prediction.id) === 'AIRBORNE'
+      && isWithinProcessingRadius(prediction, processingNowMs)
+  }), [effectiveLivePredictions, livePhaseById, operationalStateByKey, processingNowMs])
 
   const gapAfterSecondsById = useMemo(() => {
     const result: Record<string, number> = {}
@@ -841,6 +873,30 @@ export default function App() {
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
   }, [airports, effectiveLiveRunways, liveSequencedPredictions, runwayModes, runwaySpacingSeconds, spacingNm])
+
+  const provisionalSequence = useMemo(() => {
+    if (demoMode) return []
+    const provisional = effectiveLivePredictions.filter((prediction) => {
+      const phase = livePhaseById.get(prediction.id)
+      const state = operationalStateByKey[predictionFlightKey(prediction)] ?? 'NORMAL'
+      return state === 'NORMAL'
+        && (phase === 'DEPARTING' || phase === 'TAKEOFF_EST')
+        && isWithinProcessingRadius(prediction, processingNowMs)
+    })
+    const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
+      provisional.filter((prediction) => rowAirport(prediction.id) === airport),
+      airport,
+      runwayModes,
+      spacingNm,
+      effectiveLiveRunways,
+    ))
+    return assigned
+      .map((prediction) => {
+        const naturalTldt = new Date(new Date(prediction.predictedIawpAt).getTime() + prediction.nominalStarSeconds * 1000).toISOString()
+        return { ...calculateArrivalMetrics(prediction, naturalTldt, naturalTldt), sequenceIndex: -1, autoShiftSeconds: 0 }
+      })
+      .sort((a, b) => new Date(a.tldt).getTime() - new Date(b.tldt).getTime())
+  }, [airports, demoMode, effectiveLivePredictions, effectiveLiveRunways, livePhaseById, operationalStateByKey, processingNowMs, runwayModes, spacingNm])
 
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchors) return []
@@ -880,6 +936,10 @@ export default function App() {
     const cutoff = now.getTime() - historyMinutes * 60_000
     return activeSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
   }, [activeSequence, historyMinutes, now])
+  const visibleProvisionalSequence = useMemo(() => {
+    const cutoff = now.getTime() - historyMinutes * 60_000
+    return provisionalSequence.filter((row) => new Date(row.tldt).getTime() >= cutoff)
+  }, [historyMinutes, now, provisionalSequence])
 
   const capacityByAirport = useMemo(() => Object.fromEntries(airports.map((airport) => [
     airport,
@@ -968,6 +1028,9 @@ export default function App() {
         if (operationalState === 'MISSED_APPROACH') planningState = 'MISSED'
         else if (operationalState === 'DESEQUENCED') planningState = 'DESEQUENCED'
         else if (operationalState === 'REMOVED') planningState = 'REMOVED'
+        else if (livePhaseById.get(item.id) === 'BOARDING') planningState = 'BOARDING'
+        else if (livePhaseById.get(item.id) === 'DEPARTING') planningState = 'DEPARTING'
+        else if (livePhaseById.get(item.id) === 'TAKEOFF_EST') planningState = 'TAKEOFF_EST'
         else if (prediction && isWithinProcessingRadius(prediction, processingNowMs)) planningState = 'SEQUENCED'
         else planningState = 'MONITORED'
 
@@ -979,13 +1042,13 @@ export default function App() {
           aircraft: item.flight.aircraft || '----',
           refFix: item.refFix || '----',
           eta: item.predictedIawpAt,
-          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${AMAN_PROCESSING_RADIUS_NM} NM PROCESSING RADIUS` : ''}${planningState === 'MISSED' ? ' · MISSED APPROACH / AWAITING REINSERT' : ''}${planningState === 'DESEQUENCED' ? ' · DESEQUENCED / AWAITING REINSERT' : ''}${planningState === 'REMOVED' ? ' · REMOVED FROM SEQUENCE' : ''}${distanceText}${item.reason ? ` · ${item.reason}` : ''}`,
+          title: `${item.source}${stableIds[item.id] ? ' · ATC MANUAL / STABLE' : ''}${planningState === 'BOARDING' ? ' · BOARDING / NOT YET IN SEQUENCE' : ''}${planningState === 'DEPARTING' ? ' · DEPARTING / PROVISIONAL ETA ONLY' : ''}${planningState === 'TAKEOFF_EST' ? ' · AIRBORNE / ACTUAL TAKEOFF PENDING' : ''}${planningState === 'MONITORED' ? ` · MONITORED OUTSIDE ${AMAN_PROCESSING_RADIUS_NM} NM PROCESSING RADIUS` : ''}${planningState === 'MISSED' ? ' · MISSED APPROACH / AWAITING REINSERT' : ''}${planningState === 'DESEQUENCED' ? ' · DESEQUENCED / AWAITING REINSERT' : ''}${planningState === 'REMOVED' ? ' · REMOVED FROM SEQUENCE' : ''}${distanceText}${item.reason ? ` · ${item.reason}` : ''}`,
           planningState,
           processingDistanceNm: item.processingDistanceNm,
           operationalState,
         }
       }),
-  [demoMode, demoSequence, inbound, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
+  [demoMode, demoSequence, inbound, livePhaseById, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
 
   useEffect(() => {
     const ids = new Set(displayInboundRows.map((item) => item.id))
@@ -1248,6 +1311,7 @@ export default function App() {
       pointerId: event.pointerId,
       startY: event.clientY,
       startTldtMs: new Date(row.tldt).getTime(),
+      moved: false,
     }
     setDraggingId(row.id)
   }
@@ -1256,6 +1320,8 @@ export default function App() {
     const drag = dragRef.current
     if (!drag || drag.id !== row.id || drag.pointerId !== event.pointerId) return
     event.preventDefault()
+    if (!drag.moved && Math.abs(event.clientY - drag.startY) <= 3) return
+    drag.moved = true
     const rawTargetMs = drag.startTldtMs + (-(event.clientY - drag.startY) / PX_PER_MINUTE) * 60_000
     const snappedTargetMs = Math.round(rawTargetMs / DRAG_SNAP_MS) * DRAG_SNAP_MS
     setManualTldt((current) => ({ ...current, [row.id]: new Date(snappedTargetMs).toISOString() }))
@@ -1267,6 +1333,7 @@ export default function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     dragRef.current = null
     setDraggingId(null)
+    if (!drag.moved) return
     setStableIds((current) => ({ ...current, [row.id]: true }))
   }
 
@@ -1429,6 +1496,26 @@ export default function App() {
           <div className="aman-time-axis" aria-hidden="true">{ticks.map((tick) => <div className={`aman-minute-tick ${tick.isMajor ? 'is-major' : 'is-minor'}`} key={tick.key} style={{ '--offset-px': `${tick.offsetPx}px` } as CSSProperties}>{tick.isMajor && <span>{tick.label}</span>}<i /></div>)}</div>
           <div className="aman-current-line"><span>ACTUAL {formatUtc(now)}</span></div>
           <div className="aman-flight-layer">
+            {visibleProvisionalSequence.map((row) => {
+              const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
+              const offsetPx = Math.round(-offsetMinutes * PX_PER_MINUTE)
+              const airport = rowAirport(row.id)
+              const phase = livePhaseById.get(row.id)
+              return <div
+                key={`provisional-${row.id}`}
+                className="aman-provisional-row"
+                style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
+                title={`${phase === 'TAKEOFF_EST' ? 'AIRBORNE · ACTUAL TAKEOFF PENDING' : 'DEPARTING'} · PROVISIONAL ONLY · NOT IN SEQUENCE / AAR / HLD`}
+              >
+                <span className="tldt">{formatHms(row.tldt)}</span>
+                <strong>{row.callsign}<small>{phase === 'TAKEOFF_EST' ? 'TAKEOFF EST' : 'DEPARTING EST'}</small></strong>
+                <span>{row.aircraftType || '----'}</span>
+                <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
+                <span>{formatHm(row.tto)}</span>
+                <b>PROV</b>
+                <em>{airportScope === 'BOTH' ? `${airport === 'VTBD' ? 'BD' : 'BS'}/${row.runway}` : row.runway}</em>
+              </div>
+            })}
             {visibleSequence.map((row) => {
               const offsetMinutes = (new Date(row.tldt).getTime() - now.getTime()) / 60_000
               const isPast = offsetMinutes < 0
@@ -1520,6 +1607,9 @@ export default function App() {
               <span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span>
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
+                {item.planningState === 'BOARDING' && <small className="aman-planning-badge is-boarding">BOARDING</small>}
+                {item.planningState === 'DEPARTING' && <small className="aman-planning-badge is-departing">DEPARTING · EST</small>}
+                {item.planningState === 'TAKEOFF_EST' && <small className="aman-planning-badge is-departing">TAKEOFF · EST</small>}
                 {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON{Number.isFinite(item.processingDistanceNm) ? ` ${Math.round(Number(item.processingDistanceNm))}NM` : ''}</small>}
                 {item.planningState === 'MISSED' && <button type="button" className="aman-reinsert-button is-missed" onClick={() => reinsertInbound(item)}>MISSED · REINSERT</button>}
                 {item.planningState === 'DESEQUENCED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>DSEQ · REINSERT</button>}

@@ -103,13 +103,23 @@ async function getWhazzup(env) {
   return data;
 }
 
-async function getLatestFlightPlan(sessionId, env) {
+async function getLatestFlightPlan(sessionId, env, airborne = false) {
   const key = String(sessionId);
   const cached = flightPlanCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const cachedActualDeparture = finiteNumber(cached?.value?.actualDepartureTime);
+  // A pre-takeoff flight-plan response may not yet contain Actual Departure.
+  // Once Whazzup says airborne, refresh that incomplete record every 30 seconds
+  // instead of hiding IVAO's update behind the normal five-minute cache.
+  if (cached && cached.expiresAt > Date.now() && (!airborne || cachedActualDeparture != null)) return cached.value;
 
-  const value = await trackerJson(`/v2/tracker/sessions/${encodeURIComponent(key)}/flightPlans/latest`, env, 60);
-  flightPlanCache.set(key, { expiresAt: Date.now() + FLIGHT_PLAN_TTL_MS, value });
+  const value = await trackerJson(
+    `/v2/tracker/sessions/${encodeURIComponent(key)}/flightPlans/latest`,
+    env,
+    airborne ? 0 : 60,
+  );
+  const actualDeparture = finiteNumber(value?.actualDepartureTime);
+  const ttl = airborne && actualDeparture == null ? TAKEOFF_PENDING_TTL_MS : FLIGHT_PLAN_TTL_MS;
+  flightPlanCache.set(key, { expiresAt: Date.now() + ttl, value });
   trimCache(flightPlanCache);
   return value;
 }
@@ -298,7 +308,7 @@ export async function onRequestGet(context) {
         let flightPlanDetailError = null;
 
         try {
-          detailed = await getLatestFlightPlan(pilot.id, context.env) || {};
+          detailed = await getLatestFlightPlan(pilot.id, context.env, isAirborneNow(pilot)) || {};
         } catch (error) {
           flightPlanDetailError = error instanceof Error ? error.message : String(error);
         }

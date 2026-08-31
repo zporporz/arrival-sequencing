@@ -15,7 +15,6 @@ type DragGuard = {
   pointerId: number
   startY: number
   moved: boolean
-  wasManual: boolean
 }
 
 const CLICK_MOVE_TOLERANCE_PX = 3
@@ -85,7 +84,6 @@ export function installInteractionGuardRuntime() {
       pointerId: event.pointerId,
       startY: event.clientY,
       moved: false,
-      wasManual: row.classList.contains('is-stable') || row.dataset.targetMode === 'MANUAL',
     }
   }
 
@@ -102,12 +100,6 @@ export function installInteractionGuardRuntime() {
 
     if (snapshot.moved) return
     event.stopImmediatePropagation()
-
-    if (!snapshot.wasManual) {
-      window.requestAnimationFrame(() => {
-        reactProps<ReactRowProps>(snapshot.row)?.onDoubleClick?.()
-      })
-    }
   }
 
   const clearDrag = () => {

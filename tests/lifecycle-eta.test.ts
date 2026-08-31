@@ -343,16 +343,53 @@ describe('dynamic ETA', () => {
     const first = estimateIawpArrival(flight({
       sessionId: 'stable-auto',
       groundSpeed: 600,
+      actualDepartureTimeSeconds: 35_400,
+      filedEetSeconds: 1_200,
     }), geometry, 'NORTA', 0, new Date(now).toISOString())
     const laterSampleTime = now + 60_000
     const slowed = estimateIawpArrival(flight({
       sessionId: 'stable-auto',
       groundSpeed: 100,
+      actualDepartureTimeSeconds: 35_400,
+      filedEetSeconds: 1_200,
       trackTimestamp: new Date(laterSampleTime).toISOString(),
     }), geometry, 'NORTA', 0, new Date(laterSampleTime).toISOString())
 
     expect(new Date(first.predictedIawpAt!).getTime() - now).toBeLessThanOrEqual(15 * 60_000)
     expect(slowed.predictedIawpAt).toBe(first.predictedIawpAt)
     expect(slowed.reason).toContain('STABLE ETA LOCKED')
+  })
+
+  it('keeps an airborne flight provisional and unlocked while Actual Departure is pending', () => {
+    const estimate = estimateIawpArrival(flight({
+      sessionId: 'takeoff-pending',
+      filedDepartureTimeSeconds: 34_200,
+      filedEetSeconds: 3_600,
+      groundSpeed: null,
+      latitude: null,
+      longitude: null,
+      altitude: 2_000,
+      trackTimestamp: new Date(now).toISOString(),
+    } as Partial<IvaoArrivalTrafficFlight>), null, 'NORTA', 1_200, new Date(now).toISOString())
+
+    expect(estimate.source).toBe('TRACKED_TAKEOFF_EET')
+    expect(estimate.reason).toContain('ACTUAL TAKEOFF PENDING')
+    expect(estimate.reason).not.toContain('STABLE ETA LOCKED')
+    expect(new Date(estimate.predictedIawpAt!).getTime()).toBe(now + 40 * 60_000)
+
+    const confirmed = estimateIawpArrival(flight({
+      sessionId: 'takeoff-pending',
+      filedDepartureTimeSeconds: 34_200,
+      actualDepartureTimeSeconds: 36_300,
+      filedEetSeconds: 3_600,
+      groundSpeed: null,
+      latitude: null,
+      longitude: null,
+      altitude: 2_000,
+      trackTimestamp: new Date(now + 30_000).toISOString(),
+    }), null, 'NORTA', 1_200, new Date(now + 30_000).toISOString())
+
+    expect(confirmed.source).toBe('ACTUAL_DEPARTURE_EET')
+    expect(new Date(confirmed.predictedIawpAt!).getTime()).toBe(now + 45 * 60_000)
   })
 })
