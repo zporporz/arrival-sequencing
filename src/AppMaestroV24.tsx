@@ -35,6 +35,7 @@ import {
   type AmanArrivalPrediction,
   type AmanSequenceRow,
 } from './core/arrivalSequencing'
+import { TIMELINE_FUTURE_HORIZON_MINUTES } from './timelineScale'
 
 type AirportCode = 'VTBD' | 'VTBS'
 type AirportScope = AirportCode | 'BOTH'
@@ -481,6 +482,12 @@ function assignPredictionsToRunways(
   })
 }
 
+export function isWithinProvisionalPlanningWindow(prediction: AmanArrivalPrediction, nowMs: number) {
+  const landingMs = naturalLandingTimeMs(prediction)
+  return Number.isFinite(landingMs)
+    && landingMs <= nowMs + TIMELINE_FUTURE_HORIZON_MINUTES * 60_000
+}
+
 export function applyManualTargetsWithCascade(
   rows: AmanSequenceRow[],
   manualTldt: Record<string, string>,
@@ -836,7 +843,11 @@ export default function App() {
       const state = operationalStateByKey[predictionFlightKey(prediction)] ?? 'NORMAL'
       return state === 'NORMAL'
         && (phase === 'DEPARTING' || phase === 'TAKEOFF_EST')
-        && isWithinProcessingRadius(prediction, processingNowMs)
+        // A ground departure can be thousands of miles from Bangkok by design.
+        // Keep it as provisional planning context when its projected landing is
+        // inside the visible timeline; the 300 NM gate remains exclusive to the
+        // active operational sequence below.
+        && isWithinProvisionalPlanningWindow(prediction, processingNowMs)
     })
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
       provisional.filter((prediction) => rowAirport(prediction.id) === airport),

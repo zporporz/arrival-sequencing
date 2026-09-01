@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyManualTargetsWithCascade, currentSharedAutoReturnOverrides, defaultArrivalRunway } from '../src/AppMaestroV24'
+import { applyManualTargetsWithCascade, currentSharedAutoReturnOverrides, defaultArrivalRunway, isWithinProvisionalPlanningWindow } from '../src/AppMaestroV24'
 import {
   autoSequenceUnstableArrivals,
   resolveAmanPairwiseSeparationSeconds,
@@ -63,6 +63,20 @@ describe('VTBS runway assignment and display packing', () => {
     expect(rows[0].style.getPropertyValue('--display-offset-px')).toBe('0px')
     expect(rows[1].style.getPropertyValue('--display-offset-px')).toBe('12px')
     removeRuntime()
+  })
+
+  it('shows a distant departing flight when its projected landing is inside the timeline horizon', () => {
+    const now = Date.parse('2026-09-01T06:24:00.000Z')
+    const distantDeparture = {
+      ...prediction('BAW15', 'C', '2026-09-01T09:11:00.000Z', '21R'),
+      nominalStarSeconds: 25 * 60,
+      processingDistanceNm: 5_000,
+    }
+    expect(isWithinProvisionalPlanningWindow(distantDeparture, now)).toBe(true)
+    expect(isWithinProvisionalPlanningWindow({
+      ...distantDeparture,
+      predictedIawpAt: '2026-09-01T11:00:00.000Z',
+    }, now)).toBe(false)
   })
 })
 
