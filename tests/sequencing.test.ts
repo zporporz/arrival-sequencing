@@ -376,6 +376,21 @@ describe('manual drag sequencing', () => {
     removeRuntime()
   })
 
+  it('applies the timeline display scale to provisional departing strips', () => {
+    document.body.innerHTML = `
+      <div class="aman-provisional-row" data-airport="VTBS" style="--offset-px: -100px">
+        <strong>THA404</strong>
+      </div>
+    `
+    const row = document.querySelector<HTMLElement>('.aman-provisional-row')!
+    const removeRuntime = installTimelineDisplayScaleRuntime()
+
+    expect(row.style.getPropertyValue('--display-offset-px')).toBe('-90px')
+    expect(row.style.getPropertyValue('--ideal-display-offset-px')).toBe('-90px')
+
+    removeRuntime()
+  })
+
   it('uses the same display drag path while Shift is held', () => {
     document.body.innerHTML = `
       <div class="aman-flight-row" style="--offset-px: -100px" title="VTBD RWY 21R"><strong>THA1</strong></div>

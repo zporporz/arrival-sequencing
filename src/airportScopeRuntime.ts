@@ -74,9 +74,9 @@ export function installAirportScopeRuntime() {
     const selected = selectedValues()
     const selectedSet = new Set(selected)
 
-    document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    document.querySelectorAll<HTMLElement>('.aman-flight-row, .aman-provisional-row').forEach((row) => {
       const title = row.getAttribute('title') || ''
-      const airport = selected.find((value) => title.includes(`${value} RWY`))
+      const airport = selected.find((value) => row.dataset.airport === value || title.includes(`${value} RWY`))
 
       // Do not use runtime-added classes for side placement. React rewrites className on
       // every drag frame, which made LEFT rows briefly fall back to the default RIGHT side.
@@ -166,7 +166,7 @@ export function installAirportScopeRuntime() {
     wrapper?.remove()
     host?.classList.remove('has-runtime-selector')
     document.querySelector('.aman-airport-side-guide')?.remove()
-    document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    document.querySelectorAll<HTMLElement>('.aman-flight-row, .aman-provisional-row').forEach((row) => {
       delete row.dataset.displaySide
       row.classList.remove('display-left', 'display-right')
     })

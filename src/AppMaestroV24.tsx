@@ -1487,6 +1487,7 @@ export default function App() {
               return <div
                 key={`provisional-${row.id}`}
                 className="aman-provisional-row"
+                data-airport={airport}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`${phase === 'TAKEOFF_EST' ? 'AIRBORNE · ACTUAL TAKEOFF PENDING' : 'DEPARTING'} · PROVISIONAL ONLY · NOT IN SEQUENCE / AAR / HLD`}
               >

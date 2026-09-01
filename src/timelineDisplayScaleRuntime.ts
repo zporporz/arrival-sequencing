@@ -141,6 +141,14 @@ function applyStoredVisualPositions(exceptRow?: HTMLElement | null) {
   for (const key of visualResidualByKey.keys()) {
     if (!activeKeys.has(key)) visualResidualByKey.delete(key)
   }
+
+  // Ground DEPARTING/TAKEOFF_EST strips are planning context, not members of
+  // the packed operational sequence. They still need the same visual time
+  // scale or they are rendered outside the visible scrolled timeline.
+  document.querySelectorAll<HTMLElement>('.aman-provisional-row').forEach((row) => {
+    const ideal = rowIdealDisplayOffset(row)
+    if (ideal != null) setDisplayOffset(row, ideal, ideal)
+  })
 }
 
 function fakePointer(row: HTMLElement, pointerId: number, clientY: number): FakePointerEvent {
@@ -324,7 +332,7 @@ export function installTimelineDisplayScaleRuntime() {
     window.removeEventListener('aman:sequence-reordered', onSequenceReordered)
     visualResidualByKey.clear()
     releaseHoldKeys.clear()
-    document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    document.querySelectorAll<HTMLElement>('.aman-flight-row, .aman-provisional-row').forEach((row) => {
       row.style.removeProperty('--display-offset-px')
       row.style.removeProperty('--ideal-display-offset-px')
       delete row.dataset.timelinePacked

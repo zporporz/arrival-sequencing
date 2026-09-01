@@ -73,7 +73,9 @@
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row,
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row,
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row[data-display-side="RIGHT"] {
   min-height: 20px !important;
   height: 20px !important;
   width: min(660px, calc(50% - 38px));
@@ -95,9 +97,14 @@
   transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
 }
 
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row {
+  transform: translateY(calc(var(--display-offset-px, var(--offset-px, 0px)) - 50%)) !important;
+}
+
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row[data-display-side="LEFT"] {
   min-height: 20px !important;
   height: 20px !important;
   width: min(660px, calc(50% - 38px));
@@ -146,6 +153,13 @@
 .aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(5) { order: 3; }
 .aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(6) { order: 2; text-align: left; }
 .aman-monitored-flight-row[data-display-side="LEFT"] > :nth-child(7) { order: 1; text-align: left; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(1) { order: 7; text-align: right; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(2) { order: 6; text-align: right; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(3) { order: 5; text-align: right; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(4) { order: 4; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(5) { order: 3; text-align: right; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(6) { order: 2; text-align: left; }
+.aman-provisional-row[data-display-side="LEFT"] > :nth-child(7) { order: 1; text-align: left; }
 .aman-monitored-flight-row strong { color: #91a9c0; font-size: 15px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aman-monitored-flight-row span { color: #718aa4; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .aman-monitored-flight-row .fix-code { color: #91a9c0; font-weight: 900; text-align: center; overflow: visible; }

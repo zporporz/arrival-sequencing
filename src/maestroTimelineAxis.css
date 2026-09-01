@@ -77,7 +77,8 @@
 /* Both sides reserve exactly the same centre rail. */
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="RIGHT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-right,
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"] {
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="RIGHT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row[data-display-side="RIGHT"] {
   left: calc(50% + var(--aman-axis-right-gutter)) !important;
   right: auto !important;
   width: min(660px, calc(50% - var(--aman-axis-right-gutter) - 8px)) !important;
@@ -86,7 +87,8 @@
 
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row[data-display-side="LEFT"],
 .aman-timeline-stage[data-scroll-timeline="true"] .aman-flight-row.display-left,
-.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"] {
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-monitored-flight-row[data-display-side="LEFT"],
+.aman-timeline-stage[data-scroll-timeline="true"] .aman-provisional-row[data-display-side="LEFT"] {
   left: auto !important;
   right: calc(50% + var(--aman-axis-left-gutter)) !important;
   width: min(660px, calc(50% - var(--aman-axis-left-gutter) - 8px)) !important;
