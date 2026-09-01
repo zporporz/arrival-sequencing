@@ -1,4 +1,5 @@
 import { readAircraftPerformance, type AircraftPerformanceProfile, type IvaoArrivalTrafficFlight } from './api'
+import { referenceFixCoordinate } from './referenceFixCoordinates'
 
 export type Coordinates = { lat: number; lon: number }
 
@@ -257,6 +258,27 @@ function routeProgress(flight: IvaoArrivalTrafficFlight, geometry: RouteGeometry
   return best
 }
 
+function greatCircleDistanceNm(from: Coordinates, to: Coordinates) {
+  const radians = (value: number) => value * Math.PI / 180
+  const earthRadiusNm = 3440.065
+  const dLat = radians(to.lat - from.lat)
+  const dLon = radians(to.lon - from.lon)
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(radians(from.lat)) * Math.cos(radians(to.lat)) * Math.sin(dLon / 2) ** 2
+  return earthRadiusNm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)))
+}
+
+function geometryFixCoordinate(geometry: RouteGeometry | null, fix: string) {
+  const target = fix.trim().toUpperCase()
+  if (geometry) {
+    for (const segment of geometry.segments) {
+      if (segment.from.identifier.toUpperCase() === target) return segment.from.coordinates
+      if (segment.to.identifier.toUpperCase() === target) return segment.to.coordinates
+    }
+  }
+  return referenceFixCoordinate(target)
+}
+
 function fixDistances(geometry: RouteGeometry, fix: string) {
   const target = fix.trim().toUpperCase()
   const distances: number[] = []
@@ -494,6 +516,46 @@ function liveRouteEstimate(
   }
 }
 
+function midAirConnectPositionEstimate(
+  flight: IvaoArrivalTrafficFlight,
+  geometry: RouteGeometry | null,
+  refFix: string,
+  fetchedAt: string,
+  performance: AircraftPerformanceProfile | null,
+  trend: TrackTrend,
+): ArrivalEtaEstimate | null {
+  if (flight.connectedAirborne !== true || flight.onGround === true) return null
+  if (!finite(flight.latitude) || !finite(flight.longitude)) return null
+
+  const fix = geometryFixCoordinate(geometry, refFix)
+  if (!fix) return null
+  const observed = observedGroundSpeedKt(flight, trend)
+  if (!finite(observed) || observed < MIN_LIVE_GS_KT) return null
+
+  const observedGsKt = clamp(observed, 120, 650)
+  const remainingNm = greatCircleDistanceNm({ lat: flight.latitude, lon: flight.longitude }, fix)
+  const verticalTrendFpm = resolvedVerticalTrendFpm(flight, trend)
+  const descending = isDescending(flight, trend)
+  const travel = descending && finite(flight.altitude)
+    ? descentTravelSeconds(remainingNm, flight.altitude, observedGsKt, verticalTrendFpm, performance)
+    : { seconds: remainingNm / observedGsKt * 3600, averageGroundSpeedKt: observedGsKt }
+  const trackBaseMs = safeTime(flight.trackTimestamp) ?? safeTime(fetchedAt) ?? Date.now()
+
+  return {
+    source: 'LIVE_ROUTE',
+    predictedIawpAt: new Date(trackBaseMs + travel.seconds * 1000).toISOString(),
+    confidence: 'LOW',
+    remainingNm,
+    offRouteNm: null,
+    groundSpeedKt: travel.averageGroundSpeedKt,
+    pastCrossing: false,
+    reason: `ETA DBG MID-AIR CONNECT DIRECT · REM ${remainingNm.toFixed(1)}NM · OBS ${Math.round(observedGsKt)}KT · AVG ${Math.round(travel.averageGroundSpeedKt)}KT · ${refFix.trim().toUpperCase()} POSITION FALLBACK`,
+    modelPhase: descending ? 'DESCENT' : 'CRUISE',
+    trackSampleCount: trend.sampleCount,
+    verticalTrendFpm,
+  }
+}
+
 function provisionalClimbLiveEstimate(
   flight: IvaoArrivalTrafficFlight,
   geometry: RouteGeometry,
@@ -623,6 +685,14 @@ export function estimateIawpArrival(
     const live = liveRouteEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance, trend)
     if (live) return live
   }
+
+  // A session that begins airborne has neither an ATOT nor a ground-to-air track
+  // transition. Never treat its connection timestamp as takeoff and add the full
+  // filed EET again. If normal route projection is unavailable, use current
+  // position direct to the resolved feeder fix as a deliberately low-confidence
+  // live estimate until later samples or controller action refine it.
+  const midAir = midAirConnectPositionEstimate(flight, geometry, refFix, fetchedAt, resolvedPerformance, trend)
+  if (midAir) return midAir
 
   if (takeoffBaseline) return takeoffBaseline
 

@@ -38,6 +38,7 @@ function flight(overrides: Partial<IvaoArrivalTrafficFlight> = {}): IvaoArrivalT
     arrivalCountryId: 'TH',
     isDomesticThailand: true,
     trackedTakeoffAt: null,
+    connectedAirborne: false,
     filedDestinationEtaAt: null,
     domesticTriggerStatus: 'READY',
     domesticTriggerError: null,
@@ -275,6 +276,42 @@ describe('ground stage pushback detection', () => {
 })
 
 describe('dynamic ETA', () => {
+  it('uses current position instead of full EET when the IVAO session begins airborne', () => {
+    const estimate = estimateIawpArrival(flight({
+      sessionId: 'mid-air-connect',
+      departure: 'VHHH',
+      isDomesticThailand: false,
+      connectedAirborne: true,
+      connectedAt: new Date(now - 60_000).toISOString(),
+      latitude: 14.1,
+      longitude: 102.0,
+      altitude: 25_000,
+      groundSpeed: 420,
+      filedDepartureTimeSeconds: 8 * 60 * 60,
+      filedEetSeconds: 3 * 60 * 60,
+    }), null, 'EASTE', 19 * 60, new Date(now).toISOString())
+
+    expect(estimate.source).toBe('LIVE_ROUTE')
+    expect(estimate.reason).toContain('MID-AIR CONNECT DIRECT')
+    expect(new Date(estimate.predictedIawpAt!).getTime()).toBeGreaterThan(now)
+    expect(new Date(estimate.predictedIawpAt!).getTime()).toBeLessThan(now + 60 * 60_000)
+  })
+
+  it('does not apply the mid-air fallback to a normal session that connected on the ground', () => {
+    const estimate = estimateIawpArrival(flight({
+      sessionId: 'normal-airborne-session',
+      connectedAirborne: false,
+      latitude: 14.1,
+      longitude: 102.0,
+      groundSpeed: 420,
+      filedDepartureTimeSeconds: 8 * 60 * 60,
+      filedEetSeconds: 3 * 60 * 60,
+    }), null, 'EASTE', 19 * 60, new Date(now).toISOString())
+
+    expect(estimate.source).not.toBe('LIVE_ROUTE')
+    expect(estimate.reason).not.toContain('MID-AIR CONNECT DIRECT')
+  })
+
   it('latches the actual feeder-fix crossing instead of changing ETA after the STAR entry', () => {
     const first = estimateIawpArrival(flight({
       sessionId: 'passed-iawp',

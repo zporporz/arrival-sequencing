@@ -59,6 +59,7 @@ export type IvaoArrivalTrafficFlight = {
   arrivalCountryId: string | null
   isDomesticThailand: boolean
   trackedTakeoffAt: string | null
+  connectedAirborne?: boolean
   filedDestinationEtaAt: string | null
   domesticTriggerStatus: 'READY' | 'WAITING_TAKEOFF' | 'EET_UNAVAILABLE' | 'TAKEOFF_UNAVAILABLE' | 'NOT_DOMESTIC' | 'UNKNOWN'
   domesticTriggerError: string | null

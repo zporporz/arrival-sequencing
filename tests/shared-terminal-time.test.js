@@ -6,7 +6,7 @@ import {
   reconcileAmanFlights,
   utcServiceDate,
 } from '../functions/_lib/amanSharedState.js'
-import { isLocalPredeparturePilot } from '../functions/api/sequence/ivao-traffic.js'
+import { findTrackedTakeoffEvidence, isLocalPredeparturePilot } from '../functions/api/sequence/ivao-traffic.js'
 import { secondsOfDayToNearestUtc } from '../src/core/arrivalEta'
 import { installSharedAmanRuntime } from '../src/sharedAmanRuntime'
 
@@ -50,6 +50,18 @@ function mockMutableFlightStateApi(initial = []) {
 afterEach(() => vi.restoreAllMocks())
 
 describe('terminal flight protection', () => {
+  it('distinguishes a session that connected airborne from a tracked takeoff', () => {
+    expect(findTrackedTakeoffEvidence([
+      { onGround: false, timestamp: '2026-08-26T03:00:00.000Z' },
+      { onGround: false, timestamp: '2026-08-26T03:05:00.000Z' },
+    ])).toEqual({ trackedTakeoffAt: null, connectedAirborne: true })
+
+    expect(findTrackedTakeoffEvidence([
+      { onGround: true, timestamp: '2026-08-26T02:55:00.000Z' },
+      { onGround: false, timestamp: '2026-08-26T03:00:00.000Z' },
+    ])).toEqual({ trackedTakeoffAt: '2026-08-26T03:00:00.000Z', connectedAirborne: false })
+  })
+
   it.each(['on blocks', 'on ground', 'boarding'])('keeps a pre-departure %s flight inbound when it is away from the destination', (state) => {
     const pilot = {
       callsign: 'TLM1',

@@ -124,14 +124,18 @@ async function getLatestFlightPlan(sessionId, env, airborne = false) {
   return value;
 }
 
-function findTrackedTakeoff(tracks) {
-  if (!Array.isArray(tracks) || !tracks.length) return null;
+export function findTrackedTakeoffEvidence(tracks) {
+  if (!Array.isArray(tracks) || !tracks.length) {
+    return { trackedTakeoffAt: null, connectedAirborne: false };
+  }
   const ordered = [...tracks].sort((left, right) => {
     const leftTime = new Date(left?.timestamp || 0).getTime();
     const rightTime = new Date(right?.timestamp || 0).getTime();
     return leftTime - rightTime;
   });
 
+  const firstTrackedState = ordered.find((track) => typeof track?.onGround === 'boolean');
+  const connectedAirborne = firstTrackedState?.onGround === false;
   let sawGround = false;
   for (const track of ordered) {
     if (track?.onGround === true) {
@@ -140,24 +144,30 @@ function findTrackedTakeoff(tracks) {
     }
     if (!sawGround || track?.onGround !== false) continue;
     const timestamp = new Date(track.timestamp || '').getTime();
-    if (Number.isFinite(timestamp)) return new Date(timestamp).toISOString();
+    if (Number.isFinite(timestamp)) {
+      return { trackedTakeoffAt: new Date(timestamp).toISOString(), connectedAirborne: false };
+    }
   }
-  return null;
+  return { trackedTakeoffAt: null, connectedAirborne };
 }
 
-async function getTrackedTakeoff(sessionId, env) {
+async function getTrackedTakeoffEvidence(sessionId, env) {
   const key = String(sessionId);
   const cached = takeoffCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const tracks = await trackerJson(`/v2/tracker/sessions/${encodeURIComponent(key)}/tracks`, env, 15);
-  const value = findTrackedTakeoff(tracks);
+  const value = findTrackedTakeoffEvidence(tracks);
   takeoffCache.set(key, {
-    expiresAt: Date.now() + (value ? TAKEOFF_FOUND_TTL_MS : TAKEOFF_PENDING_TTL_MS),
+    expiresAt: Date.now() + (value.trackedTakeoffAt || value.connectedAirborne ? TAKEOFF_FOUND_TTL_MS : TAKEOFF_PENDING_TTL_MS),
     value,
   });
   trimCache(takeoffCache);
   return value;
+}
+
+async function getTrackedTakeoff(sessionId, env) {
+  return (await getTrackedTakeoffEvidence(sessionId, env)).trackedTakeoffAt;
 }
 
 function isAirborneNow(pilot) {
@@ -284,6 +294,26 @@ async function legacyDomesticTiming(pilot, detailedFlightPlan, env) {
   };
 }
 
+async function airborneSessionEvidence(pilot, detailedFlightPlan, env) {
+  if (!isAirborneNow(pilot)) return { trackedTakeoffAt: null, connectedAirborne: false, error: null };
+  if (finiteNumber(detailedFlightPlan?.actualDepartureTime, pilot?.flightPlan?.actualDepartureTime) != null) {
+    return { trackedTakeoffAt: null, connectedAirborne: false, error: null };
+  }
+
+  const sessionId = String(pilot?.id ?? '').trim();
+  if (!sessionId) return { trackedTakeoffAt: null, connectedAirborne: false, error: null };
+  try {
+    const evidence = await getTrackedTakeoffEvidence(sessionId, env);
+    return { ...evidence, error: null };
+  } catch (error) {
+    return {
+      trackedTakeoffAt: null,
+      connectedAirborne: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function onRequestGet(context) {
   try {
     const url = new URL(context.request.url);
@@ -314,6 +344,7 @@ export async function onRequestGet(context) {
         }
 
         const domestic = await legacyDomesticTiming(pilot, detailed, context.env);
+        const sessionEvidence = await airborneSessionEvidence(pilot, detailed, context.env);
         const aircraftSummary = detailed?.aircraft || fp?.aircraft || {};
         const filedEetSeconds = finiteNumber(detailed?.eet, fp?.eet);
         const flightRules = cleanUpper(detailed?.rules) || cleanUpper(fp?.rules);
@@ -348,10 +379,11 @@ export async function onRequestGet(context) {
           departureCountryId: domestic.departureCountryId,
           arrivalCountryId: domestic.arrivalCountryId,
           isDomesticThailand: domestic.isDomesticThailand,
-          trackedTakeoffAt: domestic.trackedTakeoffAt,
+          trackedTakeoffAt: domestic.trackedTakeoffAt || sessionEvidence.trackedTakeoffAt,
+          connectedAirborne: sessionEvidence.connectedAirborne,
           filedDestinationEtaAt: domestic.filedDestinationEtaAt,
           domesticTriggerStatus: domestic.domesticTriggerStatus,
-          domesticTriggerError: domestic.domesticTriggerError,
+          domesticTriggerError: domestic.domesticTriggerError || sessionEvidence.error,
           flightPlanDetailError,
           predepartureLocal,
         };
