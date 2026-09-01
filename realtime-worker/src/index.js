@@ -2,6 +2,8 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_AUTO_ROWS = 300;
 const MAX_PREVIEW_ROWS = 100;
 export const DRAG_LOCK_TTL_MS = 5_000;
+export const DRAG_LOCK_RENEW_WINDOW_MS = 2_000;
+export const PENDING_RELEASE_TTL_MS = 30_000;
 
 function cleanText(value, max = 120) {
   const text = String(value ?? '').trim();
@@ -74,6 +76,10 @@ export class AmanRealtimeRoom {
     return `lock:${callsign}`;
   }
 
+  pendingReleaseKey(callsign) {
+    return `pending:${callsign}`;
+  }
+
   async activeDragLocks() {
     const now = Date.now();
     const stored = await this.ctx.storage.list({ prefix: 'lock:' });
@@ -92,9 +98,34 @@ export class AmanRealtimeRoom {
     return active;
   }
 
+  async activePendingReleases() {
+    const now = Date.now();
+    const stored = await this.ctx.storage.list({ prefix: 'pending:' });
+    const active = [];
+    for (const [key, release] of stored) {
+      const acceptedAt = new Date(String(release?.acceptedAt || '')).getTime();
+      if (Number.isFinite(acceptedAt) && acceptedAt + PENDING_RELEASE_TTL_MS > now) active.push(release);
+      else await this.ctx.storage.delete(key);
+    }
+    return active;
+  }
+
   async acquireDragLock(socket, meta, callsign, previewId) {
     const key = this.lockKey(callsign);
     const now = Date.now();
+    if (
+      meta.dragCallsign === callsign
+      && meta.previewId === previewId
+      && Number(meta.dragLockExpiresAt) > now + DRAG_LOCK_RENEW_WINDOW_MS
+    ) {
+      return {
+        callsign,
+        previewId,
+        clientId: meta.clientId,
+        actor: { vid: meta.vid, name: meta.name },
+        expiresAt: Number(meta.dragLockExpiresAt),
+      };
+    }
     const existing = await this.ctx.storage.get(key);
     if (existing && Number(existing.expiresAt) > now && existing.clientId !== meta.clientId) {
       this.send(socket, {
@@ -119,6 +150,7 @@ export class AmanRealtimeRoom {
     await this.ctx.storage.put(key, lock);
     meta.previewId = previewId;
     meta.dragCallsign = callsign;
+    meta.dragLockExpiresAt = lock.expiresAt;
     socket.serializeAttachment(meta);
     if (!alreadyOwned) this.send(socket, { type: 'drag_granted', airport: meta.airport, ...lock, clientId: undefined });
     this.broadcast({ type: 'drag_lock', airport: meta.airport, ...lock, clientId: undefined }, meta.clientId);
@@ -138,8 +170,17 @@ export class AmanRealtimeRoom {
     if (!previewId || meta.previewId === previewId) {
       meta.previewId = '';
       meta.dragCallsign = '';
+      meta.dragLockExpiresAt = 0;
       socket.serializeAttachment(meta);
     }
+  }
+
+  async discardPendingRelease(meta, previewId = '') {
+    const callsign = cleanText(meta.dragCallsign, 20).toUpperCase();
+    if (!callsign) return;
+    const key = this.pendingReleaseKey(callsign);
+    const pending = await this.ctx.storage.get(key);
+    if (pending && (!previewId || pending.previewId === previewId)) await this.ctx.storage.delete(key);
   }
 
   rejectStaleCommit(socket, entity, current) {
@@ -178,10 +219,11 @@ export class AmanRealtimeRoom {
     server.serializeAttachment(meta);
     this.ctx.acceptWebSocket(server);
 
-    const [autoSnapshot, committedFlights, sequenceOrders, dragLocks] = await Promise.all([
+    const [autoSnapshot, committedFlights, sequenceOrders, pendingReleases, dragLocks] = await Promise.all([
       this.ctx.storage.get('autoSnapshot'),
       this.ctx.storage.list({ prefix: 'flight:' }),
       this.ctx.storage.list({ prefix: 'sequence:' }),
+      this.activePendingReleases(),
       this.activeDragLocks(),
     ]);
     this.send(server, {
@@ -191,6 +233,7 @@ export class AmanRealtimeRoom {
       autoSnapshot: autoSnapshot || null,
       flightStates: [...committedFlights.values()],
       sequenceOrders: [...sequenceOrders.values()],
+      pendingReleases,
       dragLocks,
     });
     queueMicrotask(() => this.announceRoles());
@@ -250,6 +293,7 @@ export class AmanRealtimeRoom {
 
     if (payload?.type === 'drag_cancel') {
       const previewId = cleanText(payload.previewId, 80) || meta.previewId;
+      await this.discardPendingRelease(meta, previewId);
       await this.releaseDragLock(socket, meta, previewId);
       if (previewId) this.broadcast({ type: 'drag_cancel', airport: meta.airport, previewId }, meta.clientId);
       return;
@@ -263,9 +307,15 @@ export class AmanRealtimeRoom {
       if (!previewId || !callsign || !targetAt || !runway) return;
       const lock = await this.ctx.storage.get(this.lockKey(callsign));
       if (lock?.clientId !== meta.clientId || lock?.previewId !== previewId) return;
-      this.broadcast({
+      const release = {
         type: 'drag_release', airport: meta.airport, callsign, previewId, targetAt, runway,
-      }, meta.clientId);
+        acceptedAt: new Date().toISOString(),
+      };
+      // A release is the live room authority immediately. Persist this small
+      // pending record once so reconnecting controllers do not wait for the
+      // Supabase round-trip to see the accepted position.
+      await this.ctx.storage.put(this.pendingReleaseKey(callsign), release);
+      this.broadcast(release, meta.clientId);
       return;
     }
 
@@ -280,7 +330,10 @@ export class AmanRealtimeRoom {
         return;
       }
       const previewId = cleanText(meta.previewId, 80);
-      await this.ctx.storage.put(key, state);
+      await Promise.all([
+        this.ctx.storage.put(key, state),
+        this.ctx.storage.delete(this.pendingReleaseKey(callsign)),
+      ]);
       await this.releaseDragLock(socket, meta);
       this.broadcast({ type: 'flight_commit', airport: meta.airport, previewId, flightState: state });
       return;
@@ -304,6 +357,7 @@ export class AmanRealtimeRoom {
   async webSocketClose(socket, code, reason) {
     const meta = socketMeta(socket);
     const previewId = meta.previewId;
+    await this.discardPendingRelease(meta, previewId);
     await this.releaseDragLock(socket, meta);
     if (previewId) {
       this.broadcast({ type: 'drag_cancel', airport: meta.airport, previewId }, meta.clientId);
@@ -315,6 +369,7 @@ export class AmanRealtimeRoom {
   async webSocketError(socket) {
     const meta = socketMeta(socket);
     const previewId = meta.previewId;
+    await this.discardPendingRelease(meta, previewId);
     await this.releaseDragLock(socket, meta);
     if (previewId) {
       this.broadcast({ type: 'drag_cancel', airport: meta.airport, previewId }, meta.clientId);

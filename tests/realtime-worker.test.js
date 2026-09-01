@@ -3,12 +3,14 @@ import { AmanRealtimeRoom, DRAG_LOCK_TTL_MS } from '../realtime-worker/src/index
 
 class FakeStorage {
   values = new Map()
+  puts = []
 
   async get(key) {
     return this.values.get(key)
   }
 
   async put(key, value) {
+    this.puts.push(key)
     this.values.set(key, value)
   }
 
@@ -91,7 +93,7 @@ describe('AMAN realtime Durable Object coordination', () => {
   })
 
   it('broadcasts a validated drag release before persistence completes', async () => {
-    const { room, sockets } = setupRoom()
+    const { room, sockets, storage } = setupRoom()
     await room.webSocketMessage(sockets[0], JSON.stringify({
       type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
     }))
@@ -105,6 +107,49 @@ describe('AMAN realtime Durable Object coordination', () => {
       airport: 'VTBS', callsign: 'THA123', previewId: 'preview-one',
       targetAt: '2026-08-25T10:20:00.000Z', runway: '19',
     })
+    expect(await storage.get('pending:THA123')).toMatchObject({
+      type: 'drag_release', previewId: 'preview-one', targetAt: '2026-08-25T10:20:00.000Z',
+    })
+  })
+
+  it('does not persist the same drag lock on every preview frame', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-25T10:00:00.000Z')
+    const { room, sockets, storage } = setupRoom()
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
+    }))
+
+    for (let index = 0; index < 20; index += 1) {
+      await room.webSocketMessage(sockets[0], JSON.stringify({
+        type: 'drag_preview', callsign: 'THA123', previewId: 'preview-one',
+        rows: [{ callsign: 'THA123', targetAt: '2026-08-25T10:20:00.000Z', runway: '19' }],
+      }))
+    }
+
+    expect(storage.puts.filter((key) => key === 'lock:THA123')).toHaveLength(1)
+    vi.advanceTimersByTime(3_100)
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_preview', callsign: 'THA123', previewId: 'preview-one',
+      rows: [{ callsign: 'THA123', targetAt: '2026-08-25T10:21:00.000Z', runway: '19' }],
+    }))
+    expect(storage.puts.filter((key) => key === 'lock:THA123')).toHaveLength(2)
+  })
+
+  it('removes a pending release after the Supabase-backed commit arrives', async () => {
+    const { room, sockets, storage } = setupRoom()
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
+    }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'drag_release', callsign: 'THA123', previewId: 'preview-one',
+      targetAt: '2026-08-25T10:20:00.000Z', runway: '19',
+    }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({
+      type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1 },
+    }))
+
+    expect(await storage.get('pending:THA123')).toBeUndefined()
   })
 
   it('keeps a newer sequence commit when an older revision arrives late', async () => {

@@ -507,6 +507,9 @@ export function installSharedAmanRuntime() {
       }))
       setSharedHealth('LIVE')
     } catch (error) {
+      window.dispatchEvent(new CustomEvent('aman:realtime-commit-failed', {
+        detail: { airport: rowInfo.airport, callsign: rowInfo.callsign },
+      }))
       setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
     }
   }

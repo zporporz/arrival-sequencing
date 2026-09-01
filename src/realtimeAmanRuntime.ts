@@ -1,6 +1,7 @@
 type CanonicalArrival = { id: string; predictedIawpAt: string }
 type LocalAutoSnapshotDetail = { predictions?: CanonicalArrival[] }
 type RealtimeCommitDetail = { airport?: string; flightState?: unknown; sequenceOrder?: unknown }
+type RealtimeCommitFailedDetail = { airport?: string; callsign?: string }
 type FinishedDrag = {
   airport: string
   callsign: string
@@ -8,11 +9,13 @@ type FinishedDrag = {
   lastSentAt: number
   pointerId: number
   row: HTMLElement
+  lastRows: Map<string, string>
 }
 
 const AIRPORTS = ['VTBD', 'VTBS'] as const
 const PX_PER_MINUTE = 10
-const PREVIEW_INTERVAL_MS = 80
+const PREVIEW_INTERVAL_MS = 50
+const COMMIT_ACK_TIMEOUT_MS = 15_000
 const AUTO_SNAPSHOT_MAX_AGE_MS = 60_000
 
 export function realtimeReconnectDelayMs(attempt: number) {
@@ -72,6 +75,7 @@ export function installRealtimeAmanRuntime() {
   const previewCancelTimers = new Map<string, number>()
   const lockTimers = new Map<string, number>()
   let activeDrag: FinishedDrag | null = null
+  let previewFramePending = false
   let disposed = false
   let activeServiceDate = realtimeUtcServiceDate()
   let serviceDateTimer: number | null = null
@@ -284,6 +288,9 @@ export function installRealtimeAmanRuntime() {
       }
       message.flightStates?.forEach(dispatchFlightState)
       message.sequenceOrders?.forEach(dispatchSequenceOrder)
+      message.pendingReleases?.forEach((release: unknown) => {
+        window.dispatchEvent(new CustomEvent('aman:realtime-manual-release', { detail: release }))
+      })
       message.dragLocks?.forEach(applyDragLock)
       return
     }
@@ -495,6 +502,7 @@ export function installRealtimeAmanRuntime() {
       lastSentAt: 0,
       pointerId: event.pointerId,
       row,
+      lastRows: new Map(),
     }
     previewSubjects.set(activeDrag.previewId, `${info.airport}:${info.callsign}`)
     send(info.airport, {
@@ -505,15 +513,20 @@ export function installRealtimeAmanRuntime() {
   }
 
   const publishDragPreview = () => {
+    previewFramePending = false
     if (!activeDrag) return
     const airport = activeDrag.airport
     const rows = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row')).flatMap((row) => {
       const info = rowInfo(row)
       const valueMs = targetMs(row)
-      return info && info.airport === airport && valueMs != null
-        ? [{ callsign: info.callsign, targetAt: new Date(valueMs).toISOString(), runway: info.runway }]
-        : []
+      if (!info || info.airport !== airport || valueMs == null) return []
+      const targetAt = new Date(Math.round(valueMs / 1_000) * 1_000).toISOString()
+      const signature = `${targetAt}:${info.runway}`
+      if (activeDrag?.lastRows.get(info.callsign) === signature) return []
+      activeDrag?.lastRows.set(info.callsign, signature)
+      return [{ callsign: info.callsign, targetAt, runway: info.runway }]
     })
+    if (!rows.length) return
     send(airport, {
       type: 'drag_preview',
       callsign: activeDrag.callsign,
@@ -538,7 +551,8 @@ export function installRealtimeAmanRuntime() {
   }
 
   const onPointerMove = () => {
-    if (!activeDrag || performance.now() - activeDrag.lastSentAt < PREVIEW_INTERVAL_MS) return
+    if (!activeDrag || previewFramePending || performance.now() - activeDrag.lastSentAt < PREVIEW_INTERVAL_MS) return
+    previewFramePending = true
     window.requestAnimationFrame(publishDragPreview)
   }
 
@@ -560,8 +574,22 @@ export function installRealtimeAmanRuntime() {
       previewCancelTimers.set(finished.previewId, window.setTimeout(() => {
         previewCancelTimers.delete(finished.previewId)
         send(finished.airport, { type: 'drag_cancel', previewId: finished.previewId })
-      }, 4_000))
+      }, COMMIT_ACK_TIMEOUT_MS))
     }
+  }
+
+  const onCommitFailed = (event: Event) => {
+    const detail = (event as CustomEvent<RealtimeCommitFailedDetail>).detail
+    const airport = String(detail?.airport || '').toUpperCase()
+    const callsign = String(detail?.callsign || '').toUpperCase()
+    if (!airport || !callsign) return
+    previewSubjects.forEach((subject, previewId) => {
+      if (subject !== `${airport}:${callsign}`) return
+      clearPreviewCancelTimer(previewId)
+      send(airport, { type: 'drag_cancel', previewId })
+      clearPreview(previewId)
+      previewSubjects.delete(previewId)
+    })
   }
 
   const onVisibility = () => {
@@ -576,6 +604,7 @@ export function installRealtimeAmanRuntime() {
 
   window.addEventListener('aman:local-auto-snapshot', onLocalAutoSnapshot)
   window.addEventListener('aman:realtime-commit-request', onCommit)
+  window.addEventListener('aman:realtime-commit-failed', onCommitFailed)
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('pointermove', onPointerMove, true)
   document.addEventListener('pointerup', onPointerUp, true)
@@ -602,6 +631,7 @@ export function installRealtimeAmanRuntime() {
     document.querySelector('.aman-runtime-realtime-status')?.remove()
     window.removeEventListener('aman:local-auto-snapshot', onLocalAutoSnapshot)
     window.removeEventListener('aman:realtime-commit-request', onCommit)
+    window.removeEventListener('aman:realtime-commit-failed', onCommitFailed)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('pointermove', onPointerMove, true)
     document.removeEventListener('pointerup', onPointerUp, true)
