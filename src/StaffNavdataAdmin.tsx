@@ -162,6 +162,11 @@ function meaningfulAltitude(value: number | null) {
   return value != null && Math.abs(value) > 0.5
 }
 
+function semanticNavdataValue(value: object) {
+  const ignored = new Set(['sourceApproachId', 'sourceTransitionId', 'sourceLegId'])
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !ignored.has(key)))
+}
+
 function hasExtractedConstraint(leg: ExtractedLeg) {
   return meaningfulAltitude(leg.altitude1Ft) || meaningfulAltitude(leg.altitude2Ft) || leg.speedLimitKt != null
 }
@@ -355,9 +360,9 @@ async function extractLittleNavmap(file: File, onProgress: (message: string) => 
         arinc: text(row.arinc_name),
         type: text(row.type),
         suffix: text(row.suffix),
-        common,
-        transitions: procedureTransitions,
-        transitionLegs: procedureTransitionLegs,
+        common: common.map(semanticNavdataValue),
+        transitions: procedureTransitions.map(semanticNavdataValue),
+        transitionLegs: procedureTransitionLegs.map(semanticNavdataValue),
       })
 
       procedures.push({

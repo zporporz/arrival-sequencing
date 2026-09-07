@@ -1,4 +1,5 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
+import { diffNavdataProcedures } from '../../_lib/navdataDiff.js';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
@@ -16,48 +17,52 @@ async function readCycles(env) {
   return { cycles: cycles.data || [], events: events.data || [] };
 }
 
+async function readAll(env, path, pageSize = 1000) {
+  const result = [];
+  for (let start = 0; ; start += pageSize) {
+    const page = await supabaseAdminRequest(env, path, {
+      headers: { Range: `${start}-${start + pageSize - 1}`, 'Range-Unit': 'items' },
+    });
+    const rows = Array.isArray(page.data) ? page.data : [];
+    result.push(...rows);
+    if (rows.length < pageSize) return result;
+  }
+}
+
+async function readNavdataCycle(env, cycleId) {
+  const encoded = encodeURIComponent(cycleId);
+  const [procedures, transitions, legs] = await Promise.all([
+    readAll(env, `navdata_procedures?cycle_id=eq.${encoded}&select=*&order=airport.asc,designator.asc,runway_name.asc`),
+    readAll(env, `navdata_transitions?cycle_id=eq.${encoded}&select=*&order=procedure_id.asc,ident.asc`),
+    readAll(env, `navdata_procedure_legs?cycle_id=eq.${encoded}&select=*&order=procedure_id.asc,transition_id.asc.nullsfirst,leg_order.asc`),
+  ]);
+  return { procedures, transitions, legs };
+}
+
 async function readCycleDetail(env, cycleId) {
   const encoded = encodeURIComponent(cycleId);
-  const [cycle, procedures, transitions, legs] = await Promise.all([
+  const [cycle, targetData] = await Promise.all([
     supabaseAdminRequest(env, `navdata_cycles?id=eq.${encoded}&select=*&limit=1`),
-    supabaseAdminRequest(env, `navdata_procedures?cycle_id=eq.${encoded}&select=*&order=airport.asc,designator.asc,runway_name.asc`),
-    supabaseAdminRequest(env, `navdata_transitions?cycle_id=eq.${encoded}&select=*&order=procedure_id.asc,ident.asc`),
-    supabaseAdminRequest(env, `navdata_procedure_legs?cycle_id=eq.${encoded}&select=*&order=procedure_id.asc,transition_id.asc.nullsfirst,leg_order.asc`),
+    readNavdataCycle(env, cycleId),
   ]);
   const target = cycle.data?.[0];
   if (!target) throw new Error('Navdata cycle not found');
 
-  let activeProcedures = [];
+  let activeData = { procedures: [], transitions: [], legs: [] };
   const active = await supabaseAdminRequest(env, 'navdata_cycles?status=eq.ACTIVE&select=id&limit=1');
   const activeId = active.data?.[0]?.id;
   if (activeId && activeId !== cycleId) {
-    const current = await supabaseAdminRequest(env, `navdata_procedures?cycle_id=eq.${encodeURIComponent(activeId)}&select=airport,designator,runway_name,fingerprint`);
-    activeProcedures = current.data || [];
+    activeData = await readNavdataCycle(env, activeId);
   }
 
-  const activeMap = new Map(activeProcedures.map((item) => [`${item.airport}|${item.designator}|${item.runway_name || ''}`, item]));
-  const targetKeys = new Set();
-  let added = 0;
-  let changed = 0;
-  let unchanged = 0;
-  const proceduresWithDiff = (procedures.data || []).map((item) => {
-    const key = `${item.airport}|${item.designator}|${item.runway_name || ''}`;
-    targetKeys.add(key);
-    const previous = activeMap.get(key);
-    const diff = !previous ? 'ADDED' : previous.fingerprint === item.fingerprint ? 'UNCHANGED' : 'CHANGED';
-    if (diff === 'ADDED') added += 1;
-    else if (diff === 'CHANGED') changed += 1;
-    else unchanged += 1;
-    return { ...item, diff };
-  });
-  const removed = activeProcedures.filter((item) => !targetKeys.has(`${item.airport}|${item.designator}|${item.runway_name || ''}`)).length;
+  const comparison = diffNavdataProcedures(targetData, activeData);
 
   return {
     cycle: target,
-    procedures: proceduresWithDiff,
-    transitions: transitions.data || [],
-    legs: legs.data || [],
-    diff: { added, changed, unchanged, removed, comparedToActive: Boolean(activeId && activeId !== cycleId) },
+    procedures: comparison.procedures,
+    transitions: targetData.transitions,
+    legs: targetData.legs,
+    diff: { ...comparison.diff, comparedToActive: Boolean(activeId && activeId !== cycleId) },
   };
 }
 
