@@ -479,9 +479,8 @@ export function installRealtimeAmanRuntime() {
       previewSubjects.forEach((subject, previewId) => {
         if (subject === `${airport}:${callsign}`) clearPreviewCancelTimer(previewId)
       })
-      send(airport, { type: 'flight_commit', flightState: detail.flightState })
+      // The authenticated API publishes the committed state through its private binding.
     }
-    if (detail.sequenceOrder) send(airport, { type: 'sequence_commit', sequenceOrder: detail.sequenceOrder })
   }
 
   const onPointerDown = (event: PointerEvent) => {

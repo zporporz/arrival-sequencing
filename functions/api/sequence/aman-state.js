@@ -185,6 +185,16 @@ async function patchFlightState(env, serviceDate, airport, callsign, patch) {
   return result.data?.[0] || null;
 }
 
+async function writeTargetIfCurrent(env, identity, patch, expectedRevision) {
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return null;
+  if (expectedRevision === 0) return insertFrozenFlightState(env, { ...identity, ...patch });
+  const result = await supabaseAdminRequest(env,
+    `aman_flight_states?service_date=eq.${encodeURIComponent(identity.service_date)}&airport=eq.${encodeURIComponent(identity.airport)}&callsign=eq.${encodeURIComponent(identity.callsign)}&revision=eq.${expectedRevision}&select=*`, {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(patch),
+    });
+  return result.data?.[0] || null;
+}
+
 async function patchUnfrozenFlightState(env, serviceDate, airport, callsign, patch) {
   const result = await supabaseAdminRequest(
     env,
@@ -370,8 +380,7 @@ export async function onRequestPost(context) {
       const manualRunway = cleanText(payload.manualRunway, 12)?.toUpperCase();
       if (!manualRunway) throw new Error('Landing runway is required');
 
-      const row = await upsertFlightState(context.env, {
-        ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),
+      const row = await writeTargetIfCurrent(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
         ...autoBaselineForManualTarget(existing, payload),
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
@@ -379,7 +388,8 @@ export async function onRequestPost(context) {
         manual_updated_by_vid: auth.vid,
         manual_updated_by_name: auth.name,
         manual_updated_at: new Date().toISOString(),
-      });
+      }, payload.expectedRevision);
+      if (!row) return json({ error: 'Target changed. Refresh and try again.', code: 'STALE_TARGET' }, 409);
       return json({ ok: true, flightState: row });
     }
 
@@ -420,7 +430,7 @@ export async function onRequestPost(context) {
       const autoReturnFloorTldt = cleanIso(payload.autoFloorTldt, true);
       const autoReturnRunway = cleanRunway(payload.autoRunway);
       if (!autoReturnRunway) throw new Error('Current AUTO runway is required');
-      const row = await patchFlightState(context.env, serviceDate, airport, callsign, {
+      const row = await writeTargetIfCurrent(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
         target_mode: 'AUTO',
         missed_approach_active: false,
         missed_approach_expires_at: null,
@@ -435,7 +445,8 @@ export async function onRequestPost(context) {
         auto_returned_at: new Date().toISOString(),
         auto_returned_by_vid: auth.vid,
         auto_returned_by_name: auth.name,
-      });
+      }, payload.expectedRevision);
+      if (!row) return json({ error: 'Target changed. Refresh and try again.', code: 'STALE_TARGET' }, 409);
       return json({ ok: true, flightState: row });
     }
 

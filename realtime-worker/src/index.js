@@ -41,7 +41,54 @@ export class AmanRealtimeRoom {
   }
 
   sockets() {
-    return this.ctx.getWebSockets();
+    return this.ctx.getWebSockets().filter(socket => {
+      const meta = socketMeta(socket);
+      if (meta.expiresAt > Date.now() && !meta.revoked) return true;
+      try { socket.close(4001, 'Session expired'); } catch { /* already closed */ }
+      return false;
+    });
+  }
+
+  async alarm() {
+    const sockets = this.sockets();
+    this.announceRoles();
+    const revoked = await this.ctx.storage.list({ prefix: 'revoked:' });
+    await Promise.all([...revoked].filter(([, expires]) => expires <= Date.now()).map(([key]) => this.ctx.storage.delete(key)));
+    const deadlines = [...sockets.map(socket => socketMeta(socket).expiresAt), ...[...revoked.values()].filter(time => time > Date.now())];
+    if (deadlines.length) await this.ctx.storage.setAlarm(Math.min(...deadlines));
+  }
+
+  async scheduleExpiry(expiresAt) {
+    const current = await this.ctx.storage.getAlarm();
+    if (!current || expiresAt < current) await this.ctx.storage.setAlarm(expiresAt);
+  }
+
+  async publishCommitted(payload) {
+    const flight = payload.type === 'flight_commit';
+    const state = flight ? payload.flightState : payload.sequenceOrder;
+    const identity = cleanText(flight ? state?.callsign : state?.runway, 20).toUpperCase();
+    if (!identity || !cleanAirport(state?.airport) || !commitRevision(state?.revision)) return;
+    // New namespace excludes unverified data cached by older worker versions.
+    const key = `${flight ? 'flight' : 'sequence'}:${identity}`;
+    const current = await this.ctx.storage.get(key);
+    if (!incomingCommitIsNewer(state, current)) return;
+    await this.ctx.storage.put(key, state);
+    let previewId = '';
+    if (flight) {
+      const pending = await this.ctx.storage.get(this.pendingReleaseKey(identity));
+      // A prior drag's DB round-trip can finish during a newer preview/release.
+      // Keep the newer visible release until its own authoritative commit lands.
+      if (pending && state.target_mode !== 'AUTO' && pending.targetAt !== state.manual_tldt) return;
+      if (state.target_mode === 'AUTO' || pending?.targetAt === state.manual_tldt) {
+        previewId = pending?.previewId || '';
+        await this.ctx.storage.delete(this.pendingReleaseKey(identity));
+        for (const socket of this.sockets()) {
+          const meta = socketMeta(socket);
+          if (meta.dragCallsign === identity && meta.previewId === previewId) await this.releaseDragLock(socket, meta, previewId);
+        }
+      }
+    }
+    this.broadcast({ type: payload.type, airport: state.airport, previewId, [flight ? 'flightState' : 'sequenceOrder']: state });
   }
 
   leaderId(excludeClientId = '') {
@@ -193,6 +240,29 @@ export class AmanRealtimeRoom {
   }
 
   async fetch(request) {
+    if (request.method === 'POST' && new URL(request.url).pathname === '/authority') {
+      const payload = await request.json();
+      if (payload.type === 'flight_commit' || payload.type === 'sequence_commit') {
+        await this.publishCommitted(payload);
+      } else if (payload.type === 'revoke_session' || payload.type === 'renew_session') {
+        if (!payload.sessionId || !Number.isFinite(payload.expiresAt)) return new Response('Invalid session', { status: 400 });
+        if (payload.type === 'revoke_session') {
+          await this.ctx.storage.put(`revoked:${payload.sessionId}`, Date.now() + 86400000);
+          await this.scheduleExpiry(Date.now() + 86400000);
+        } else if (await this.ctx.storage.get(`revoked:${payload.sessionId}`)) {
+          return new Response('Session revoked', { status: 401 });
+        }
+        for (const socket of this.ctx.getWebSockets()) {
+          const meta = socketMeta(socket);
+          if (meta.sessionId !== payload.sessionId) continue;
+          socket.serializeAttachment({ ...meta, expiresAt: payload.expiresAt, revoked: payload.type === 'revoke_session' });
+        }
+        this.sockets();
+        this.announceRoles();
+        if (payload.expiresAt > Date.now()) await this.scheduleExpiry(payload.expiresAt);
+      } else return new Response('Unsupported command', { status: 400 });
+      return new Response(null, { status: 204 });
+    }
     if ((request.headers.get('Upgrade') || '').toLowerCase() !== 'websocket') {
       return new Response('WebSocket upgrade required', { status: 426 });
     }
@@ -205,6 +275,11 @@ export class AmanRealtimeRoom {
       return new Response('Invalid authenticated AMAN room request', { status: 400 });
     }
 
+    const sessionId = cleanText(request.headers.get('X-AMAN-Session'), 180);
+    const expiresAt = Number(request.headers.get('X-AMAN-Expires'));
+    if (!sessionId || !Number.isFinite(expiresAt) || expiresAt <= Date.now()
+      || await this.ctx.storage.get(`revoked:${sessionId}`)) return new Response('Session expired', { status: 401 });
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const meta = {
@@ -214,10 +289,13 @@ export class AmanRealtimeRoom {
       airport,
       serviceDate,
       joinedAt: Date.now(),
+      sessionId,
+      expiresAt,
       previewId: '',
     };
     server.serializeAttachment(meta);
     this.ctx.acceptWebSocket(server);
+    await this.scheduleExpiry(expiresAt);
 
     const [autoSnapshot, committedFlights, sequenceOrders, pendingReleases, dragLocks] = await Promise.all([
       this.ctx.storage.get('autoSnapshot'),
@@ -245,7 +323,14 @@ export class AmanRealtimeRoom {
     let payload;
     try { payload = JSON.parse(message); } catch { return; }
     const meta = socketMeta(socket);
-    if (!meta.clientId) return;
+    if (!meta.clientId || !(meta.expiresAt > Date.now()) || meta.revoked) {
+      try { socket.close(4001, 'Session expired'); } catch { /* already closed */ }
+      return;
+    }
+    if (payload?.type === 'flight_commit' || payload?.type === 'sequence_commit') {
+      // Browsers may preview a drag, but only the authenticated API publishes a commit.
+      return;
+    }
 
     if (payload?.type === 'auto_snapshot') {
       if (meta.clientId !== this.leaderId() || !Array.isArray(payload.arrivals)) return;
@@ -319,39 +404,6 @@ export class AmanRealtimeRoom {
       return;
     }
 
-    if (payload?.type === 'flight_commit' && payload.flightState) {
-      const state = payload.flightState;
-      const callsign = cleanText(state.callsign, 20).toUpperCase();
-      if (!callsign || cleanAirport(state.airport) !== meta.airport) return;
-      const key = `flight:${callsign}`;
-      const current = await this.ctx.storage.get(key);
-      if (!incomingCommitIsNewer(state, current)) {
-        this.rejectStaleCommit(socket, 'flight', current);
-        return;
-      }
-      const previewId = cleanText(meta.previewId, 80);
-      await Promise.all([
-        this.ctx.storage.put(key, state),
-        this.ctx.storage.delete(this.pendingReleaseKey(callsign)),
-      ]);
-      await this.releaseDragLock(socket, meta);
-      this.broadcast({ type: 'flight_commit', airport: meta.airport, previewId, flightState: state });
-      return;
-    }
-
-    if (payload?.type === 'sequence_commit' && payload.sequenceOrder) {
-      const order = payload.sequenceOrder;
-      const runway = cleanText(order.runway, 12).toUpperCase();
-      if (!runway || cleanAirport(order.airport) !== meta.airport) return;
-      const key = `sequence:${runway}`;
-      const current = await this.ctx.storage.get(key);
-      if (!incomingCommitIsNewer(order, current)) {
-        this.rejectStaleCommit(socket, 'sequence', current);
-        return;
-      }
-      await this.ctx.storage.put(key, order);
-      this.broadcast({ type: 'sequence_commit', airport: meta.airport, sequenceOrder: order });
-    }
   }
 
   async webSocketClose(socket, code, reason) {

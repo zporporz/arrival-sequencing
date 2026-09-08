@@ -4,6 +4,9 @@ import { AmanRealtimeRoom, DRAG_LOCK_TTL_MS } from '../realtime-worker/src/index
 class FakeStorage {
   values = new Map()
   puts = []
+  alarm = null
+  async getAlarm() { return this.alarm }
+  async setAlarm(value) { this.alarm = value }
 
   async get(key) {
     return this.values.get(key)
@@ -27,7 +30,7 @@ class FakeSocket {
   sent = []
 
   constructor(meta) {
-    this.meta = meta
+    this.meta = { ...meta, sessionId: meta.vid, expiresAt: Date.now() + 86400000 }
   }
 
   deserializeAttachment() {
@@ -60,20 +63,58 @@ afterEach(() => {
 })
 
 describe('AMAN realtime Durable Object coordination', () => {
+  it('rejects forged browser commits even with a maximum revision', async () => {
+    const { room, sockets, storage } = setupRoom()
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: Number.MAX_SAFE_INTEGER } }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'sequence_commit', sequenceOrder: { airport: 'VTBS', runway: '19', revision: Number.MAX_SAFE_INTEGER } }))
+    expect(storage.values.size).toBe(0)
+    await room.fetch(new Request('https://aman.internal/authority', { method: 'POST', body: JSON.stringify({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1 } }) }))
+    expect(await storage.get('flight:THA123')).toMatchObject({ revision: 1 })
+  })
+
+  it('does not roll a newer released preview back when an earlier drag finishes saving', async () => {
+    const { room, sockets, storage } = setupRoom()
+    await storage.put('pending:THA123', { previewId: 'newer', targetAt: '2026-08-25T10:30:00.000Z' })
+    await room.publishCommitted({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1, target_mode: 'MANUAL', manual_tldt: '2026-08-25T10:20:00.000Z' } })
+    expect(sockets[1].sent).toHaveLength(0)
+    expect(await storage.get('pending:THA123')).toMatchObject({ previewId: 'newer' })
+    await room.publishCommitted({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 2, target_mode: 'MANUAL', manual_tldt: '2026-08-25T10:30:00.000Z' } })
+    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'flight_commit', previewId: 'newer' })
+  })
+
+  it('expires sockets for both sending and receiving, including silent sockets', async () => {
+    const { room, sockets, storage } = setupRoom()
+    sockets[0].meta.expiresAt = Date.now() - 1
+    const close = vi.spyOn(sockets[0], 'close')
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'drag_begin', callsign: 'THA123' }))
+    await room.alarm()
+    room.broadcast({ type: 'test' })
+    expect(close).toHaveBeenCalledWith(4001, 'Session expired')
+    expect(sockets[0].sent).toHaveLength(0)
+    expect(await storage.get('lock:THA123')).toBeUndefined()
+    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'test' })
+  })
+
+  it('revokes logout sessions and refuses subsequent renewal', async () => {
+    const { room, sockets } = setupRoom()
+    const command = type => room.fetch(new Request('https://aman.internal/authority', { method: 'POST', body: JSON.stringify({ type, sessionId: '111', expiresAt: Date.now() + 60000 }) }))
+    expect((await command('revoke_session')).status).toBe(204)
+    expect(sockets[0].meta.revoked).toBe(true)
+    expect((await command('renew_session')).status).toBe(401)
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'drag_begin', callsign: 'THA123' }))
+    expect(sockets[0].sent).toHaveLength(0)
+  })
   it('keeps a newer flight commit when an older revision arrives late', async () => {
     const { room, sockets, storage } = setupRoom()
     const current = { airport: 'VTBS', callsign: 'THA123', revision: 10 }
     const stale = { airport: 'VTBS', callsign: 'THA123', revision: 9 }
 
-    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'flight_commit', flightState: current }))
-    await room.webSocketMessage(sockets[1], JSON.stringify({ type: 'flight_commit', flightState: stale }))
+    await room.publishCommitted({ type: 'flight_commit', flightState: current })
+    await room.publishCommitted({ type: 'flight_commit', flightState: stale })
 
     expect(await storage.get('flight:THA123')).toEqual(current)
     expect(sockets[1].sent.at(-1)).toMatchObject({
-      type: 'commit_rejected',
-      entity: 'flight',
-      reason: 'STALE_REVISION',
-      current,
+      type: 'flight_commit', flightState: current,
     })
   })
 
@@ -84,7 +125,8 @@ describe('AMAN realtime Durable Object coordination', () => {
     await room.webSocketMessage(sockets[0], JSON.stringify({
       type: 'drag_begin', callsign: 'THA123', previewId: 'preview-one',
     }))
-    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'flight_commit', flightState: state }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'drag_release', callsign: 'THA123', previewId: 'preview-one', targetAt: '2026-08-25T10:20:00.000Z', runway: '19' }))
+    await room.publishCommitted({ type: 'flight_commit', flightState: { ...state, manual_tldt: '2026-08-25T10:20:00.000Z' } })
 
     expect(sockets[1].sent.find((message) => message.type === 'flight_commit')).toMatchObject({
       previewId: 'preview-one',
@@ -145,9 +187,9 @@ describe('AMAN realtime Durable Object coordination', () => {
       type: 'drag_release', callsign: 'THA123', previewId: 'preview-one',
       targetAt: '2026-08-25T10:20:00.000Z', runway: '19',
     }))
-    await room.webSocketMessage(sockets[0], JSON.stringify({
-      type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1 },
-    }))
+    await room.publishCommitted({
+      type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 1, manual_tldt: '2026-08-25T10:20:00.000Z' },
+    })
 
     expect(await storage.get('pending:THA123')).toBeUndefined()
   })
@@ -157,11 +199,11 @@ describe('AMAN realtime Durable Object coordination', () => {
     const current = { airport: 'VTBS', runway: '19', ordered_callsigns: ['A', 'B'], revision: 8 }
     const stale = { airport: 'VTBS', runway: '19', ordered_callsigns: ['B', 'A'], revision: 7 }
 
-    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'sequence_commit', sequenceOrder: current }))
-    await room.webSocketMessage(sockets[1], JSON.stringify({ type: 'sequence_commit', sequenceOrder: stale }))
+    await room.publishCommitted({ type: 'sequence_commit', sequenceOrder: current })
+    await room.publishCommitted({ type: 'sequence_commit', sequenceOrder: stale })
 
     expect(await storage.get('sequence:19')).toEqual(current)
-    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'commit_rejected', entity: 'sequence', current })
+    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'sequence_commit', sequenceOrder: current })
   })
 
   it('allows only one controller to drag a flight until the five-second lease expires', async () => {

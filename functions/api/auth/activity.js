@@ -1,4 +1,5 @@
 import { keepAuditWriteAlive, endLoginAudit, updateLoginActivity } from "../../_lib/loginAudit.js";
+import { updateRealtimeSession } from '../../_lib/realtimeAuthority.js';
 import {
   clearCookie,
   encodeSession,
@@ -34,6 +35,7 @@ export async function onRequestPost(context) {
 
   const session = { ...state.session, lastActivityAt: new Date().toISOString() };
   const lifecycle = inspectSession(session);
+  await updateRealtimeSession(env, session);
   const token = await encodeSession(session, getSessionSecret(env));
   const headers = new Headers();
   headers.append("Set-Cookie", makeCookie(request, "ivao_session", token, lifecycle.remainingSeconds));

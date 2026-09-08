@@ -63,7 +63,7 @@ const STAR_STEM_TO_IAWP: Record<string, Record<string, string>> = {
     SEHN: 'SEHNA',
     SABA: 'SABAI',
   },
-  VTBS: {},
+  VTBS: { WILA: 'WILLA' },
 }
 
 function directOrStarIawp(

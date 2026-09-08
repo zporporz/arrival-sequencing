@@ -1,3 +1,5 @@
+import { writeFlightCommand } from './flightCommandQueue'
+
 type ReactRowProps = {
   onDoubleClick?: () => void
 }
@@ -45,12 +47,7 @@ function clearLegacyGainLimit(row: HTMLElement) {
 }
 
 async function clearSharedTarget(airport: string, callsign: string, autoTldt: string, autoFloorTldt: string, autoRunway: string) {
-  const response = await fetch('/api/sequence/aman-state', {
-    method: 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
+  const response = await writeFlightCommand({
       action: 'clearManualTarget',
       serviceDate: new Date().toISOString().slice(0, 10),
       airport,
@@ -58,7 +55,7 @@ async function clearSharedTarget(airport: string, callsign: string, autoTldt: st
       autoTldt,
       autoFloorTldt,
       autoRunway,
-    }),
+      expectedRevision: Number(findRow(airport, callsign)?.dataset.sharedRevision) || undefined,
   })
   const payload = await response.json() as { error?: string; flightState?: unknown }
   if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)
@@ -123,6 +120,7 @@ export function installInteractionGuardRuntime() {
 
     if (resetPending.has(identity.key)) return
     resetPending.add(identity.key)
+    window.dispatchEvent(new CustomEvent('aman:cancel-pending-manual', { detail: identity.key }))
 
     const oldSharedRevision = row.dataset.sharedRevision
     row.dataset.resetPending = 'true'

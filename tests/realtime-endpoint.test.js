@@ -24,7 +24,7 @@ describe('authenticated realtime endpoint', () => {
     })
 
     expect(response.status).toBe(200)
-    expect(getByName).toHaveBeenCalledWith('2026-08-25:VTBS')
+    expect(getByName).toHaveBeenCalledWith('v2:2026-08-25:VTBS')
     const proxiedRequest = fetch.mock.calls[0][0]
     expect(proxiedRequest.headers.get('X-AMAN-VID')).toBe('739898')
     expect(proxiedRequest.headers.get('X-AMAN-Name')).toBe('Controller')

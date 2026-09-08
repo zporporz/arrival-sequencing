@@ -1,3 +1,4 @@
+import { realtimeSession } from '../../_lib/realtimeAuthority.js';
 const json = (body, status) => Response.json(body, {
   status,
   headers: { 'Cache-Control': 'private, no-store' },
@@ -18,7 +19,10 @@ export async function onRequestGet(context) {
   const headers = new Headers(context.request.headers);
   headers.set('X-AMAN-VID', String(context.data.auth?.vid || ''));
   headers.set('X-AMAN-Name', String(context.data.auth?.name || context.data.auth?.vid || 'IVAO'));
+  const session = realtimeSession(context.data.auth);
+  headers.set('X-AMAN-Session', session.sessionId);
+  headers.set('X-AMAN-Expires', String(session.expiresAt));
   const roomRequest = new Request(context.request.url, { method: 'GET', headers });
-  const room = context.env.AMAN_REALTIME.getByName(`${serviceDate}:${airport}`);
+  const room = context.env.AMAN_REALTIME.getByName(`v2:${serviceDate}:${airport}`);
   return room.fetch(roomRequest);
 }

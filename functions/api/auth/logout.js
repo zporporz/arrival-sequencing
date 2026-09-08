@@ -1,5 +1,6 @@
 import { endLoginAudit, keepAuditWriteAlive } from "../../_lib/loginAudit.js";
 import { clearCookie, getRequestSessionState } from "../../_lib/session.js";
+import { updateRealtimeSession } from '../../_lib/realtimeAuthority.js';
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -9,6 +10,7 @@ export async function onRequestGet(context) {
     ? state.reason
     : requestedReason === "IDLE" ? "IDLE" : "SIGN_OUT";
   if (state.session) {
+    await updateRealtimeSession(env, state.session, true);
     const auditWrite = keepAuditWriteAlive(
       context,
       endLoginAudit(env, state.session, reason),

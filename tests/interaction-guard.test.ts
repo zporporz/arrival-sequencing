@@ -35,11 +35,7 @@ describe('return to AUTO interaction guard', () => {
       manual_runway: null,
       revision: 7,
     }
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ ok: true, flightState }),
-    })
+    const fetchMock = vi.fn().mockImplementation(async () => Response.json({ ok: true, flightState }))
     vi.stubGlobal('fetch', fetchMock)
 
     document.body.innerHTML = '<div class="aman-flight-row is-stable" data-target-mode="MANUAL" title="VTBS RWY 19"><strong>THA123</strong></div>'
@@ -71,8 +67,8 @@ describe('return to AUTO interaction guard', () => {
     expect(reset).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => expect(commits).toHaveLength(1))
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
       action: 'clearManualTarget',
       airport: 'VTBS',
       callsign: 'THA123',

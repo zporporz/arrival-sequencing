@@ -1,4 +1,5 @@
 import { getAuthenticatedIdentity } from './browserIdentity'
+import { writeFlightCommand } from './flightCommandQueue'
 
 type WorkspaceState = {
   service_date: string
@@ -278,7 +279,8 @@ async function readSharedState(serviceDate: string) {
 }
 
 async function writeSharedState(body: Record<string, unknown>) {
-  const response = await fetch('/api/sequence/aman-state', {
+  const response = body.action === 'setManualTarget' || body.action === 'clearManualTarget'
+    ? await writeFlightCommand(body) : await fetch('/api/sequence/aman-state', {
     method: 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
@@ -497,6 +499,7 @@ export function installSharedAmanRuntime() {
         callsign: rowInfo.callsign,
         manualTldt: new Date(targetMs).toISOString(),
         manualRunway: runway,
+        expectedRevision: Number(row.dataset.sharedRevision) || undefined,
         autoBaselineTldt: baseline?.tldt,
         autoBaselineRunway: baseline?.runway,
         autoBaselineRank: baseline?.rank,
@@ -600,6 +603,13 @@ export function installSharedAmanRuntime() {
     const row = event.target instanceof Element ? event.target.closest<HTMLElement>('.aman-flight-row') : null
     if (!row || (event.target instanceof Element && event.target.closest('select'))) return
     void clearManualTarget(row)
+  }
+
+  const onCancelPendingManual = (event: Event) => {
+    const key = (event as CustomEvent<string>).detail
+    const timer = flightWriteTimers.get(key)
+    if (timer != null) window.clearTimeout(timer)
+    flightWriteTimers.delete(key)
   }
 
   const releaseOriginals = new Map<string, {
@@ -716,6 +726,7 @@ export function installSharedAmanRuntime() {
   document.addEventListener('pointerdown', onPointerDown)
   document.addEventListener('pointerup', onPointerUp)
   document.addEventListener('dblclick', onDoubleClick)
+  window.addEventListener('aman:cancel-pending-manual', onCancelPendingManual)
   window.addEventListener('aman:force-shared-refresh', onForceRefresh)
   window.addEventListener('aman:frozen-target-request', onFrozenTargetRequest)
   window.addEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
@@ -748,6 +759,7 @@ export function installSharedAmanRuntime() {
     document.removeEventListener('pointerdown', onPointerDown)
     document.removeEventListener('pointerup', onPointerUp)
     document.removeEventListener('dblclick', onDoubleClick)
+    window.removeEventListener('aman:cancel-pending-manual', onCancelPendingManual)
     window.removeEventListener('aman:force-shared-refresh', onForceRefresh)
     window.removeEventListener('aman:frozen-target-request', onFrozenTargetRequest)
     window.removeEventListener('aman:realtime-manual-release', onRealtimeManualRelease)
