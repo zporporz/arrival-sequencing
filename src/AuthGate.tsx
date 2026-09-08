@@ -251,39 +251,15 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (!user) {
     return (
       <main className="auth-page auth-landing">
-        <header className="login-header">
+        <section className="login-minimal" aria-labelledby="login-title">
           <img src={ivaoThailandLogo} alt="IVAO Thailand" />
-          <span>THAILAND APPROACH <b>AMAN</b></span>
-        </header>
-        <div className="login-layout">
-          <section className="login-intro" aria-labelledby="login-title">
-            <div className="login-kicker"><span /> ARRIVAL MANAGEMENT</div>
-            <h1 id="login-title">Every arrival.<br /><span>One shared picture.</span></h1>
-            <p>Plan the sequence. Coordinate the approach.<br />Your shared workspace for Thailand’s virtual skies.</p>
-            <div className="login-radar" aria-hidden="true">
-              <svg viewBox="0 0 560 190" fill="none">
-                <path d="M0 35H100L230 95H400M0 155H120L230 95M560 30H465L400 95M560 160H470L400 95" />
-                <circle cx="400" cy="95" r="66" /><circle cx="400" cy="95" r="36" />
-                <path className="login-route" d="M0 35H100L230 95H400" />
-                <circle className="login-fix" cx="230" cy="95" r="4" /><circle className="login-fix" cx="400" cy="95" r="5" />
-                <text x="211" y="122">SEQUENCE</text><text x="375" y="181">APPROACH</text>
-              </svg>
-              <span>COORDINATE · SEQUENCE · ARRIVE</span>
-            </div>
-          </section>
-          <section className="auth-card login-panel" aria-labelledby="signin-title">
-            <div className="login-panel-icon" aria-hidden="true">↗</div>
-            <div className="auth-eyebrow">CONTROLLER WORKSPACE</div>
-            <h2 id="signin-title">Ready for arrivals?</h2>
-            <p className="auth-copy">Sign in with your IVAO account to open Arrival Sequencing.</p>
-            {error && <div className="auth-error" role="alert">{error}</div>}
-            <a className="auth-login-button" href="/api/auth/login">Continue with IVAO <span aria-hidden="true">→</span></a>
-            <p className="login-security">You’ll be redirected to IVAO to sign in securely.<br />Your IVAO password is never entered here.</p>
-            {error && <button type="button" className="login-retry" onClick={() => window.location.reload()}>Check session again</button>}
-            <div className="login-panel-footer"><span>IVAO THAILAND</span><span>ARRIVAL SEQUENCING</span></div>
-          </section>
-        </div>
-        <footer className="login-footer"><span>THAILAND DIVISION · APPROACH TOOLS</span><span>For flight simulation only</span></footer>
+          <div className="login-rule" />
+          <div className="auth-eyebrow">THAILAND APPROACH AMAN</div>
+          <h1 id="login-title">Arrival Sequencing</h1>
+          {error && <div className="auth-error" role="alert">{error}</div>}
+          <a className="auth-login-button" href="/api/auth/login">Sign in with IVAO</a>
+          {error && <button type="button" className="login-retry" onClick={() => window.location.reload()}>Try again</button>}
+        </section>
       </main>
     )
   }
