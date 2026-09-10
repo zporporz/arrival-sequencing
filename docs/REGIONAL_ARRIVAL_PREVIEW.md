@@ -2,7 +2,9 @@
 
 Status: experimental, not the operational shared sequence. Open `/?regional=VTCC`
 or `/?regional=VTSP`, behind the normal IVAO login. The main AMAN header links here.
-VTBD/VTBS timing, locks, manual targets, realtime and sequencing are unchanged.
+VTBD/VTBS stage timing, locks, manual targets, realtime and sequencing are unchanged.
+The shared route-geometry service now resolves SID/STAR names and runway variants
+generically for both the operational callers and this preview.
 
 ## What is available
 
@@ -18,6 +20,37 @@ VTBD/VTBS timing, locks, manual targets, realtime and sequencing are unchanged.
   does not fabricate a past FF crossing time or reuse EOBT + EET.
 - ETA-FF and STA-FF have the same value only because this preview does NOT yet
   allocate slots. Once past entry, no historical FF time is invented.
+
+## Filed SID/STAR names and partial routes
+
+The route API looks up the departure SID and arrival STAR in airac.net's current,
+airport/type-scoped procedure catalogs (including pagination). Canonical identifiers
+are accepted directly. Full-fix / abbreviated aliases are accepted only when the
+procedure's published endpoint and exact revision/suffix verify the relationship.
+There is no MARNI-specific replacement table. Unknown or colliding names are not
+silently substituted with a similar procedure or another revision.
+
+Runways are sent to the parser explicitly: a supplied runway must be compatible
+with the procedure; otherwise only a single concrete published runway is inferred.
+Multiple runways or a parallel family such as `20B` do not imply `20L` or `20R`.
+The regional page supplies its selected arrival runway, active AIRAC and entry fix;
+it never reuses that arrival runway as a departure runway. Upstream catalog/detail/
+route caches include the cycle, respect cycle expiration and deduplicate inflight
+requests. A regional AIRAC mismatch fails closed.
+
+If terminal procedure resolution fails, the API may independently re-parse the
+filed enroute section through the explicit STAR entry. Only a warning-free section
+is retained, without artificial airport-to-first-fix or entry-to-airport segments.
+An unresolved airway/waypoint, missing entry or invalid coordinates cannot become a
+straight-line shortcut. The live estimator additionally checks continuity, entry
+coordinates, direction and proximity. A flight still on the omitted SID receives
+no estimate from that partial route. The main callers can use the same verified
+enroute section without changing stage/locking rules.
+
+Route-service errors are shown separately from off-route/heading warnings instead
+of being silently converted into a generic vector warning. Fixture tests cover all
+45 bundled STAR names, multiple SID airports, aliases, ambiguity, runway families,
+cycle changes and the NOK0409 Y26 regression; automated tests do not call live APIs.
 
 ## Assumptions and deliberate limits
 

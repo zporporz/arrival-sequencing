@@ -15,6 +15,7 @@ export type RouteSegment = {
   distance: number
   bearing: number | null
   cumulativeDistance: number
+  via?: string | null
 }
 
 export type RouteGeometry = {
@@ -22,7 +23,13 @@ export type RouteGeometry = {
   destination: string
   totalDistance: number | null
   segments: RouteSegment[]
-  errors: Array<{ type: string; message: string }>
+  errors: Array<{ type: string; message: string; segment?: string; scope?: string }>
+  cycle?: string
+  normalizedRoute?: string
+  departureRunway?: string | null
+  arrivalRunway?: string | null
+  entryRoute?: RouteGeometry & { entryFix: string; cycle: string } | null
+  entryRouteError?: string | null
 }
 
 export type ArrivalEtaSource =

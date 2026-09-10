@@ -89,7 +89,8 @@ export default function RegionalAman() {
     const result = nav && star && approach ? calculateRegionalTiming(nav.airport, star, approach, profile) : null
     const live = result?.timing && profile && !stale ? estimateRegionalLive(flight, result.timing, profile, snapshot!.routes[flight.sessionId] || null, snapshot!.traffic.fetchedAt) : null
     return { flight, star, timing: result?.timing, estimate: live?.estimate,
-      reason: stale ? 'STALE — refreshing traffic' : !star ? 'STAR unresolved for this runway — check filed route' : !approach ? 'Select approach' : result?.error || live?.error || '' }
+      reason: stale ? 'STALE — refreshing traffic' : !star ? 'STAR unresolved for this runway — check filed route' : !approach ? 'Select approach'
+        : result?.error || (live?.error && snapshot?.routeErrors?.[flight.sessionId] ? `Route service: ${snapshot.routeErrors[flight.sessionId]}` : live?.error) || '' }
   }).sort((a, b) => (a.estimate?.tldtMs ?? Infinity) - (b.estimate?.tldtMs ?? Infinity) || a.flight.callsign.localeCompare(b.flight.callsign))
 
   return <main className="regional-aman">

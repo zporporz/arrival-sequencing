@@ -35,11 +35,15 @@ export function estimateRegionalLive(flight: IvaoArrivalTrafficFlight, timing: R
   if (!Number.isFinite(asOf) || !Number.isFinite(sample) || asOf - sample > 90_000 || sample - asOf > 15_000) return { error: 'STALE — recent position required' }
   const entry = { lat: timing.entry.lat!, lon: timing.entry.lon! }
   const prefix: PathSegment[] = []
+  // A partial path is independently re-parsed from the filed enroute section,
+  // never made safe simply by ignoring warnings on the full route.
+  const partial = geometry?.entryRoute
+  const source = partial && partial.entryFix === timing.entry.fix && partial.cycle === geometry?.cycle ? partial : geometry
   // Use a resolved route only if it really reaches this entry fix. Never insert
   // direct-to-STAR from an arbitrary airborne position or mix parser errors in.
-  if (geometry?.destination === flight.arrival && geometry.origin === flight.departure && !geometry.errors?.length) {
+  if (source?.destination === flight.arrival && source.origin === flight.departure && !source.errors?.length) {
     let connected = false
-    for (const s of geometry.segments) {
+    for (const s of source.segments) {
       if (!valid(s.from?.coordinates) || !valid(s.to?.coordinates)) break
       if (prefix.length && regionalDistanceNm(prefix.at(-1)!.to, s.from.coordinates) > .1) break
       if (s.from.identifier === timing.entry.fix && regionalDistanceNm(s.from.coordinates, entry) < .2) { connected = true; break }
@@ -58,7 +62,9 @@ export function estimateRegionalLive(flight: IvaoArrivalTrafficFlight, timing: R
     .filter((p) => Math.abs(((p.bearing - flight.heading! + 540) % 360) - 180) <= 70)
     .sort((a, b) => a.off - b.off || b.index - a.index)
   const position = options[0]
-  if (!position || position.off > 3) return { error: 'Off published route / vector / unresolved entry route — no direct shortcut estimate' }
+  if (!position || position.off > 3) return { error: !prefix.length
+    ? `Route to STAR entry unavailable — ${geometry?.entryRouteError || geometry?.errors?.[0]?.message || 'no connected upstream route'}`
+    : 'Off published route / heading mismatch — no direct shortcut estimate' }
   if (options.some((p) => Math.abs(p.index - position.index) > 1 && p.off < position.off + .5)) return { error: 'Ambiguous route crossing — waiting for a clearer position' }
   const current = path[position.index]
   const currentDistance = current.distanceNm * (1 - position.f)

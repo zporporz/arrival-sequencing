@@ -220,12 +220,18 @@ function routeKey(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
   return `${flight.departure}|${airport}|${flight.route}`
 }
 
-function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
-  const key = routeKey(flight, airport)
-  if (!key || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
+function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode, entryFix: string) {
+  const baseKey = routeKey(flight, airport)
+  if (!baseKey || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
+  const key = `${baseKey}|${entryFix}`
   const existing = routeGeometryCache.get(key)
   if (existing) return existing
-  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route).catch(() => { routeGeometryCache.delete(key); return null })
+  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route, undefined, { entryFix })
+    .then((geometry) => {
+      const usable = geometry.entryRoute || (geometry.errors.length ? null : geometry)
+      if (!usable) routeGeometryCache.delete(key)
+      return usable
+    }).catch(() => { routeGeometryCache.delete(key); return null })
   routeGeometryCache.set(key, request)
   return request
 }
@@ -657,7 +663,7 @@ export default function App() {
             if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, processingDistanceNm: distanceToAirportNm, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route' } satisfies InboundPreview, prediction: null }
             const nominalSeconds = nominalStarSeconds(airport, match.entryFix)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, processingDistanceNm: distanceToAirportNm, source: 'NO TIMING', reason: 'No nominal STAR timing configured' } satisfies InboundPreview, prediction: null }
-            const geometry = await resolveRouteGeometry(flight, airport)
+            const geometry = await resolveRouteGeometry(flight, airport, match.entryFix)
             const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt)
             const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, processingDistanceNm: distanceToAirportNm, source: eta.source, reason: eta.reason } satisfies InboundPreview
             const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {

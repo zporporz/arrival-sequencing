@@ -35,6 +35,7 @@ export type RegionalSnapshot = {
   traffic: IvaoTrafficPayload
   profiles: Record<string, AircraftPerformanceProfile | null>
   routes: Record<string, RouteGeometry | null>
+  routeErrors?: Record<string, string>
 }
 export const readRegionalNav = (airport: string) => timed((signal) => apiGet<RegionalNavPayload>(`/api/sequence/regional-navdata?airport=${encodeURIComponent(airport)}`, signal))
 export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: string): Promise<RegionalSnapshot> {
@@ -42,7 +43,7 @@ export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: stri
   const current = await readRegionalNav(nav.airport.code)
   if (current.cycle !== nav.cycle) throw new Error('Active AIRAC changed — refresh regional navdata')
   const traffic = await timed((signal) => readIvaoTraffic(nav.airport.code, 'regional-preview', signal))
-  const output: RegionalSnapshot = { traffic, profiles: {}, routes: {} }
+  const output: RegionalSnapshot = { traffic, profiles: {}, routes: {}, routeErrors: {} }
   const flights = traffic.flights || []
   let next = 0
   // A small pool also bounds route parsing requests on busy airports.
@@ -51,10 +52,18 @@ export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: stri
       const flight = flights[next++]
       const type = flight.aircraft || ''
       output.profiles[type] = await previewPerformance(type).catch(() => null)
-      if (!flight.route || !flight.departure || flight.onGround === true || !resolveRegionalStar(nav.airport, runway, flight.route)) continue
-      const key = `route:${nav.cycle}:${flight.departure}:${flight.arrival}:${flight.route}`
-      output.routes[flight.sessionId] = await cached(routes, key,
-        () => timed((signal) => readRouteGeometry<RouteGeometry>(flight.departure!, flight.arrival, flight.route!, signal))).catch(() => null)
+      const star = resolveRegionalStar(nav.airport, runway, flight.route)
+      if (!flight.route || !flight.departure || flight.onGround === true || !star) continue
+      const entryFix = star.legs[0]?.fix || undefined
+      const key = `route:${nav.cycle}:${runway}:${entryFix}:${flight.departure}:${flight.arrival}:${flight.route}`
+      try {
+        output.routes[flight.sessionId] = await cached(routes, key,
+          () => timed((signal) => readRouteGeometry<RouteGeometry>(flight.departure!, flight.arrival, flight.route!, signal,
+            { arrivalRunway: runway, cycle: nav.cycle, entryFix })))
+      } catch (error) {
+        output.routes[flight.sessionId] = null
+        output.routeErrors![flight.sessionId] = error instanceof Error ? error.message : 'Route service unavailable'
+      }
     }
   }))
   return output

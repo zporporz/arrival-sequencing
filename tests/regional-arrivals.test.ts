@@ -56,6 +56,15 @@ describe('regional STAR + approach model (AIRAC source fixture)', () => {
   it('does not classify VOR-A as a STAR', () => {
     expect(airports.VTCC.procedures.filter((p) => p.kind === 'STAR').every((p) => p.type === 'GPS')).toBe(true)
   })
+  it('recognizes canonical and verified endpoint aliases for every bundled STAR', () => {
+    for (const airport of Object.values(airports)) for (const star of airport.procedures.filter((p) => p.kind === 'STAR')) {
+      expect(resolveRegionalStar(airport, star.runway, star.name)?.id).toBe(star.id)
+      const suffix = star.name.match(/\d[A-Z]$/)?.[0], entry = star.legs[0]?.fix
+      if (suffix && entry?.startsWith(star.name.slice(0, -suffix.length))) {
+        expect(resolveRegionalStar(airport, star.runway, `${entry} ${entry}${suffix}`)?.id).toBe(star.id)
+      }
+    }
+  })
   it('uses actual waypoint coordinates even when stored leg distances are zero', () => {
     const timing = calculateRegionalTiming(airport, star, approach, profile).timing!
     expect(timing.distanceNm).toBeGreaterThan(10)

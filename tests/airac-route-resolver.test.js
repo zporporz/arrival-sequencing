@@ -1,0 +1,203 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createAiracRouteResolver, normalizeRunway } from '../functions/_lib/airacRouteResolver.js'
+import { onRequestPost } from '../functions/api/sequence/route-geometry.js'
+import bundle from '../functions/_data/regional-arrivals.json'
+
+const cycle = '2609'
+const leg = (fix) => ({ fix_identifier: fix, fix_coordinates: { lat: 15, lon: 100 }, path_terminator: 'TF' })
+const detail = (airport, identifier, kind, fix, runways) => ({ airport, identifier, type: { code: kind },
+  available_runways: runways, common_route: kind === 'STAR' ? [leg(fix), leg('FINAL')] : [],
+  transitions: {}, runway_transitions: Object.fromEntries(runways.map((r) => [r, kind === 'SID' ? [leg('EXIT'), leg(fix)] : []])) })
+const procedures = [detail('VTBD', 'OLVU1B', 'SID', 'OLVUK', ['03L']), detail('VTCC', 'MARN2A', 'STAR', 'MARNI', ['36'])]
+const point = (identifier, lat) => ({ identifier, type: identifier.startsWith('VT') ? 'airport' : 'waypoint', coordinates: { lat, lon: 100 } })
+const routeData = (names = ['VTBD', 'OLVUK', 'UPMUT', 'MARNI', 'VTCC'], errors = []) => ({
+  total_distance: (names.length - 1) * 60,
+  segments: names.slice(1).map((name, i) => ({ from: point(names[i], i), to: point(name, i + 1), distance: 60, bearing: 0, cumulative_distance: (i + 1) * 60 })), errors,
+})
+function api(options = {}) {
+  const calls = [], definitions = options.procedures || procedures
+  const fetcher = vi.fn(async (url, init) => {
+    const u = new URL(url), path = u.pathname.replace('/api/v1/', '')
+    calls.push(u)
+    if (options.fail?.(u)) throw new Error('Temporary outage')
+    let data, pagination
+    if (path === 'airac/current') data = { cycle: options.cycle?.() || cycle, expiration_date: '2099-10-01T00:00:00Z' }
+    else if (path === 'procedures') {
+      const rows = definitions.filter((p) => p.airport === u.searchParams.get('airport') && p.type.code === u.searchParams.get('type'))
+        .map((p) => ({ airport: p.airport, identifier: p.identifier, type: p.type }))
+      const page = Number(u.searchParams.get('page'))
+      data = options.paginate ? rows.slice(page - 1, page) : rows
+      pagination = { has_more: options.paginate ? page < rows.length : false }
+    } else if (path.startsWith('procedures/')) {
+      const [, airport, id] = path.split('/')
+      data = definitions.find((p) => p.airport === airport && p.identifier === decodeURIComponent(id))
+      if (!data) return Response.json({ error: 'not found' }, { status: 404 })
+    } else if (path === 'routes/parse') data = options.parse?.(u) || routeData()
+    else throw new Error(`Unexpected URL ${url}`)
+    expect(init.headers['User-Agent']).toContain('ArrivalSequencing')
+    return Response.json({ status: 'success', data, ...(pagination ? { pagination } : {}) },
+      { headers: { 'X-AIRAC-Cycle': options.headerCycle?.(u) || options.cycle?.() || cycle } })
+  })
+  return { resolve: createAiracRouteResolver(fetcher), fetcher, calls }
+}
+const request = { origin: 'VTBD', destination: 'VTCC', route: 'OLVUK1B OLVUK Y26 MARNI MARNI2A', cycle, arrivalRunway: '36', entryFix: 'MARNI' }
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+describe('generic SID / STAR route resolution', () => {
+  it('normalizes both procedures and infers a runway only from a single published choice', async () => {
+    const a = api(), result = await a.resolve(request)
+    expect(result.normalizedRoute).toBe('OLVU1B OLVUK Y26 MARNI MARN2A')
+    expect(result.errors).toEqual([])
+    expect(result.departureRunway).toBe('03L')
+    const parse = a.calls.find((u) => u.pathname.endsWith('/routes/parse'))
+    expect(parse.searchParams.get('departure_runway')).toBe('03L')
+    expect(parse.searchParams.get('arrival_runway')).toBe('36')
+    expect(result.entryRoute).toBeNull()
+  })
+  it('accepts canonical names, lowercase runway inputs and speed/level suffixes', async () => {
+    expect(normalizeRunway('rw3l')).toBe('03L')
+    expect(normalizeRunway('RWY36')).toBe('36')
+    expect(normalizeRunway('37')).toBeNull()
+    const a = api()
+    const result = await a.resolve({ ...request, route: 'N0444F360 OLVU1B OLVUK/N0440F340 Y26 MARNI MARNI2A/N0250F130' })
+    expect(result.normalizedRoute).toBe('N0444F360 OLVU1B OLVUK/N0440F340 Y26 MARNI MARN2A/N0250F130')
+  })
+  it('handles a STAR-only route without treating it as the departure SID', async () => {
+    const result = await api().resolve({ ...request, route: 'MARNI2A' })
+    expect(result.normalizedRoute).toBe('MARN2A')
+    expect(result.procedures).toHaveLength(1)
+    expect(result.procedures[0].kind).toBe('STAR')
+  })
+  it('supports abbreviated input when the catalog stores the full endpoint name', async () => {
+    const p = detail('VTSP', 'RADAR2A', 'STAR', 'RADAR', ['27'])
+    const result = await api({ procedures: [p] }).resolve({ origin: 'VTBD', destination: 'VTSP', route: 'RADAR RADA2A', arrivalRunway: '27' })
+    expect(result.normalizedRoute).toBe('RADAR RADAR2A')
+  })
+  it('paginates catalogs rather than assuming the first page contains every procedure', async () => {
+    const a = api({ paginate: true, procedures: [detail('VTCC', 'ALFA1A', 'STAR', 'ALFAX', ['36']), ...procedures] })
+    expect((await a.resolve(request)).normalizedRoute).toContain('MARN2A')
+    expect(a.calls.some((u) => u.searchParams.get('airport') === 'VTCC' && u.searchParams.get('page') === '2')).toBe(true)
+  })
+  it('does not change revision, suffix, airport or a similar-looking endpoint', async () => {
+    for (const route of ['OLVUK1B OLVUK Y26 MARNI MARNI3A', 'OLVUK1B OLVUK Y26 MARNI MARNI2B', 'OLVUK1B OLVUK Y26 MARNI MARNX2A']) {
+      await expect(api().resolve({ ...request, route, entryFix: undefined })).rejects.toThrow(/not verified/)
+    }
+    await expect(api().resolve({ ...request, destination: 'VTSP', entryFix: undefined })).rejects.toThrow(/not verified/)
+  })
+  it('fails closed for colliding aliases instead of selecting the first match', async () => {
+    const a = api({ procedures: [...procedures, detail('VTCC', 'MAR2A', 'STAR', 'MARNI', ['36'])] })
+    await expect(a.resolve({ ...request, entryFix: undefined })).rejects.toThrow(/Ambiguous/)
+    expect(a.calls.some((u) => u.pathname.endsWith('routes/parse'))).toBe(false)
+  })
+  it('never guesses a runway or substitutes a different runway variant', async () => {
+    const multi = detail('VTBD', 'OLVU1B', 'SID', 'OLVUK', ['03L', '03R'])
+    await expect(api({ procedures: [multi, procedures[1]] }).resolve({ ...request, entryFix: undefined })).rejects.toThrow(/Runway required/)
+    await expect(api().resolve({ ...request, departureRunway: '21R', entryFix: undefined })).rejects.toThrow(/not supported/)
+    expect((await api({ procedures: [multi, procedures[1]] }).resolve({ ...request, departureRunway: '03R' })).departureRunway).toBe('03R')
+  })
+  it('does not infer left/right from a parallel runway family', async () => {
+    const p = detail('VTBS', 'NORT2C', 'STAR', 'NORTA', ['20B'])
+    const r = { origin: 'VTBD', destination: 'VTBS', route: 'NORTA NORTA2C' }
+    await expect(api({ procedures: [p] }).resolve(r)).rejects.toThrow(/Runway required/)
+    expect((await api({ procedures: [p] }).resolve({ ...r, arrivalRunway: '20R' })).arrivalRunway).toBe('20R')
+    await expect(api({ procedures: [p] }).resolve({ ...r, arrivalRunway: '19' })).rejects.toThrow(/not supported/)
+  })
+  it('keeps the independently verified enroute section when SID cannot be resolved', async () => {
+    const a = api({ procedures: [procedures[1]] })
+    const result = await a.resolve(request)
+    expect(result.errors[0].scope).toBe('departure')
+    expect(result.entryRoute.errors).toEqual([])
+    expect(result.entryRoute.segments[0].from.identifier).toBe('OLVUK')
+    expect(result.entryRoute.segments.at(-1).to.identifier).toBe('MARNI')
+    expect(result.entryRoute.segments.some((s) => s.from.identifier === 'VTBD' || s.to.identifier === 'VTCC')).toBe(false)
+    expect(a.calls.find((u) => u.pathname.endsWith('routes/parse')).searchParams.get('route')).toBe('OLVUK Y26 MARNI')
+  })
+  it('also isolates SID parser warnings after successful name/runway resolution', async () => {
+    const a = api({ parse: (u) => routeData(undefined, u.searchParams.get('route').includes('OLVU1B')
+      ? [{ type: 'procedure_no_segments', segment: 'OLVU1B', message: 'No segments' }] : []) })
+    const result = await a.resolve(request)
+    expect(result.errors).toHaveLength(1)
+    expect(result.entryRoute.errors).toEqual([])
+  })
+  it('does not salvage an unresolved airway, missing entry, or malformed coordinates', async () => {
+    const a = api({ parse: () => routeData(undefined, [{ type: 'airway_not_found', message: 'Y26 missing' }]) })
+    const result = await a.resolve(request)
+    expect(result.entryRoute).toBeNull()
+    expect(result.entryRouteError).toMatch(/unresolved/)
+    const bad = api({ parse: () => { const d = routeData(); d.segments[1].to.coordinates.lat = 91; return d } })
+    expect((await bad.resolve(request)).entryRoute).toBeNull()
+    const missing = api({ procedures: [procedures[1]] })
+    await expect(missing.resolve({ ...request, route: 'OLVUK1B OLVUK Y26 MARNI2A' })).rejects.toThrow()
+  })
+  it('rejects a disconnected route even when the upstream parser reports no error', async () => {
+    const a = api({ parse: () => { const d = routeData(); d.segments[2].from.coordinates.lat += .5; return d } })
+    const result = await a.resolve(request)
+    expect(result.errors.some((e) => e.type === 'route_discontinuity')).toBe(true)
+    expect(result.entryRoute).toBeNull()
+  })
+  it('does not reuse geometry for a different explicitly selected runway', async () => {
+    const a = api({ procedures: [detail('VTBD', 'OLVU1B', 'SID', 'OLVUK', ['03L', '03R']), procedures[1]] })
+    await a.resolve({ ...request, departureRunway: '03L' })
+    await a.resolve({ ...request, departureRunway: '03R' })
+    expect(a.calls.filter((u) => u.pathname.endsWith('/routes/parse')).map((u) => u.searchParams.get('departure_runway'))).toEqual(['03L', '03R'])
+  })
+  it('scopes caches by cycle/runway, deduplicates requests and retries outages', async () => {
+    const a = api()
+    await Promise.all([a.resolve(request), a.resolve(request)])
+    expect(a.calls.filter((u) => u.pathname.endsWith('/routes/parse'))).toHaveLength(1)
+    await a.resolve(request)
+    expect(a.calls.filter((u) => u.pathname.endsWith('/routes/parse'))).toHaveLength(1)
+    let fail = true
+    const b = api({ fail: (u) => fail && u.pathname.endsWith('/airac/current') })
+    await expect(b.resolve(request)).rejects.toThrow(/outage/)
+    fail = false
+    expect((await b.resolve(request)).errors).toEqual([])
+  })
+  it('rejects mismatched AIRAC and discards previous-cycle cached geometry', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-10T07:00:00Z'))
+    let current = '2609'
+    const a = api({ cycle: () => current })
+    await a.resolve(request)
+    current = '2610'; vi.advanceTimersByTime(61_000)
+    await expect(a.resolve(request)).rejects.toThrow(/AIRAC mismatch/)
+    await a.resolve({ ...request, cycle: '2610' })
+    expect(a.calls.filter((u) => u.pathname.endsWith('/routes/parse'))).toHaveLength(2)
+  })
+  it('rejects mixed-cycle upstream responses', async () => {
+    const a = api({ headerCycle: (u) => u.pathname.endsWith('/routes/parse') ? '2608' : '2609' })
+    await expect(a.resolve(request)).rejects.toThrow(/AIRAC changed/)
+  })
+})
+
+describe('all source STAR names, not a MARNI special case', () => {
+  for (const airport of Object.values(bundle.airports)) {
+    for (const p of airport.procedures.filter((p) => p.kind === 'STAR')) {
+      it(`${airport.code} ${p.name} / ${p.runway}: canonical and endpoint alias`, async () => {
+        const entry = p.legs[0].fix, suffix = p.name.match(/\d[A-Z]$/)?.[0]
+        const a = api({ procedures: [detail(airport.code, p.name, 'STAR', entry, [p.runway])] })
+        for (const name of new Set([p.name, suffix && entry.startsWith(p.name.slice(0, -suffix.length)) ? `${entry}${suffix}` : p.name])) {
+          const result = await a.resolve({ origin: 'VTBD', destination: airport.code, route: `${entry} ${name}`, arrivalRunway: p.runway })
+          expect(result.normalizedRoute).toBe(`${entry} ${p.name}`)
+        }
+      })
+    }
+  }
+  it.each([
+    ['VTCC', 'LIBI2A', 'LIBIN', '18'], ['VTSP', 'KREN1B', 'KRENS', '27'],
+    ['VTBS', 'GOST3C', 'GOSTO', '19'], ['EGLL', 'LAM6M', 'LAM', '27R'],
+  ])('uses the same SID rules at %s (synthetic fixtures)', async (airport, id, exit, rwy) => {
+    const a = api({ procedures: [detail(airport, id, 'SID', exit, [rwy])] })
+    const alias = exit + id.match(/\d[A-Z]$/)[0]
+    const result = await a.resolve({ origin: airport, destination: 'VTBD', route: `${alias} ${exit} DCT FINAL` })
+    expect(result.normalizedRoute).toBe(`${id} ${exit} DCT FINAL`)
+    expect(result.departureRunway).toBe(rwy)
+  })
+})
+
+describe('route API validation', () => {
+  it.each([{ arrivalRunway: 'https://evil.test' }, { departureRunway: '37' }, { cycle: 'latest' }, { entryFix: 'MARNI&evil' }, { route: 'X'.repeat(2001) }])('rejects invalid optional fields %j', async (extra) => {
+    const response = await onRequestPost({ request: new Request('https://example.test/api/sequence/route-geometry', { method: 'POST', body: JSON.stringify({ ...request, ...extra }) }) })
+    expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+  })
+})

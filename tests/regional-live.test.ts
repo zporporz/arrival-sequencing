@@ -39,7 +39,7 @@ describe('regional airborne timing', () => {
     expect(estimateRegionalLive(flight(), timing, profile, null, '2026-09-10T10:02:00Z').error).toMatch(/STALE/)
     expect(estimateRegionalLive({ ...flight(), onGround: true }, timing, profile, null, now).error).toMatch(/GROUND/)
     expect(estimateRegionalLive({ ...flight(), state: 'Landed' }, timing, profile, null, now).error).toMatch(/Terminal/)
-    expect(estimateRegionalLive({ ...flight(), latitude: 40 }, timing, profile, null, now).error).toMatch(/Off published/)
+    expect(estimateRegionalLive({ ...flight(), latitude: 40 }, timing, profile, null, now).error).toMatch(/Route to STAR entry unavailable/)
     expect(estimateRegionalLive({ ...flight(), heading: (flight().heading! + 180) % 360 }, timing, profile, null, now).estimate).toBeUndefined()
     expect(estimateRegionalLive({ ...flight(), latitude: null }, timing, profile, null, now).error).toMatch(/Position/)
   })
@@ -63,10 +63,45 @@ describe('regional airborne timing', () => {
       { ...geo.segments[0], from: geo.segments[0].to },
     ] }
     expect(estimateRegionalLive(f, timing, profile, disconnected, now).estimate).toBeUndefined()
+    const partial = { ...geo, entryFix: timing.entry.fix!, cycle: '2609' }
+    const withSidWarning: RouteGeometry = { ...geo, cycle: '2609', errors: [{ type: 'procedure_no_segments', message: 'SID needs runway' }], entryRoute: partial }
+    expect(estimateRegionalLive(f, timing, profile, withSidWarning, now).estimate).toEqual(result)
+    expect(estimateRegionalLive(f, timing, profile, { ...withSidWarning, entryRoute: { ...partial, cycle: '2608' } }, now).estimate).toBeUndefined()
+    expect(estimateRegionalLive(f, timing, profile, { ...withSidWarning, entryRoute: { ...partial, entryFix: 'WRONG' } }, now).estimate).toBeUndefined()
+    expect(estimateRegionalLive(f, timing, profile, { ...withSidWarning, entryRoute: { ...partial, errors: [{ type: 'airway_not_found', message: 'missing airway' }] } }, now).estimate).toBeUndefined()
+    expect(estimateRegionalLive({ ...f, latitude: start.lat + .1 }, timing, profile, withSidWarning, now).estimate).toBeUndefined()
+    expect(estimateRegionalLive({ ...f, longitude: f.longitude + 1 }, timing, profile, withSidWarning, now).error).toMatch(/Off published/)
   })
   it('does not label a position just before entry as PASSED when its upstream route is missing', () => {
     const s = timing.segments[0]
     const f = { ...flight(), latitude: s.from.lat! - .05 * (s.to.lat! - s.from.lat!), longitude: s.from.lon! - .05 * (s.to.lon! - s.from.lon!) }
     expect(estimateRegionalLive(f, timing, profile, null, now).estimate).toBeUndefined()
+  })
+  it('regression: NOK0409 on Y26 gets ETA-FF and TLDT before MARNI instead of a vector warning', () => {
+    const vtcc = bundle.airports.VTCC as unknown as RegionalAirport
+    const star = vtcc.procedures.find((p) => p.name === 'MARN2A')!
+    const approach = vtcc.procedures.find((p) => p.name === 'I36-Z')!
+    const b738 = { ...profile, aircraftType: 'B738', performanceCategory: 'D' }
+    const model = calculateRegionalTiming(vtcc, star, approach, b738).timing!
+    // Read-only IVAO/AIRAC diagnostic sample captured at 06:26:32Z, 10 Sep 2026.
+    const sample = '2026-09-10T06:26:32Z'
+    const points = [
+      { identifier: 'OLVUK', type: 'waypoint', coordinates: { lat: 14.657883, lon: 100.211175 } },
+      { identifier: 'UPMUT', type: 'waypoint', coordinates: { lat: 15.011944, lon: 100.093333 } },
+      { identifier: 'ELDAL', type: 'waypoint', coordinates: { lat: 16.351667, lon: 99.644167 } },
+      { identifier: 'NUVLU', type: 'waypoint', coordinates: { lat: 16.696111, lon: 99.527778 } },
+      { identifier: 'BEBUV', type: 'waypoint', coordinates: { lat: 17.453611, lon: 99.270278 } },
+      { identifier: 'MARNI', type: 'waypoint', coordinates: { lat: 18.143372, lon: 99.096975 } },
+    ]
+    const geo: RouteGeometry = { origin: 'VTBD', destination: 'VTCC', cycle: '2609', totalDistance: null, errors: [],
+      segments: points.slice(1).map((p, i) => ({ from: points[i], to: p, distance: 1, cumulativeDistance: i + 1, bearing: null })) }
+    const f = { ...flight(), arrival: 'VTCC', callsign: 'NOK0409', route: 'OLVUK1B OLVUK Y26 MARNI MARNI2A',
+      latitude: 16.027168, longitude: 99.75291, altitude: 34229, groundSpeed: 434, heading: 343, trackTimestamp: sample }
+    const result = estimateRegionalLive(f, model, b738, geo, sample)
+    expect(result.error).toBeUndefined()
+    expect(result.estimate!.pastEntry).toBe(false)
+    expect(result.estimate!.offRouteNm).toBeLessThan(.1)
+    expect(result.estimate!.etaFfMs).toBeGreaterThan(Date.parse(sample))
+    expect(result.estimate!.tldtMs - result.estimate!.etaFfMs!).toBeCloseTo(model.nominalSeconds * 1000, 0)
   })
 })

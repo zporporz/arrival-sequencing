@@ -188,11 +188,13 @@ export function readOperationalConfig(serviceDate = new Date().toISOString().sli
   return apiGet<OperationalConfigPayload>(`/api/sequence/operational-config?${params.toString()}`)
 }
 
-export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string, signal?: AbortSignal) {
+export type RouteGeometryOptions = { departureRunway?: string; arrivalRunway?: string; cycle?: string; entryFix?: string }
+export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string, signal?: AbortSignal, options: RouteGeometryOptions = {}) {
   return apiPost<TGeometry>('/api/sequence/route-geometry', {
     origin: origin.trim().toUpperCase(),
     destination: destination.trim().toUpperCase(),
     route: route.trim().toUpperCase(),
+    ...options,
   }, signal)
 }
 

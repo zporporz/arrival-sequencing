@@ -356,12 +356,18 @@ function routeKey(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
   return `${flight.departure}|${airport}|${flight.route}`
 }
 
-function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
-  const key = routeKey(flight, airport)
-  if (!key || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
+function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode, entryFix: string) {
+  const baseKey = routeKey(flight, airport)
+  if (!baseKey || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
+  const key = `${baseKey}|${entryFix}`
   const existing = routeGeometryCache.get(key)
   if (existing) return existing
-  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route).catch(() => { routeGeometryCache.delete(key); return null })
+  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route, undefined, { entryFix })
+    .then((geometry) => {
+      const usable = geometry.entryRoute || (geometry.errors.length ? null : geometry)
+      if (!usable) routeGeometryCache.delete(key)
+      return usable
+    }).catch(() => { routeGeometryCache.delete(key); return null })
   routeGeometryCache.set(key, request)
   return request
 }
@@ -1152,7 +1158,7 @@ export default function App() {
               : nominalStarSeconds(airport, match.entryFix)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const [geometry, performancePayload] = await Promise.all([
-              resolveRouteGeometry(flight, airport),
+              resolveRouteGeometry(flight, airport, match.entryFix),
               flight.aircraft ? readAircraftPerformance(flight.aircraft).catch(() => null) : Promise.resolve(null),
             ])
             const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)

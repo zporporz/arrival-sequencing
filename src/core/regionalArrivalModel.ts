@@ -49,16 +49,25 @@ export function resolveRegionalStar(airport: RegionalAirport, runway: string, ro
   const ordered = (route || '').toUpperCase().split(/\s+/).map((t) => t.split('/')[0])
   const tokens = new Set(ordered)
   const stars = airport.procedures.filter((p) => p.kind === 'STAR' && p.runway === runway)
-  const exact = stars.filter((p) => {
-    const suffix = p.name.match(/\d[A-Z]$/)?.[0]
-    return tokens.has(p.name) || Boolean(suffix && tokens.has(`${p.legs[0]?.fix}${suffix}`))
-  })
+  const aliases = (p: NavProcedure) => {
+    const suffix = p.name.match(/\d{1,2}[A-Z]?$/)?.[0]
+    const names = new Set([p.name])
+    if (suffix) {
+      const stem = p.name.slice(0, -suffix.length)
+      for (const fix of [p.legs[0]?.fix, ...p.transitions.map((t) => t.legs[0]?.fix)]) {
+        if (!fix?.startsWith(stem)) continue
+        names.add(`${fix}${suffix}`)
+        if (stem === fix) names.add(`${fix.slice(0, 6 - suffix.length)}${suffix}`)
+      }
+    }
+    return [...names]
+  }
+  const filed = (p: NavProcedure) => aliases(p).some((name) => tokens.has(name))
+  const exact = stars.filter(filed)
   if (exact.length === 1) return exact[0]
   if (exact.length > 1) return null
   // Never silently replace an explicitly filed STAR with another runway's variant.
-  if (airport.procedures.some((p) => p.kind === 'STAR' && (
-    tokens.has(p.name) || tokens.has(`${p.legs[0]?.fix}${p.name.match(/\d[A-Z]$/)?.[0] || ''}`)
-  ))) return null
+  if (airport.procedures.some((p) => p.kind === 'STAR' && filed(p))) return null
   const byEntry = stars.filter((p) => p.legs[0]?.fix && tokens.has(p.legs[0].fix))
   if (byEntry.length === 1 && ordered.slice(ordered.lastIndexOf(byEntry[0].legs[0].fix!) + 1)
     .some((token) => /^[A-Z]{3,5}\d[A-Z]$/.test(token))) return null
