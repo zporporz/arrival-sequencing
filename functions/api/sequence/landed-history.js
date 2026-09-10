@@ -1,6 +1,8 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
 
 const AIRPORT_REFERENCE = {
+  VTCC: { lat: 18.771389, lon: 98.962776 },
+  VTSP: { lat: 8.1125, lon: 98.309166 },
   VTBD: { lat: 13.9126, lon: 100.6068 },
   VTBS: { lat: 13.6811, lon: 100.7473 },
 };
@@ -181,7 +183,7 @@ export async function onRequestGet(context) {
   try {
     const url = new URL(context.request.url);
     const airport = cleanAirport(url.searchParams.get('airport'));
-    if (!airport) return json({ error: 'VTBD or VTBS airport is required' }, 400);
+    if (!airport) return json({ error: 'Supported AMAN airport is required' }, 400);
 
     await captureCurrentLanded(context.env, airport);
     const cutoff = new Date(Date.now() - MAX_HISTORY_MINUTES * 60_000).toISOString();

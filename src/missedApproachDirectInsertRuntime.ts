@@ -1,4 +1,4 @@
-type AirportCode = 'VTBD' | 'VTBS'
+type AirportCode = 'VTBD' | 'VTBS' | 'VTCC' | 'VTSP'
 
 type ActiveIdentity = {
   airport: AirportCode
@@ -33,10 +33,12 @@ const LANDED_GA_MIN_CLIMB_FPM = 200
 const AIRPORT_REFERENCE: Record<AirportCode, { lat: number; lon: number }> = {
   VTBD: { lat: 13.9126, lon: 100.6068 },
   VTBS: { lat: 13.6811, lon: 100.7473 },
+  VTCC: { lat: 18.771389, lon: 98.962776 }, VTSP: { lat: 8.1125, lon: 98.309166 },
 }
 const AIRPORT_RUNWAYS: Record<AirportCode, ReadonlySet<string>> = {
   VTBD: new Set(['21R', '21L']),
   VTBS: new Set(['19', '20L', '20R']),
+  VTCC: new Set(['18', '36']), VTSP: new Set(['09', '27']),
 }
 
 function showMessage(text: string) {
@@ -97,7 +99,7 @@ async function dismissLanded(airport: AirportCode, callsign: string) {
 function activeMenuIdentity(menu: HTMLElement): ActiveIdentity | null {
   const callsign = menu.querySelector('header strong')?.textContent?.trim().toUpperCase() || ''
   const meta = menu.querySelector('header span')?.textContent?.trim().toUpperCase() || ''
-  const airport = meta.match(/\b(VTBD|VTBS)\b/)?.[1] as AirportCode | undefined
+  const airport = meta.match(/\b(VTBD|VTBS|VTCC|VTSP)\b/)?.[1] as AirportCode | undefined
   const runway = meta.match(/\bRWY\s+([0-9A-Z]+)/)?.[1] || null
   return airport && callsign && runway ? { airport, callsign, runway } : null
 }
@@ -105,7 +107,7 @@ function activeMenuIdentity(menu: HTMLElement): ActiveIdentity | null {
 function landedMenuIdentity(menu: HTMLElement) {
   const callsign = menu.querySelector('header strong')?.textContent?.trim().toUpperCase() || ''
   const meta = menu.querySelector('header span')?.textContent?.trim().toUpperCase() || ''
-  const airport = meta.match(/\b(VTBD|VTBS)\b/)?.[1] as AirportCode | undefined
+  const airport = meta.match(/\b(VTBD|VTBS|VTCC|VTSP)\b/)?.[1] as AirportCode | undefined
   if (!airport || !callsign) return null
 
   const row = Array.from(document.querySelectorAll<HTMLElement>('.aman-landed-history-row')).find((candidate) => {

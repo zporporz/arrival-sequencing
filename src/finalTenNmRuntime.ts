@@ -1,3 +1,11 @@
+import { selectedAmanAirports } from './core/airports'
+import { regionalFinalGeometry } from '../functions/_lib/regionalGeometry'
+import type { RegionalAirport } from './core/regionalArrivalModel'
+
+export function registerRegionalFinalGeometry(airport: RegionalAirport) {
+  Object.assign(RUNWAYS, regionalFinalGeometry(airport))
+}
+
 type LiveFlight = {
   callsign: string
   latitude: number | null
@@ -40,7 +48,6 @@ const RUNWAYS: Record<string, RunwayGeometry> = {
 
 // Every airport represented by runway geometry is refreshed independently.
 // Adding another airport's runways automatically adds its own traffic health scope.
-const AIRPORTS = [...new Set(Object.keys(RUNWAYS).map((key) => key.split(':')[0]).filter(Boolean))]
 
 const latestFlights = new Map<string, LiveFlight>()
 const airportAvailability = new Map<string, boolean>()
@@ -77,9 +84,7 @@ function initialBearing(lat1: number, lon1: number, lat2: number, lon2: number) 
 
 function rowAirport(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
-  if (title.includes('VTBS RWY')) return 'VTBS'
-  if (title.includes('VTBD RWY')) return 'VTBD'
-  return ''
+  return title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
 }
 
 function rowCallsign(row: HTMLElement) {
@@ -90,7 +95,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|18|36|09|27)/)?.[1] || ''
 }
 
 function trackFresh(flight: LiveFlight, nowMs = Date.now()) {
@@ -189,7 +194,7 @@ export function installFinalTenNmRuntime() {
   let disposed = false
 
   const refresh = async () => {
-    await Promise.allSettled(AIRPORTS.map(async (airport) => {
+    await Promise.allSettled(selectedAmanAirports().map(async (airport) => {
       try {
         await refreshAirport(airport)
         airportAvailability.set(airport, true)
@@ -202,11 +207,13 @@ export function installFinalTenNmRuntime() {
   }
 
   void refresh()
+  window.addEventListener('aman:airport-selection-change', refresh)
   const fetchTimer = window.setInterval(() => void refresh(), FETCH_MS)
   const applyTimer = window.setInterval(applyToRows, APPLY_MS)
 
   return () => {
     disposed = true
+    window.removeEventListener('aman:airport-selection-change', refresh)
     window.clearInterval(fetchTimer)
     window.clearInterval(applyTimer)
     latestFlights.clear()

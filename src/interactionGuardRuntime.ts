@@ -30,7 +30,7 @@ function reactProps<T>(element: Element): T | null {
 function rowIdentity(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   return airport && callsign ? { airport, callsign, key: `${airport}:${callsign}` } : null
 }
 

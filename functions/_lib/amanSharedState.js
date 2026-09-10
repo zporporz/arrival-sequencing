@@ -1,3 +1,5 @@
+import regionalNav from '../_data/regional-arrivals.json';
+import { regionalFinalGeometry } from './regionalGeometry.js';
 import { supabaseAdminRequest } from './supabaseAdmin.js';
 
 export const AMAN_GHOST_RETENTION_MS = 30 * 60 * 1000;
@@ -13,11 +15,13 @@ const TERMINAL_STATES = new Set([
 ]);
 
 const AIRPORT_REFERENCE = {
+  ...Object.fromEntries(Object.entries(regionalNav.airports).map(([code, airport]) => [code, { lat: airport.lat, lon: airport.lon }])),
   VTBD: { lat: 13.9126, lon: 100.6068 },
   VTBS: { lat: 13.6811, lon: 100.7473 },
 };
 
 const RUNWAY_FINAL_GEOMETRY = {
+  ...Object.assign({}, ...Object.values(regionalNav.airports).map(regionalFinalGeometry)),
   'VTBD:21R': { lat: 13 + 55 / 60 + 34.87 / 3600, lon: 100 + 36 / 60 + 44.62 / 3600, course: 209 },
   'VTBD:21L': { lat: 13 + 55 / 60 + 28.33 / 3600, lon: 100 + 36 / 60 + 55.97 / 3600, course: 208 },
   'VTBS:19': { lat: 13 + 41 / 60 + 30.17 / 3600, lon: 100 + 45 / 60 + 39.72 / 3600, course: 194.42 },

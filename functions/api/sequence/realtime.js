@@ -12,7 +12,7 @@ export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const airport = String(url.searchParams.get('airport') || '').trim().toUpperCase();
   const serviceDate = String(url.searchParams.get('serviceDate') || '').trim();
-  if (!/^(VTBD|VTBS)$/.test(airport) || !/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+  if (!/^(VTBD|VTBS|VTCC|VTSP)$/.test(airport) || !/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
     return json({ error: 'Valid serviceDate and airport are required' }, 400);
   }
 

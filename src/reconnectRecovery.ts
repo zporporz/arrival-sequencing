@@ -128,7 +128,7 @@ function decorateRecoveryRows() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
     const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
     const title = row.getAttribute('title') || ''
-    const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+    const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
     const status = airport && callsign ? byKey.get(statusKey(airport, callsign)) : undefined
 
     if (!status || status.phase === 'LIVE') {
@@ -143,7 +143,7 @@ function decorateRecoveryRows() {
   document.querySelectorAll<HTMLElement>('.aman-inbound-row').forEach((row) => {
     const callsignElement = row.querySelector<HTMLElement>('strong')
     const airportText = row.querySelector<HTMLElement>('.apt')?.textContent?.trim().toUpperCase() || ''
-    const airport = airportText === 'BS' ? 'VTBS' : airportText === 'BD' ? 'VTBD' : ''
+    const airport = ['BD','BS','CC','SP'].includes(airportText || '') ? `VT${airportText}` : ''
     const callsign = callsignElement?.textContent?.trim().toUpperCase() || ''
     const status = airport && callsign ? byKey.get(statusKey(airport, callsign)) : undefined
     if (!callsignElement || !status || status.phase === 'LIVE') {

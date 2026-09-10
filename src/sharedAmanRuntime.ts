@@ -120,7 +120,7 @@ const SHARED_STATE_EVENT = 'aman:shared-state'
 const SHARED_HEALTH_EVENT = 'aman:shared-state-health'
 const PX_PER_MINUTE = 10
 const POINTER_ID = 70421
-const AIRPORTS = ['VTBD', 'VTBS'] as const
+const AIRPORTS = ['VTBD', 'VTBS', 'VTCC', 'VTSP'] as const
 
 function utcServiceDate() {
   return new Date().toISOString().slice(0, 10)
@@ -150,7 +150,7 @@ function invokeReactChange(element: HTMLInputElement | HTMLSelectElement, value:
 function rowIdentity(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   return airport && callsign ? { airport, callsign, key: flightKey(airport, callsign) } : null
 }
 
@@ -180,7 +180,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|18|36|09|27)/)?.[1] || ''
 }
 
 function fakePointer(clientY: number): FakePointerEvent {
@@ -218,7 +218,7 @@ function clearTargetThroughReact(row: HTMLElement) {
 
 function airportFromConfigBlock(block: HTMLElement) {
   const label = block.querySelector<HTMLElement>('.aman-profile-select > span')?.textContent?.trim().toUpperCase() || ''
-  return label.match(/^(VTBD|VTBS)\s+CONFIG$/)?.[1] || ''
+  return label.match(/^(VTBD|VTBS|VTCC|VTSP)\s+CONFIG$/)?.[1] || ''
 }
 
 function findConfigBlock(airport: string) {
@@ -242,7 +242,8 @@ function readWorkspaceFromDom(airport: string) {
     if (Number.isFinite(spacing) && spacing > 0) spacingNm[runway] = spacing
   })
 
-  return { airport, profileId, runwayModes, spacingNm }
+  const approachName = block.querySelector<HTMLSelectElement>('[data-regional-approach]')?.value
+  return { airport, profileId, runwayModes, spacingNm, approachName }
 }
 
 function setSharedHealth(status: 'CONNECTING' | 'LIVE' | 'ERROR', detail = '') {
@@ -362,6 +363,12 @@ export function installSharedAmanRuntime() {
         invokeReactChange(spacingInput, String(remoteSpacing))
       }
     })
+    const approach = block.querySelector<HTMLSelectElement>('[data-regional-approach]')
+    const remoteApproach = state.settings?.approachName
+    if (approach && typeof remoteApproach === 'string') {
+      if (![...approach.options].some(option => option.value === remoteApproach)) return
+      if (approach.value !== remoteApproach) invokeReactChange(approach, remoteApproach)
+    }
     block.dataset.sharedRevision = String(state.revision)
     block.title = `Shared config · ${state.updated_by_name || state.updated_by_vid || 'IVAO'} · revision ${state.revision}`
   }
@@ -464,9 +471,8 @@ export function installSharedAmanRuntime() {
         profileId: current.profileId,
         runwayModes: current.runwayModes,
         spacingNm: current.spacingNm,
-        settings: workspaceStates.get(airport)?.settings || {
-          holdingThresholdMinutes: 5,
-          speedAdvisoryEnabled: true,
+        settings: { ...(workspaceStates.get(airport)?.settings || { holdingThresholdMinutes: 5, speedAdvisoryEnabled: true }),
+          ...(current.approachName ? { approachName: current.approachName } : {}),
         },
       })
       mergeWorkspace(result.workspaceState)
@@ -572,7 +578,7 @@ export function installSharedAmanRuntime() {
 
   const onWorkspaceConfigChange = (event: Event) => {
     const airport = String((event as CustomEvent<{ airport?: string }>).detail?.airport || '').trim().toUpperCase()
-    if (airport === 'VTBD' || airport === 'VTBS') queueWorkspaceSave(airport)
+    if (['VTBD', 'VTBS', 'VTCC', 'VTSP'].includes(airport)) queueWorkspaceSave(airport)
   }
 
   const onPointerDown = (event: PointerEvent) => {

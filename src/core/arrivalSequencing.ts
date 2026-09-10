@@ -1,3 +1,4 @@
+import { airportFromId } from './airports'
 import { classifyAmanDelay, nmToMinutesAtReferenceSpeed, type AmanDelayAction } from './amanConstants'
 import { cachedAircraftPerformanceCategory } from './aircraftPerformanceCategory'
 import type { AircraftPerformanceCategory } from './api'
@@ -15,6 +16,17 @@ export type AmanArrivalPrediction = {
   predictedIawpAt: string
   nominalStarSeconds: number
   processingDistanceNm?: number | null
+  regional?: RegionalArrivalState
+}
+
+export type RegionalArrivalState = {
+  modelKey: string
+  callsign: string
+  runway: string
+  estimatedLandingAt: string
+  nominalStarSeconds: number
+  etaFfPassed: boolean
+  stage: 'UNSTABLE' | 'STABLE' | 'SUPERSTABLE'
 }
 
 export type AmanSequenceRow = AmanArrivalPrediction & {
@@ -70,8 +82,7 @@ export function amanSequenceOrderIdentity(airport: string, callsign: string) {
 }
 
 function airportFromPredictionId(id: string) {
-  const upper = id.toUpperCase()
-  return upper.includes('VTBS') ? 'VTBS' : 'VTBD'
+  return airportFromId(id)
 }
 
 export function amanSequenceOrderKey(arrival: Pick<AmanArrivalPrediction, 'id' | 'callsign'>) {
@@ -262,9 +273,10 @@ export function autoSequenceUnstableArrivals(
     const runway = arrival.runway.trim().toUpperCase()
     if (!runway) throw new Error(`Runway is required for ${arrival.callsign}`)
     const normalized = { ...arrival, runway }
-    const bucket = byRunway.get(runway) ?? []
+    const group = `${airportFromPredictionId(arrival.id)}:${runway}`
+    const bucket = byRunway.get(group) ?? []
     bucket.push(normalized)
-    byRunway.set(runway, bucket)
+    byRunway.set(group, bucket)
   }
 
   const rows: AmanSequenceRow[] = []

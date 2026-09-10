@@ -12,7 +12,7 @@ function cleanText(value, max = 120) {
 
 function cleanAirport(value) {
   const airport = cleanText(value, 4).toUpperCase();
-  return /^(VTBD|VTBS)$/.test(airport) ? airport : '';
+  return /^(VTBD|VTBS|VTCC|VTSP)$/.test(airport) ? airport : '';
 }
 
 function cleanIso(value) {
@@ -32,6 +32,31 @@ export function commitRevision(value) {
 export function incomingCommitIsNewer(incoming, current) {
   const incomingRevision = commitRevision(incoming?.revision);
   return incomingRevision > 0 && incomingRevision > commitRevision(current?.revision);
+}
+
+// Regional forecasts lock in the shared room, not in the browser that joined first.
+export function canonicalAutoArrival(item, previous, airport) {
+  const id = cleanText(item?.id, 180), predictedIawpAt = cleanIso(item?.predictedIawpAt);
+  if (!id.startsWith(airport + ':') || !predictedIawpAt) return null;
+  if (!['VTCC', 'VTSP'].includes(airport)) return { id, predictedIawpAt };
+  const r = item.regional;
+  const seconds = Number(r?.nominalStarSeconds);
+  const modelKey = cleanText(r?.modelKey, 300), callsign = cleanText(r?.callsign, 20).toUpperCase();
+  const runway = cleanText(r?.runway, 3);
+  if (!modelKey || !callsign || !Number.isFinite(seconds) || seconds <= 0 || seconds > 14400
+      || !(airport === 'VTCC' ? ['18', '36'] : ['09', '27']).includes(runway)
+      || !['UNSTABLE', 'STABLE', 'SUPERSTABLE'].includes(r?.stage)) return null;
+  const old = previous?.id === id && previous.regional?.modelKey === modelKey ? previous : null;
+  const locked = old && old.regional.stage !== 'UNSTABLE';
+  const anchor = locked ? old.predictedIawpAt : predictedIawpAt;
+  const nominal = locked ? old.regional.nominalStarSeconds : seconds;
+  const past = r.etaFfPassed === true || Boolean(locked && old.regional.etaFfPassed);
+  const stage = past || r.stage === 'SUPERSTABLE' || old?.regional.stage === 'SUPERSTABLE'
+    ? 'SUPERSTABLE' : locked ? 'STABLE' : r.stage;
+  return { id, predictedIawpAt: anchor, regional: {
+    modelKey, callsign, runway, nominalStarSeconds: nominal, etaFfPassed: past, stage,
+    estimatedLandingAt: new Date(Date.parse(anchor) + nominal * 1000).toISOString(),
+  } };
 }
 
 export class AmanRealtimeRoom {
@@ -73,6 +98,17 @@ export class AmanRealtimeRoom {
     const current = await this.ctx.storage.get(key);
     if (!incomingCommitIsNewer(state, current)) return;
     await this.ctx.storage.put(key, state);
+    if (flight && state.target_mode === 'MANUAL' && ['VTCC', 'VTSP'].includes(state.airport)) {
+      const snapshot = await this.ctx.storage.get('autoSnapshot');
+      if (snapshot?.arrivals?.some(item => item.regional?.callsign === identity && item.regional.stage === 'UNSTABLE')) {
+        snapshot.arrivals = snapshot.arrivals.map(item => item.regional?.callsign === identity
+          ? { ...item, regional: { ...item.regional, stage: item.regional.stage === 'SUPERSTABLE' ? 'SUPERSTABLE' : 'STABLE' } } : item);
+        snapshot.revision = Number(snapshot.revision || 0) + 1;
+        snapshot.updatedAt = new Date().toISOString();
+        await this.ctx.storage.put('autoSnapshot', snapshot);
+        this.broadcast({ type: 'auto_snapshot', airport: state.airport, ...snapshot });
+      }
+    }
     let previewId = '';
     if (flight) {
       const pending = await this.ctx.storage.get(this.pendingReleaseKey(identity));
@@ -334,11 +370,10 @@ export class AmanRealtimeRoom {
 
     if (payload?.type === 'auto_snapshot') {
       if (meta.clientId !== this.leaderId() || !Array.isArray(payload.arrivals)) return;
-      const arrivals = payload.arrivals.slice(0, MAX_AUTO_ROWS).map((item) => ({
-        id: cleanText(item?.id, 180),
-        predictedIawpAt: cleanIso(item?.predictedIawpAt),
-      })).filter((item) => item.id && item.predictedIawpAt);
       const previous = await this.ctx.storage.get('autoSnapshot');
+      const previousById = new Map((previous?.arrivals || []).map(item => [item.id, item]));
+      const arrivals = payload.arrivals.slice(0, MAX_AUTO_ROWS)
+        .map(item => canonicalAutoArrival(item, previousById.get(item?.id), meta.airport)).filter(Boolean);
       const snapshot = {
         revision: Number(previous?.revision || 0) + 1,
         updatedAt: new Date().toISOString(),

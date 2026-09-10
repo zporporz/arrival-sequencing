@@ -29,6 +29,7 @@ import './maestroOpsMenuRuntime.css'
 import './landedHistoryRuntime.css'
 import './staffNavdataLinkRuntime.css'
 import './responsiveOperational.css'
+import './airportSelection.css'
 import AuthGate, { useAuthUser } from './AuthGate'
 import App from './AppMaestroV24'
 import { installTimelineScrollableRuntime } from './timelineScrollableRuntime'
@@ -50,7 +51,6 @@ import { installTimelineDisplayScaleRuntime } from './timelineDisplayScaleRuntim
 import { installMonitoredTimelineRuntime } from './monitoredTimelineRuntime'
 import { installMaestroOpsMenuRuntime } from './maestroOpsMenuRuntime'
 import { installLandedHistoryRuntime } from './landedHistoryRuntime'
-import { installVtbdCapacityRuntime } from './vtbdCapacityRuntime'
 import { installStaffNavdataLinkRuntime } from './staffNavdataLinkRuntime'
 import { installMissedApproachDirectInsertRuntime } from './missedApproachDirectInsertRuntime'
 import { installRealtimeAmanRuntime } from './realtimeAmanRuntime'
@@ -91,7 +91,6 @@ function AppWithRuntime() {
     const removeMonitoredTimelineRuntime = installMonitoredTimelineRuntime()
     const removeMaestroOpsMenuRuntime = installMaestroOpsMenuRuntime()
     const removeLandedHistoryRuntime = installLandedHistoryRuntime()
-    const removeVtbdCapacityRuntime = installVtbdCapacityRuntime()
     const removeStaffNavdataLinkRuntime = user.isThailandStaff
       ? installStaffNavdataLinkRuntime()
       : () => {}
@@ -117,7 +116,6 @@ function AppWithRuntime() {
       removeMonitoredTimelineRuntime()
       removeMaestroOpsMenuRuntime()
       removeLandedHistoryRuntime()
-      removeVtbdCapacityRuntime()
       removeStaffNavdataLinkRuntime()
       removeOperationalAdvisoryRuntime()
       removeTimelineReadableRuntime()

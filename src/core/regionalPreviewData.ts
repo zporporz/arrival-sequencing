@@ -38,11 +38,11 @@ export type RegionalSnapshot = {
   routeErrors?: Record<string, string>
 }
 export const readRegionalNav = (airport: string) => timed((signal) => apiGet<RegionalNavPayload>(`/api/sequence/regional-navdata?airport=${encodeURIComponent(airport)}`, signal))
-export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: string): Promise<RegionalSnapshot> {
+export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: string, operational = false): Promise<RegionalSnapshot> {
   // Re-check active cycle on every refresh; an open tab must stop using stale data.
   const current = await readRegionalNav(nav.airport.code)
   if (current.cycle !== nav.cycle) throw new Error('Active AIRAC changed — refresh regional navdata')
-  const traffic = await timed((signal) => readIvaoTraffic(nav.airport.code, 'regional-preview', signal))
+  const traffic = await timed((signal) => readIvaoTraffic(nav.airport.code, operational ? undefined : 'regional-preview', signal))
   const output: RegionalSnapshot = { traffic, profiles: {}, routes: {}, routeErrors: {} }
   const flights = traffic.flights || []
   let next = 0

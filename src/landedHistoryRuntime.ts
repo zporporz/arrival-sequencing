@@ -1,6 +1,6 @@
 import { TIMELINE_DISPLAY_PX_PER_MINUTE, TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
 
-type AirportCode = 'VTBD' | 'VTBS'
+import { displaySidesFromDom, isAmanAirport, type AirportCode } from './core/airports'
 type DisplaySide = 'LEFT' | 'RIGHT'
 type LandedRecord = {
   airport: AirportCode
@@ -32,7 +32,6 @@ type ReactRowProps = {
   onPointerUp?: (event: FakePointerEvent) => void
 }
 
-const STORAGE_KEY = 'aman-airport-display-sides-v1'
 const LIVE_POLL_MS = 15_000
 const RENDER_MS = 1_000
 const LANDED_MENU_CLASS = 'aman-landed-stage-menu'
@@ -102,7 +101,7 @@ function testTrafficEnabled() {
 function selectedAirports(): AirportCode[] {
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.aman-airport-scope-picker input[type="checkbox"]:checked'))
     .map((input) => input.value.trim().toUpperCase())
-    .filter((value): value is AirportCode => value === 'VTBD' || value === 'VTBS')
+    .filter((value): value is AirportCode => isAmanAirport(value))
   if (checked.length) return checked
   return ['VTBD']
 }
@@ -112,18 +111,6 @@ function historyMinutes() {
   return Number.isFinite(value) ? value : 10
 }
 
-function readDisplaySides() {
-  const fallback: Record<AirportCode, DisplaySide> = { VTBD: 'LEFT', VTBS: 'RIGHT' }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}') as Partial<Record<AirportCode, DisplaySide>>
-    return {
-      VTBD: parsed.VTBD === 'RIGHT' ? 'RIGHT' : 'LEFT',
-      VTBS: parsed.VTBS === 'LEFT' ? 'LEFT' : 'RIGHT',
-    } satisfies Record<AirportCode, DisplaySide>
-  } catch {
-    return fallback
-  }
-}
 
 function formatHm(value: string) {
   const date = new Date(value)
@@ -145,9 +132,7 @@ function parseClockNearNow(value: string, nowMs: number) {
 
 function testRowAirport(row: HTMLElement): AirportCode | null {
   const title = row.getAttribute('title') || ''
-  if (title.includes('VTBD RWY')) return 'VTBD'
-  if (title.includes('VTBS RWY')) return 'VTBS'
-  return null
+  return title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] as AirportCode || null
 }
 
 function testRowTldtMs(row: HTMLElement, nowMs: number) {
@@ -437,7 +422,7 @@ export function installLandedHistoryRuntime() {
     const layer = document.querySelector<HTMLElement>('.aman-flight-layer')
     if (!layer) return
     const cutoffMs = nowMs - historyMinutes() * 60_000
-    const sides = readDisplaySides()
+    const sides = displaySidesFromDom()
     const visible = currentRecords().filter((record) => {
       const landedMs = new Date(record.landed_at).getTime()
       return Number.isFinite(landedMs) && landedMs >= cutoffMs && landedMs <= nowMs

@@ -110,7 +110,7 @@ function fakePointer(clientY: number, pointerId = POINTER_ID, row: HTMLElement |
 function rowIdentity(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   if (!airport || !callsign) return null
   return { airport, callsign, identity: amanSequenceOrderIdentity(airport, callsign) }
 }

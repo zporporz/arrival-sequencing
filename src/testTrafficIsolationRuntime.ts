@@ -35,7 +35,7 @@ function demoFlightRows() {
 
 function demoIdentity(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   return airport && callsign ? `${airport}:${callsign}` : ''
 }
@@ -46,7 +46,7 @@ function demoIdentitySet() {
 
 function configAirport(block: HTMLElement) {
   const label = block.querySelector<HTMLElement>('.aman-profile-select > span')?.textContent?.trim().toUpperCase() || ''
-  return label.match(/^(VTBD|VTBS)\s+CONFIG$/)?.[1] || ''
+  return label.match(/^(VTBD|VTBS|VTCC|VTSP)\s+CONFIG$/)?.[1] || ''
 }
 
 function protectDemoStateFromSharedApply(detail: SharedStateDetail | undefined) {

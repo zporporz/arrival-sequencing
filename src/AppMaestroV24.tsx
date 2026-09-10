@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
+import AirportSelector from './AirportSelector'
+import { AMAN_AIRPORTS, AIRPORT_REFERENCE, DEFAULT_AIRPORT_VIEW, airportFromId, isAmanAirport, isRegionalAirport, type AirportCode, type AirportView } from './core/airports'
+import { registerRegionalFinalGeometry } from './finalTenNmRuntime'
+import { readRegionalNav, readRegionalSnapshot } from './core/regionalPreviewData'
+import type { RegionalNavPayload } from './core/regionalArrivalModel'
+import { regionalPrediction, retainRegionalLock } from './core/regionalAmanAdapter'
 import ivaoThailandLogo from './assets/ivao-thailand-logo.png'
 import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
@@ -37,8 +43,7 @@ import {
 } from './core/arrivalSequencing'
 import { TIMELINE_FUTURE_HORIZON_MINUTES } from './timelineScale'
 
-type AirportCode = 'VTBD' | 'VTBS'
-type AirportScope = AirportCode | 'BOTH'
+type AirportScope = string
 type RunwayMode = 'ARR' | 'DEP' | 'MIX' | 'CLOSED'
 type OperationalState = 'NORMAL' | 'MISSED_APPROACH' | 'DESEQUENCED' | 'REMOVED'
 type PlanningState = 'BOARDING' | 'DEPARTING' | 'TAKEOFF_EST' | 'SEQUENCED' | 'MONITORED' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
@@ -124,14 +129,18 @@ type OpsMenuState = {
 const RUNWAYS: Record<AirportCode, readonly string[]> = {
   VTBD: ['21R', '21L'],
   VTBS: ['19', '20L', '20R'],
+  VTCC: ['18', '36'], VTSP: ['09', '27'],
 }
 
 const ENTRY_FIXES: Record<AirportCode, readonly string[]> = {
   VTBD: ['WEHHA', 'NAKON', 'ENDUU', 'SEHNA', 'SABAI'],
   VTBS: ['WILLA', 'NORTA', 'EASTE', 'TUMGA', 'LEBIM'],
+  VTCC: [], VTSP: [],
 }
 
 const RUNWAY_PROFILES: Record<AirportCode, readonly RunwayProfile[]> = {
+  VTCC: [{ id: 'RWY 18', modes: { '18': 'ARR', '36': 'CLOSED' } }, { id: 'RWY 36', modes: { '18': 'CLOSED', '36': 'ARR' } }],
+  VTSP: [{ id: 'RWY 09', modes: { '09': 'ARR', '27': 'CLOSED' } }, { id: 'RWY 27', modes: { '09': 'CLOSED', '27': 'ARR' } }],
   VTBD: [
     { id: 'DUAL_21RARR_21LARR', modes: { '21R': 'ARR', '21L': 'ARR' } },
     { id: '21RARR_21LDEP', modes: { '21R': 'ARR', '21L': 'DEP' } },
@@ -146,21 +155,25 @@ const RUNWAY_PROFILES: Record<AirportCode, readonly RunwayProfile[]> = {
 }
 
 const DEFAULT_PROFILE: Record<AirportCode, string> = {
+  VTCC: 'RWY 18', VTSP: 'RWY 27',
   VTBD: 'DUAL_21RARR_21LARR',
   VTBS: 'SEMI35_19MIX_20LDEP_20RARR',
 }
 
 const RUNTIME_MASTER_FLOW: Record<AirportCode, string> = {
+  VTCC: '18', VTSP: '27',
   VTBD: '21',
   VTBS: '19_20',
 }
 
 const DEFAULT_RUNWAY_MODES: Record<AirportCode, Record<string, RunwayMode>> = {
+  VTCC: { '18': 'ARR', '36': 'CLOSED' }, VTSP: { '09': 'CLOSED', '27': 'ARR' },
   VTBD: { '21R': 'ARR', '21L': 'ARR' },
   VTBS: { '19': 'MIX', '20L': 'DEP', '20R': 'ARR' },
 }
 
 const DEFAULT_SPACING_NM: Record<string, number> = {
+  'VTCC:18': 5, 'VTCC:36': 5, 'VTSP:09': 5, 'VTSP:27': 5,
   'VTBD:21R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21R'],
   'VTBD:21L': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21L'],
   'VTBS:19': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['19'],
@@ -177,6 +190,15 @@ export function resetAirportSpacing(current: Record<string, number>, airport: Ai
 }
 
 const DEMO_SPECS: Record<AirportCode, readonly DemoSpec[]> = {
+  // Synthetic queue exercises only; these are not operational timing profiles.
+  VTCC: [
+    { callsign: 'TESTCC1', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'ADLUS', naturalLandingOffsetMinutes: 18 },
+    { callsign: 'TESTCC2', aircraftType: 'B738', wakeTurbulence: 'M', refFix: 'ADLUS', naturalLandingOffsetMinutes: 19 },
+  ],
+  VTSP: [
+    { callsign: 'TESTSP1', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'ANPUB', naturalLandingOffsetMinutes: 20 },
+    { callsign: 'TESTSP2', aircraftType: 'B738', wakeTurbulence: 'M', refFix: 'ANPUB', naturalLandingOffsetMinutes: 21 },
+  ],
   VTBD: [
     { callsign: 'THA101', aircraftType: 'A320', wakeTurbulence: 'M', refFix: 'WEHHA', naturalLandingOffsetMinutes: 8 },
     { callsign: 'AIQ202', aircraftType: 'A321', wakeTurbulence: 'M', refFix: 'NAKON', naturalLandingOffsetMinutes: 8.5 },
@@ -210,7 +232,7 @@ const VTBD_21L_CALLSIGN_PREFIXES = ['LKY', 'RTN', 'WHK', 'RTAF', 'VMS'] as const
 const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function scopeAirports(scope: AirportScope): AirportCode[] {
-  return scope === 'BOTH' ? ['VTBD', 'VTBS'] : [scope]
+  return scope === 'BOTH' ? ['VTBD', 'VTBS'] : scope.split(',').filter(isAmanAirport)
 }
 
 function spacingKey(airport: AirportCode, runway: string) {
@@ -222,7 +244,7 @@ function flightKey(airport: string, callsign: string) {
 }
 
 function rowAirport(id: string): AirportCode {
-  return id.toUpperCase().includes('VTBS') ? 'VTBS' : 'VTBD'
+  return airportFromId(id)
 }
 
 function normalizedFlightState(flight: IvaoArrivalTrafficFlight) {
@@ -308,7 +330,7 @@ function nominalStarSeconds(airport: AirportCode, fix: string) {
 }
 
 function masterTimingLookup(config: OperationalConfigPayload | null) {
-  const result: Record<AirportCode, Record<string, number>> = { VTBD: {}, VTBS: {} }
+  const result: Record<AirportCode, Record<string, number>> = { VTBD: {}, VTBS: {}, VTCC: {}, VTSP: {} }
   if (!config) return result
   for (const airport of ['VTBD', 'VTBS'] as const) {
     const airportWorkspaces = config.workspaces.filter((item) => item.airport === airport)
@@ -383,12 +405,13 @@ function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
 
 function processingDistanceNm(flight: IvaoArrivalTrafficFlight) {
   if (!Number.isFinite(flight.latitude) || !Number.isFinite(flight.longitude)) return null
-  return distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, Number(flight.latitude), Number(flight.longitude))
+  const reference = isRegionalAirport(flight.arrival) ? AIRPORT_REFERENCE[flight.arrival] : BKK_VOR_COORDINATES
+  return distanceNm(reference.lat, reference.lon, Number(flight.latitude), Number(flight.longitude))
 }
 
 function buildDemoPredictions(airport: AirportCode, anchor: Date, timingLookup: Record<AirportCode, Record<string, number>>, useMaster: boolean) {
   return DEMO_SPECS[airport].flatMap<AmanArrivalPrediction>((spec, index) => {
-    const nominalSeconds = useMaster
+    const nominalSeconds = isRegionalAirport(airport) ? 15 * 60 : useMaster
       ? timingLookup[airport][spec.refFix] ?? null
       : nominalStarSeconds(airport, spec.refFix)
     if (nominalSeconds == null) return []
@@ -632,14 +655,15 @@ export function currentSharedAutoReturnOverrides(
   return { tldtById, floorById, runwayById }
 }
 
-function configuredAirportCapacityPerHour(
+export function configuredAirportCapacityPerHour(
   airport: AirportCode,
   runwayModes: Record<AirportCode, Record<string, RunwayMode>>,
   spacingNm: Record<string, number>,
 ) {
   const configured = activeRunwaysForAirport(airport, runwayModes).reduce((sum, runway) => {
     const spacingMinutes = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5)
-    return sum + (spacingMinutes > 0 ? 60 / spacingMinutes : 0)
+    const rate = spacingMinutes > 0 ? 60 / spacingMinutes : 0
+    return airport === 'VTBD' ? Math.max(sum, rate) : sum + rate
   }, 0)
   const rounded = Math.max(0, Math.floor(configured))
   if (airport === 'VTBS') return Math.min(rounded, AMAN_REFERENCE_AAR_PER_HOUR.VTBS)
@@ -661,14 +685,19 @@ async function postOperationalAction(body: Record<string, unknown>) {
 export default function App() {
   const user = useAuthUser()
   const [now, setNow] = useState(() => new Date())
-  const [airportScope, setAirportScope] = useState<AirportScope>('VTBD')
-  const [runwayModes, setRunwayModes] = useState<Record<AirportCode, Record<string, RunwayMode>>>(() => ({ VTBD: { ...DEFAULT_RUNWAY_MODES.VTBD }, VTBS: { ...DEFAULT_RUNWAY_MODES.VTBS } }))
+  const [airportView, setAirportView] = useState<AirportView>({ ...DEFAULT_AIRPORT_VIEW })
+  const airportScope = Object.values(airportView).filter(Boolean).join(',')
+  const [regionalNav, setRegionalNav] = useState<Partial<Record<AirportCode, RegionalNavPayload>>>({})
+  const [approachByAirport, setApproachByAirport] = useState<Record<string, string>>({
+    'VTCC:18': 'R18', 'VTCC:36': 'I36-Z', 'VTSP:09': 'R09-Y', 'VTSP:27': 'I27',
+  })
+  const [runwayModes, setRunwayModes] = useState<Record<AirportCode, Record<string, RunwayMode>>>(() => Object.fromEntries(AMAN_AIRPORTS.map(code => [code, { ...DEFAULT_RUNWAY_MODES[code] }])) as Record<AirportCode, Record<string, RunwayMode>>)
   const [profileByAirport, setProfileByAirport] = useState<Record<AirportCode, string>>({ ...DEFAULT_PROFILE })
   const [spacingNm, setSpacingNm] = useState<Record<string, number>>({ ...DEFAULT_SPACING_NM })
   const [historyMinutes, setHistoryMinutes] = useState(AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES)
   const [inbound, setInbound] = useState<InboundPreview[]>([])
   const [livePredictions, setLivePredictions] = useState<AmanArrivalPrediction[]>([])
-  const [canonicalEtaById, setCanonicalEtaById] = useState<Record<string, string>>({})
+  const [canonicalEtaById, setCanonicalEtaById] = useState<Record<string, Pick<AmanArrivalPrediction, 'predictedIawpAt' | 'regional'>>>({})
   const [loading, setLoading] = useState(true)
   const [trafficErrorsByAirport, setTrafficErrorsByAirport] = useState<Partial<Record<AirportCode, string>>>({})
   const [operationalConfig, setOperationalConfig] = useState<OperationalConfigPayload | null>(null)
@@ -688,6 +717,10 @@ export default function App() {
   const [mobileInboundOpen, setMobileInboundOpen] = useState(false)
   const [mobileInboundUnread, setMobileInboundUnread] = useState(false)
   const dragRef = useRef<DragState | null>(null)
+  const manualTldtRef = useRef(manualTldt)
+  manualTldtRef.current = manualTldt
+  const latestPredictionState = useRef({ livePredictions, canonicalEtaById })
+  latestPredictionState.current = { livePredictions, canonicalEtaById }
   const previousInboundRef = useRef<{ scope: AirportScope; ids: Set<string> } | null>(null)
 
   const airports = useMemo(() => scopeAirports(airportScope), [airportScope])
@@ -701,7 +734,7 @@ export default function App() {
   const processingNowMs = Math.floor(now.getTime() / 60_000) * 60_000
   const runwaySpacingSeconds = useMemo(() => {
     const result: Record<string, number> = {}
-    for (const airport of ['VTBD', 'VTBS'] as const) {
+    for (const airport of AMAN_AIRPORTS) {
       for (const runway of RUNWAYS[airport]) {
         result[runway] = nmToMinutesAtReferenceSpeed(spacingNm[spacingKey(airport, runway)] ?? 5) * 60
       }
@@ -713,7 +746,7 @@ export default function App() {
     const onCanonicalSnapshot = (event: Event) => {
       const detail = (event as CustomEvent<{
         airport?: string
-        arrivals?: Array<{ id?: string; predictedIawpAt?: string }>
+        arrivals?: Array<{ id?: string; predictedIawpAt?: string; regional?: AmanArrivalPrediction['regional'] }>
       }>).detail
       const airport = String(detail?.airport || '').trim().toUpperCase()
       const arrivals = detail?.arrivals
@@ -723,7 +756,7 @@ export default function App() {
         for (const item of arrivals) {
           const id = String(item.id || '')
           const eta = String(item.predictedIawpAt || '')
-          if (id.startsWith(`${airport}:`) && Number.isFinite(new Date(eta).getTime())) next[id] = eta
+          if (id.startsWith(`${airport}:`) && Number.isFinite(new Date(eta).getTime())) next[id] = { predictedIawpAt: eta, regional: item.regional }
         }
         return next
       })
@@ -733,7 +766,7 @@ export default function App() {
   }, [])
 
   const livePhaseById = useMemo(
-    () => new Map(inbound.map((item) => [item.id, previewGroundPhase(item)])),
+    () => new Map(inbound.map((item) => [item.id, isRegionalAirport(item.airport) && item.flight.onGround === false ? 'AIRBORNE' : previewGroundPhase(item)])),
     [inbound],
   )
 
@@ -742,7 +775,7 @@ export default function App() {
       detail: {
         predictions: livePredictions
           .filter((prediction) => livePhaseById.get(prediction.id) === 'AIRBORNE')
-          .map(({ id, predictedIawpAt }) => ({ id, predictedIawpAt })),
+          .map(({ id, predictedIawpAt, regional }) => ({ id, predictedIawpAt, regional })),
       },
     }))
     publish()
@@ -750,10 +783,19 @@ export default function App() {
     return () => window.removeEventListener('aman:realtime-health', publish)
   }, [livePhaseById, livePredictions])
 
-  const effectiveLivePredictions = useMemo(() => livePredictions.map((prediction) => {
+  const effectiveLivePredictions = useMemo(() => livePredictions.filter(prediction => {
+    if (!prediction.regional) return true
+    const airport = rowAirport(prediction.id), runway = prediction.regional.runway
+    const approach = regionalNav[airport]?.airport.procedures.find(p => p.kind === 'APPROACH'
+      && p.runway === runway && p.name === approachByAirport[`${airport}:${runway}`])
+    return activeRunwaysForAirport(airport, runwayModes).includes(runway)
+      && approach?.id === prediction.regional.modelKey.split('|')[3]
+  }).map((prediction) => {
     const canonical = canonicalEtaById[prediction.id]
-    return canonical ? { ...prediction, predictedIawpAt: canonical } : prediction
-  }), [canonicalEtaById, livePredictions])
+    if (!canonical || (prediction.regional && canonical.regional?.modelKey !== prediction.regional.modelKey)) return prediction
+    return { ...prediction, predictedIawpAt: canonical.predictedIawpAt,
+      ...(canonical.regional ? { regional: canonical.regional, nominalStarSeconds: canonical.regional.nominalStarSeconds } : {}) }
+  }), [canonicalEtaById, livePredictions, regionalNav, runwayModes, approachByAirport])
 
   const sharedAutoReturnOverrides = useMemo(
     () => currentSharedAutoReturnOverrides(effectiveLivePredictions, sharedOperationalFlights, now.getTime()),
@@ -899,8 +941,11 @@ export default function App() {
     [effectiveAutoReturnFloorTldt, gapAfterSecondsById, liveBaseSequence, manualTldt, runwaySpacingSeconds, sharedAutoReturnOverrides.tldtById],
   )
   const activeSequence = demoMode ? demoSequence : liveSequence
-  const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE').length, [inbound])
-  const liveTmaCount = useMemo(() => inbound.filter(({ flight }) => Number.isFinite(flight.latitude) && Number.isFinite(flight.longitude) && distanceNm(BKK_VOR_COORDINATES.lat, BKK_VOR_COORDINATES.lon, flight.latitude as number, flight.longitude as number) <= BANGKOK_TMA_WORKING_RADIUS_NM).length, [inbound])
+  const liveRouteCount = useMemo(() => inbound.filter((item) => item.source === 'LIVE_ROUTE' || (item.source === 'REGIONAL EST' && !item.reason)).length, [inbound])
+  const liveTmaCount = useMemo(() => inbound.filter(({ flight }) => {
+    const distance = processingDistanceNm(flight)
+    return distance != null && distance <= BANGKOK_TMA_WORKING_RADIUS_NM
+  }).length, [inbound])
   const averageDelay = useMemo(() => averageDelayMinutes(activeSequence), [activeSequence])
   const visibleSequence = useMemo(() => {
     const cutoff = now.getTime() - historyMinutes * 60_000
@@ -917,7 +962,7 @@ export default function App() {
   ])) as Record<AirportCode, number>, [airports, runwayModes, spacingNm])
 
   const demandByAirport = useMemo(() => {
-    const result: Record<AirportCode, number> = { VTBD: 0, VTBS: 0 }
+    const result: Record<AirportCode, number> = { VTBD: 0, VTBS: 0, VTCC: 0, VTSP: 0 }
     const start = now.getTime()
     const end = start + 60 * 60_000
     for (const row of activeSequence) {
@@ -933,7 +978,7 @@ export default function App() {
     const airport = rowAirport(row.id)
     return sharedOperationalFlightByKey.get(flightKey(airport, row.callsign))?.missed_approach_active === true
   }).length
-  const capacitySummary = airports.map((airport) => `${airport === 'VTBD' ? 'BD' : 'BS'} ${demandByAirport[airport]}/${capacityByAirport[airport] || '--'}`).join(' · ')
+  const capacitySummary = airports.map((airport) => `${airport.slice(2)} ${demandByAirport[airport]}/${capacityByAirport[airport] || '--'}`).join(' · ')
 
   const separationConflictIds = useMemo(() => {
     const conflicts = new Set<string>()
@@ -1061,10 +1106,14 @@ export default function App() {
     dragRef.current = null
   }
 
-  const setScope = (scope: AirportScope) => {
+  const setView = (view: AirportView) => {
     resetManualState()
-    setAirportScope(scope)
+    setAirportView(view)
+    const selected = Object.values(view).filter(isAmanAirport)
+    setInbound(current => current.filter(item => selected.includes(item.airport)))
+    setLivePredictions(current => current.filter(item => selected.includes(rowAirport(item.id))))
   }
+  useEffect(() => { window.dispatchEvent(new CustomEvent('aman:airport-selection-change')) }, [airportScope])
 
   const applyProfile = (airport: AirportCode, profileId: string) => {
     const profile = RUNWAY_PROFILES[airport].find((item) => item.id === profileId)
@@ -1077,7 +1126,11 @@ export default function App() {
   const setRunwayMode = (airport: AirportCode, runway: string, mode: RunwayMode) => {
     resetManualState()
     setProfileByAirport((current) => ({ ...current, [airport]: 'CUSTOM' }))
-    setRunwayModes((current) => ({ ...current, [airport]: { ...current[airport], [runway]: mode } }))
+    setRunwayModes((current) => ({ ...current, [airport]: {
+      ...current[airport],
+      ...(isRegionalAirport(airport) && isArrivalMode(mode) ? Object.fromEntries(RUNWAYS[airport].map(r => [r, 'CLOSED'])) : {}),
+      [runway]: mode,
+    } }))
   }
 
   const setRunwaySpacing = (airport: AirportCode, runway: string, value: number) => {
@@ -1147,6 +1200,24 @@ export default function App() {
       if (!announceAirport) setLoading(true)
       const results = await Promise.all(targetAirports.map(async (airport) => {
         try {
+          if (isRegionalAirport(airport)) {
+            const nav = await readRegionalNav(airport)
+            if (disposed) return { airport, payload: null, resolved: [], error: null }
+            registerRegionalFinalGeometry(nav.airport)
+            setRegionalNav(current => ({ ...current, [airport]: nav }))
+            const runway = activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]
+            const snapshot = await readRegionalSnapshot(nav, runway, true)
+            const resolved = (snapshot.traffic.flights || []).map(flight => {
+              const value = regionalPrediction(nav, snapshot, runway, approachByAirport[`${airport}:${runway}`], flight,
+                latestPredictionState.current.canonicalEtaById[`${airport}:${flight.sessionId}`]
+                || latestPredictionState.current.livePredictions.find(item => item.id === `${airport}:${flight.sessionId}`))
+              const preview: InboundPreview = { airport, id: `${airport}:${flight.sessionId}`, flight, refFix: value.refFix,
+                predictedIawpAt: value.prediction?.regional?.etaFfPassed ? null : value.prediction?.predictedIawpAt || null,
+                source: 'REGIONAL EST', reason: value.reason, processingDistanceNm: value.distance }
+              return { preview, prediction: value.prediction }
+            })
+            return { airport, payload: snapshot.traffic, resolved, error: null }
+          }
           const payload = await readIvaoTraffic(airport)
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
             const id = `${airport}:${flight.sessionId}`
@@ -1190,7 +1261,11 @@ export default function App() {
 
       setInbound((current) => mergeAirportRefresh(current, previews, targetAirports, (item) => item.airport)
         .sort((a, b) => (a.predictedIawpAt || '9999').localeCompare(b.predictedIawpAt || '9999')))
-      setLivePredictions((current) => mergeAirportRefresh(current, predictions, targetAirports, (item) => rowAirport(item.id)))
+      setLivePredictions((current) => {
+        const old = new Map(current.map(item => [item.id, item]))
+        const next = predictions.map(item => retainRegionalLock(old.get(item.id), item, Boolean(manualTldtRef.current[item.id])))
+        return mergeAirportRefresh(current, next, targetAirports, (item) => rowAirport(item.id))
+      })
       setTrafficErrorsByAirport((current) => {
         const next = { ...current }
         for (const result of results) {
@@ -1229,7 +1304,7 @@ export default function App() {
       window.clearInterval(refresh)
       window.removeEventListener('aman:recompute-airport', onAirportRecompute)
     }
-  }, [airports, operationalConfig, operationalTimings])
+  }, [airports, operationalConfig, operationalTimings, runwayModes, approachByAirport])
 
   useEffect(() => {
     if (!demoMode) return
@@ -1267,7 +1342,7 @@ export default function App() {
     }
     const anchor = new Date()
     anchor.setUTCSeconds(0, 0)
-    setDemoAnchors({ VTBD: anchor, VTBS: anchor })
+    setDemoAnchors({ VTBD: anchor, VTBS: anchor, VTCC: anchor, VTSP: anchor })
     setDemoMode(true)
   }
 
@@ -1309,6 +1384,7 @@ export default function App() {
     dragRef.current = null
     setDraggingId(null)
     if (!drag.moved) return
+    if (row.regional) setLivePredictions(current => current.map(item => item.id === row.id ? retainRegionalLock(row, item, true) : item))
     setStableIds((current) => ({ ...current, [row.id]: true }))
   }
 
@@ -1403,12 +1479,12 @@ export default function App() {
   }
 
   const configSummary = activeArrivalRunways.length
-    ? activeArrivalRunways.map(({ airport, runway }) => `${airport === 'VTBD' ? 'BD' : 'BS'}${runway} ${spacingNm[spacingKey(airport, runway)].toFixed(1)}NM`).join(' · ')
+    ? activeArrivalRunways.map(({ airport, runway }) => `${airport.slice(2)}${runway} ${spacingNm[spacingKey(airport, runway)].toFixed(1)}NM`).join(' · ')
     : 'NO ARRIVAL RUNWAY'
 
   const opsMenuRow = opsMenu ? activeSequence.find((row) => row.id === opsMenu.rowId) ?? null : null
 
-  return <div className={`aman-app${airportScope === 'BOTH' ? ' scope-both' : ''}`}>
+  return <div className={`aman-app${airports.length > 1 ? ' scope-both' : ''}`}>
     <header className="aman-topbar">
       <div className="aman-brand">
         <img src={ivaoThailandLogo} alt="IVAO Thailand" />
@@ -1417,22 +1493,20 @@ export default function App() {
       <div className="aman-session">
         <div className="aman-clock"><span>UTC</span><strong>{formatUtc(now)}</strong></div>
         <div className="aman-user"><strong>{user.name}</strong><span>VID {user.vid}</span></div>
-        <a className="aman-preview-link" href="/?regional=VTCC">VTCC / VTSP · TEST</a>
+        <a className="aman-preview-link" href="/?regional=VTCC">Route calculator</a>
         <a className="aman-signout" href="/api/auth/logout">Sign out</a>
       </div>
     </header>
 
     <section className="aman-control-strip aman-multi-runway-strip">
-      <div className="aman-airport-tabs" aria-label="Airport selector">
-        {(['VTBD', 'VTBS', 'BOTH'] as const).map((code) => <button key={code} type="button" className={airportScope === code ? 'is-active' : ''} onClick={() => setScope(code)}>{code}</button>)}
-      </div>
+      <AirportSelector view={airportView} onChange={setView} />
       <div className="aman-runway-config-control">
-        {airports.map((airport) => <div className="aman-runway-config-block" key={airport}>
+        {airports.map((airport) => <div className="aman-runway-config-block" key={airport} data-airport={airport}>
           <div className="aman-profile-select">
             <span>{airport} CONFIG</span>
             <select value={profileByAirport[airport]} onChange={(event) => applyProfile(airport, event.target.value)}>
               {profileByAirport[airport] === 'CUSTOM' && <option value="CUSTOM">CUSTOM</option>}
-              {RUNWAY_PROFILES[airport].map((profile) => <option key={profile.id} value={profile.id}>{profile.id}</option>)}
+              {RUNWAY_PROFILES[airport].map((profile) => <option key={profile.id} value={profile.id}>{profile.id.replaceAll('_', ' · ')}</option>)}
             </select>
             <button
               type="button"
@@ -1441,6 +1515,15 @@ export default function App() {
               onClick={() => resetRunwaySpacing(airport)}
             >RESET LAND SEP</button>
           </div>
+          {isRegionalAirport(airport) && <div className="aman-regional-approach"><label>Approach · EST
+            <select data-regional-approach aria-label={`${airport} approach`} value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`] || ''}
+              onChange={event => {
+                const runway = activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]
+                setApproachByAirport(current => ({ ...current, [`${airport}:${runway}`]: event.target.value }))
+              }}>
+              {(regionalNav[airport]?.airport.procedures || []).filter(p => p.kind === 'APPROACH' && p.runway === (activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0])).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+              {!regionalNav[airport] && <option value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`]}>Loading AIRAC…</option>}
+            </select></label><small>STAR + SimBrief · LAND SEP configurable</small></div>}
           <div className="aman-runway-cards">
             {RUNWAYS[airport].map((runway) => {
               const mode = runwayModes[airport][runway]
@@ -1450,7 +1533,7 @@ export default function App() {
                 <select value={mode} onChange={(event) => setRunwayMode(airport, runway, event.target.value as RunwayMode)}>
                   <option value="ARR">ARR</option><option value="DEP">DEP</option><option value="MIX">MIX</option><option value="CLOSED">CLOSED</option>
                 </select>
-                <label title="Target landing spacing">
+                <label title={isRegionalAirport(airport) ? 'Experimental landing spacing · default 5 NM, controller configurable' : 'Target landing spacing'}>
                   <input type="number" min="1" max="20" step="0.1" value={spacingNm[spacingKey(airport, runway)]} disabled={!arrivalEnabled} onChange={(event) => setRunwaySpacing(airport, runway, Number(event.target.value))} />
                   <span>NM</span>
                 </label>
@@ -1513,9 +1596,9 @@ export default function App() {
                 <strong>{row.callsign}<small>{phase === 'TAKEOFF_EST' ? 'TAKEOFF EST' : 'DEPARTING EST'}</small></strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
-                <span>{formatHm(row.tto)}</span>
+                <span>{row.regional?.etaFfPassed ? 'PASSED' : formatHm(row.tto)}</span>
                 <b>PROV</b>
-                <em>{airportScope === 'BOTH' ? `${airport === 'VTBD' ? 'BD' : 'BS'}/${row.runway}` : row.runway}</em>
+                <em>{airports.length > 1 ? `${airport.slice(2)}/${row.runway}` : row.runway}</em>
               </div>
             })}
             {visibleSequence.map((row) => {
@@ -1527,7 +1610,7 @@ export default function App() {
               const isDragging = draggingId === row.id
               const airport = rowAirport(row.id)
               const selectableRunways = activeRunwaysForAirport(airport, runwayModes)
-              const runwayLabel = airportScope === 'BOTH' ? `${airport === 'VTBD' ? 'BD' : 'BS'}/${row.runway}` : row.runway
+              const runwayLabel = airports.length > 1 ? `${airport.slice(2)}/${row.runway}` : row.runway
               const split = splitAmanDelay(row.delayMinutes)
               const matrix = getAmanOperationalMatrixAdvice(row.delayMinutes)
               const matrixClass = matrix.band.toLowerCase().replace(/_/g, '-')
@@ -1540,6 +1623,13 @@ export default function App() {
               return <div
                 key={row.id}
                 className={`aman-flight-row action-${row.delayAction.toLowerCase()} matrix-${matrixClass}${isPast ? ' is-past' : ''}${demoMode ? ' is-demo' : ''}${isStable ? ' is-stable' : ''}${hasConflict ? ' is-sep-conflict' : ''}${isDragging ? ' is-dragging' : ''}${isMissedApproach ? ' is-missed-approach' : ''}`}
+                data-airport={airport}
+                data-ref-fix={row.refFix}
+                data-delay-minutes={row.delayMinutes}
+                data-regional-stage={row.regional?.stage}
+                data-regional-model={row.regional?.modelKey}
+                data-eta-ff-passed={row.regional?.etaFfPassed ? 'true' : undefined}
+                data-timing-model={row.regional ? 'EST' : undefined}
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
                 data-target-mode={isStable ? 'MANUAL' : 'AUTO'}
@@ -1551,7 +1641,7 @@ export default function App() {
                 data-frozen-approach-category={sharedFlight?.frozen_approach_category || undefined}
                 data-missed-approach-active={isMissedApproach ? 'true' : undefined}
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
-                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${formatHms(row.predictedIawpAt)}Z · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${formatHms(row.tto)}Z · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
+                title={`Drag sets target · double-click returns AUTO · right-click operational actions · ETA-FF ${row.regional?.etaFfPassed ? 'PASSED' : formatHms(row.predictedIawpAt) + 'Z'} · STA/TLDT ${formatHms(row.tldt)}Z · STA-FF/TTO ${row.regional?.etaFfPassed ? 'PASSED' : formatHms(row.tto) + 'Z'} · TDLY ${formatDelay(split.tdlyMinutes)} min · EDLY ${formatSplit(split.edlyMinutes)} · ADLY ${formatSplit(split.adlyMinutes)} · ${matrix.primary} / ${matrix.secondary} / ${matrix.vectorLimit} · ${airport} RWY ${row.runway}${row.regional ? ' · EST — STAR + approach / SimBrief' : ''}${row.performanceCategory ? ` · PER ${row.performanceCategory}` : ''}${isStable ? ' · ATC manual / Stable' : ''}${manualRunways[row.id] ? ' · MANUAL RUNWAY' : ''}${gapSeconds ? ` · RESERVED GAP ${gapSeconds}s` : ''}${hasConflict ? ' · PAIRWISE SEPARATION INVARIANT FAILED' : ''}${isPast ? ' · TLDT PASSED · AWAITING LIVE LANDING CONFIRMATION' : ''}`}
                 onPointerDown={(event) => startDrag(event, row)}
                 onPointerMove={(event) => moveDrag(event, row)}
                 onPointerUp={(event) => endDrag(event, row)}
@@ -1566,7 +1656,7 @@ export default function App() {
                 <strong>{row.callsign}{isMissedApproach && <small className="aman-ga-badge">GA</small>}</strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
-                <span>{formatHm(row.tto)}</span>
+                <span>{row.regional?.etaFfPassed ? 'PASSED' : formatHm(row.tto)}</span>
                 <b className="aman-delay-stack">
                   <span>{formatDelay(row.delayMinutes)}</span>
                   {row.delayMinutes < 0
@@ -1605,19 +1695,20 @@ export default function App() {
           <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><div className="aman-inbound-header-actions"><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span><button type="button" className="aman-mobile-inbound-close" aria-label="Close inbound traffic" onClick={() => setMobileInboundOpen(false)}>×</button></div></div>
           <div className="aman-inbound-list">
             <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA-FF</span></div>
-            {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} key={item.id} title={item.title}>
-              <span className="apt">{item.airport === 'VTBD' ? 'BD' : 'BS'}</span>
+            {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} data-airport={item.airport} data-predicted-tldt={livePredictionById.get(item.id)?.regional?.estimatedLandingAt} data-nominal-seconds={livePredictionById.get(item.id)?.nominalStarSeconds} key={item.id} title={item.title}>
+              <span className="apt">{item.airport.slice(2)}</span>
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
                 {item.planningState === 'BOARDING' && <small className="aman-planning-badge is-boarding">BOARDING</small>}
                 {item.planningState === 'DEPARTING' && <small className="aman-planning-badge is-departing">DEPARTING · EST</small>}
                 {item.planningState === 'TAKEOFF_EST' && <small className="aman-planning-badge is-departing">TAKEOFF · EST</small>}
+                {isRegionalAirport(item.airport) && !livePredictionById.has(item.id) && item.planningState === 'MONITORED' && <small className="aman-planning-badge is-departing">NO ETA · SEE INFO</small>}
                 {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON{Number.isFinite(item.processingDistanceNm) ? ` ${Math.round(Number(item.processingDistanceNm))}NM` : ''}</small>}
                 {item.planningState === 'MISSED' && <button type="button" className="aman-reinsert-button is-missed" onClick={() => reinsertInbound(item)}>MISSED · REINSERT</button>}
                 {item.planningState === 'DESEQUENCED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>DSEQ · REINSERT</button>}
                 {item.planningState === 'REMOVED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>REM · REINSERT</button>}
               </div>
-              <span>{item.aircraft}</span><span>{item.refFix}</span><span>{formatHm(item.eta)}</span>
+              <span>{item.aircraft}</span><span>{item.refFix}</span><span>{livePredictionById.get(item.id)?.regional?.etaFfPassed ? 'PASSED' : formatHm(item.eta)}</span>
             </div>)}
             {!loading && !displayInboundRows.length && <p>No connected inbound traffic for {airportScope}.</p>}
           </div>

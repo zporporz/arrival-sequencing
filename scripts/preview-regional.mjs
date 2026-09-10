@@ -6,14 +6,21 @@ const data = JSON.parse(readFileSync(new URL('../functions/_data/regional-arriva
 const server = await createServer({ server: { host: '127.0.0.1', port: 5187, strictPort: true }, plugins: [{
   name: 'local-regional-fixture',
   configureServer(vite) {
+    // This fixture never joins production rooms.
+    vite.httpServer?.on('upgrade', (req, socket) => { if (req.url?.startsWith('/api/sequence/realtime')) socket.destroy(); });
     vite.middlewares.use((req, res, next) => {
       const url = new URL(req.url, 'http://127.0.0.1:5187');
       if (!url.pathname.startsWith('/api/')) return next();
-      const code = url.searchParams.get('airport') === 'VTSP' ? 'VTSP' : 'VTCC';
+      const requested = url.searchParams.get('airport');
+      const code = requested === 'VTSP' ? 'VTSP' : 'VTCC';
       let payload;
       if (url.pathname === '/api/auth/me') payload = { authenticated: true, user: { id: 'local-test', vid: 'LOCAL', name: 'Local fixture', isThailandStaff: false, staffPositions: [], createdAt: new Date().toISOString() } };
       else if (url.pathname === '/api/sequence/regional-navdata') payload = { cycle: data.cycle, source: data.source, airport: data.airports[code] };
       else if (url.pathname === '/api/sequence/aircraft-performance') payload = { type: 'A320', found: true, profile: { source: 'SIMBRIEF', aircraftType: 'A320', aircraftName: 'Local test fixture', performanceCategory: 'C', descentProfile: '78/280/250 (TEST)', descentMach: .78, descentIasKt: 280, descentBelow10000IasKt: 250 } };
+      else if (url.pathname === '/api/sequence/aman-state') payload = { workspaces: [], flightStates: [], sequenceOrders: [] };
+      else if (url.pathname === '/api/sequence/operational-config') payload = { workspaces: [], timings: [] };
+      else if (url.pathname === '/api/sequence/landed-history') payload = { flights: [], history: [] };
+      else if (url.pathname === '/api/sequence/ivao-traffic' && !['VTCC', 'VTSP'].includes(requested)) payload = { airport: requested, fetchedAt: new Date().toISOString(), flights: [] };
       else if (url.pathname === '/api/sequence/ivao-traffic') {
         const star = data.airports[code].procedures.find(p => p.kind === 'STAR' && p.runway === (code === 'VTSP' ? '27' : '18'));
         const [a, b] = star.legs;

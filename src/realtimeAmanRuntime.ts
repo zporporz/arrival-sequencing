@@ -1,4 +1,6 @@
-type CanonicalArrival = { id: string; predictedIawpAt: string }
+import { selectedAmanAirports } from './core/airports'
+import type { RegionalArrivalState } from './core/arrivalSequencing'
+type CanonicalArrival = { id: string; predictedIawpAt: string; regional?: RegionalArrivalState }
 type LocalAutoSnapshotDetail = { predictions?: CanonicalArrival[] }
 type RealtimeCommitDetail = { airport?: string; flightState?: unknown; sequenceOrder?: unknown }
 type RealtimeCommitFailedDetail = { airport?: string; callsign?: string }
@@ -12,7 +14,6 @@ type FinishedDrag = {
   lastRows: Map<string, string>
 }
 
-const AIRPORTS = ['VTBD', 'VTBS'] as const
 const PX_PER_MINUTE = 10
 const PREVIEW_INTERVAL_MS = 50
 const COMMIT_ACK_TIMEOUT_MS = 15_000
@@ -40,9 +41,9 @@ export function millisecondsUntilNextUtcServiceDate(nowMs = Date.now()) {
 function rowInfo(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   const runway = row.querySelector<HTMLSelectElement>('.runway-assignment select')?.value
-    || row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().replace(/^(?:BD|BS)\//, '')
+    || row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().replace(/^(?:BD|BS|CC|SP)\//, '')
     || ''
   return airport && callsign ? { airport, callsign, runway: runway.toUpperCase() } : null
 }
@@ -96,8 +97,8 @@ export function installRealtimeAmanRuntime() {
     const live = [...rooms.values()].filter((room) => room.status === 'LIVE').length
     const value = row.querySelector<HTMLElement>('dd')
     if (!value) return
-    value.textContent = live === AIRPORTS.length ? 'LIVE' : live ? `DEGRADED ${live}/${AIRPORTS.length}` : 'DEGRADED'
-    value.classList.toggle('is-warning', live !== AIRPORTS.length)
+    value.textContent = live === rooms.size ? 'LIVE' : live ? `DEGRADED ${live}/${rooms.size}` : 'DEGRADED'
+    value.classList.toggle('is-warning', live !== rooms.size)
   }
 
   const send = (airport: string, payload: unknown) => {
@@ -281,7 +282,8 @@ export function installRealtimeAmanRuntime() {
       return
     }
     if (message?.type === 'room_snapshot') {
-      if (message.autoSnapshot && canonicalSnapshotIsFresh(message.autoSnapshot.updatedAt)) {
+      if (message.autoSnapshot && (canonicalSnapshotIsFresh(message.autoSnapshot.updatedAt)
+        || ['VTCC', 'VTSP'].includes(room.airport))) {
         window.dispatchEvent(new CustomEvent('aman:canonical-auto-snapshot', {
           detail: { airport: room.airport, arrivals: message.autoSnapshot.arrivals || [] },
         }))
@@ -372,7 +374,7 @@ export function installRealtimeAmanRuntime() {
   }
 
   const connect = (room: Room, nextServiceDate = activeServiceDate) => {
-    if (disposed) return
+    if (disposed || rooms.get(room.airport) !== room) return
     if (room.reconnectTimer != null) {
       window.clearTimeout(room.reconnectTimer)
       room.reconnectTimer = null
@@ -383,7 +385,7 @@ export function installRealtimeAmanRuntime() {
     room.socket = socket
     room.serviceDate = nextServiceDate
     socket.addEventListener('open', () => {
-      if (room.socket !== socket || room.serviceDate !== activeServiceDate) {
+      if (rooms.get(room.airport) !== room || room.socket !== socket || room.serviceDate !== activeServiceDate) {
         socket.close(1000, 'stale service date')
         return
       }
@@ -393,10 +395,10 @@ export function installRealtimeAmanRuntime() {
       window.dispatchEvent(new CustomEvent('aman:realtime-health', { detail: { airport: room.airport, status: 'LIVE' } }))
     })
     socket.addEventListener('message', (event) => {
-      if (room.socket === socket && room.serviceDate === activeServiceDate) handleMessage(room, event)
+      if (rooms.get(room.airport) === room && room.socket === socket && room.serviceDate === activeServiceDate) handleMessage(room, event)
     })
     const reconnect = () => {
-      if (room.socket !== socket || disposed) return
+      if (rooms.get(room.airport) !== room || room.socket !== socket || disposed) return
       room.socket = null
       room.leader = false
       room.status = 'DEGRADED'
@@ -412,7 +414,16 @@ export function installRealtimeAmanRuntime() {
     socket.addEventListener('error', () => socket.close())
   }
 
-  for (const airport of AIRPORTS) {
+  const syncRooms = () => {
+    const selected = selectedAmanAirports()
+    for (const [airport, room] of rooms) {
+      if (selected.some(code => code === airport)) continue
+      rooms.delete(airport)
+      if (room.reconnectTimer != null) window.clearTimeout(room.reconnectTimer)
+      room.socket?.close(1000, 'Airport view changed')
+    }
+    for (const airport of selected) {
+      if (rooms.has(airport)) continue
     const room: Room = {
       airport,
       socket: null,
@@ -425,8 +436,11 @@ export function installRealtimeAmanRuntime() {
     }
     rooms.set(airport, room)
     connect(room)
+    }
+    renderHealth()
   }
-  renderHealth()
+  syncRooms()
+  window.addEventListener('aman:airport-selection-change', syncRooms)
 
   const reconnectForCurrentServiceDate = () => {
     const nextServiceDate = realtimeUtcServiceDate()
@@ -465,7 +479,7 @@ export function installRealtimeAmanRuntime() {
     for (const room of rooms.values()) {
       room.latestLocal = predictions
         .filter((item) => String(item.id || '').startsWith(`${room.airport}:`))
-        .map((item) => ({ id: String(item.id), predictedIawpAt: String(item.predictedIawpAt) }))
+        .map((item) => ({ id: String(item.id), predictedIawpAt: String(item.predictedIawpAt), ...(item.regional ? { regional: item.regional } : {}) }))
       sendAutoSnapshot(room)
     }
   }
@@ -612,6 +626,7 @@ export function installRealtimeAmanRuntime() {
 
   return () => {
     disposed = true
+    window.removeEventListener('aman:airport-selection-change', syncRooms)
     if (serviceDateTimer != null) window.clearTimeout(serviceDateTimer)
     rooms.forEach((room) => {
       if (room.reconnectTimer != null) window.clearTimeout(room.reconnectTimer)

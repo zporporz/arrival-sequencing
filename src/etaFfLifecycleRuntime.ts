@@ -40,9 +40,7 @@ function parseHmNearNow(value: string, now: Date) {
 
 function rowAirport(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
-  if (title.includes('VTBS RWY')) return 'VTBS'
-  if (title.includes('VTBD RWY')) return 'VTBD'
-  return ''
+  return title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
 }
 
 function rowCallsign(row: HTMLElement) {
@@ -50,6 +48,7 @@ function rowCallsign(row: HTMLElement) {
 }
 
 function rowKey(row: HTMLElement) {
+  if (row.dataset.regionalModel) return `${row.dataset.airport}:${rowCallsign(row)}:${row.dataset.regionalModel}`
   const airport = rowAirport(row)
   const callsign = rowCallsign(row)
   return airport && callsign ? `${airport}:${callsign}` : ''
@@ -159,7 +158,7 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
   const targetLanding = targetTldtMs(row, now)
   const frozenTrigger = resolveFrozenTrigger({
     finalTenNm,
-    finalGeometryAvailable,
+    finalGeometryAvailable: finalGeometryAvailable || Boolean(row.dataset.regionalStage),
     targetLandingMs: targetLanding,
     nowMs: now.getTime(),
   })
@@ -170,6 +169,8 @@ function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): Aman
     return 'FROZEN'
   }
 
+  if (row.dataset.regionalStage === 'SUPERSTABLE') return 'SUPERSTABLE'
+  if (row.dataset.regionalStage === 'STABLE') return 'STABLE'
   if (isManualTarget(row)) {
     const targetIawp = targetTtoMs(row, now)
     if (targetIawp != null && (targetIawp - now.getTime()) / 60_000 <= SUPERSTABLE_BEFORE_IAWP_MINUTES) {
@@ -235,6 +236,11 @@ function refreshRows() {
     const callsign = rowCallsign(row)
     if (callsign) statusByCallsign.set(callsign, status)
 
+    if (row.dataset.etaFfPassed === 'true') {
+      const cell = etaCell(row)
+      if (cell && cell.textContent !== 'PASSED') cell.textContent = 'PASSED'
+      return
+    }
     const resolved = resolveDisplayedEta(row, now, status, key)
     if (!resolved) return
 

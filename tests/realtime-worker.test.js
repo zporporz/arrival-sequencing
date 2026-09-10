@@ -63,6 +63,34 @@ afterEach(() => {
 })
 
 describe('AMAN realtime Durable Object coordination', () => {
+  it.each(['VTCC', 'VTSP'])('persists %s stable AUTO across leader handoff and isolates model changes', async airport => {
+    const { room, sockets, storage } = setupRoom(); sockets.forEach(s => { s.meta.airport = airport; });
+    const row = { id: airport + ':session', predictedIawpAt: '2026-09-10T10:20:00Z', regional: {
+      callsign: 'REG123', modelKey: '2609|route', runway: airport === 'VTCC' ? '18' : '27',
+      stage: 'STABLE', nominalStarSeconds: 900, etaFfPassed: false,
+    } };
+    const send = (socket, item) => room.webSocketMessage(socket, JSON.stringify({ type: 'auto_snapshot', arrivals: [item] }));
+    await send(sockets[0], row);
+    expect((await storage.get('autoSnapshot')).arrivals[0].regional.estimatedLandingAt).toBe('2026-09-10T10:35:00.000Z');
+    sockets[0].meta.expiresAt = Date.now() - 1;
+    const later = { ...row, predictedIawpAt: '2026-09-10T10:28:00Z', regional: { ...row.regional, stage: 'UNSTABLE' } };
+    await send(sockets[1], later);
+    expect((await storage.get('autoSnapshot')).arrivals[0].predictedIawpAt).toBe('2026-09-10T10:20:00.000Z');
+    expect(sockets[1].sent.at(-1).arrivals[0].regional.stage).toBe('STABLE');
+    await send(sockets[1], { ...later, regional: { ...later.regional, modelKey: 'NEW-RUNWAY' } });
+    expect((await storage.get('autoSnapshot')).arrivals[0].predictedIawpAt).toBe('2026-09-10T10:28:00.000Z');
+    await send(sockets[1], { ...row, id: 'VTBD:wrong-room' });
+    expect((await storage.get('autoSnapshot')).arrivals).toEqual([]);
+  });
+
+  it('locks regional AUTO at manual commit without replacing it with the manual target', async () => {
+    const { room, sockets, storage } = setupRoom(); sockets.forEach(s => { s.meta.airport = 'VTCC'; });
+    const row = { id: 'VTCC:session', predictedIawpAt: '2026-09-10T10:20:00Z', regional: { callsign: 'REG123', modelKey: '2609|18', runway: '18', stage: 'UNSTABLE', nominalStarSeconds: 900, etaFfPassed: false } };
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'auto_snapshot', arrivals: [row] }));
+    await room.publishCommitted({ type: 'flight_commit', flightState: { airport: 'VTCC', callsign: 'REG123', revision: 1, target_mode: 'MANUAL', manual_tldt: '2026-09-10T11:00:00Z' } });
+    expect((await storage.get('autoSnapshot')).arrivals[0]).toMatchObject({ predictedIawpAt: '2026-09-10T10:20:00.000Z', regional: { stage: 'STABLE', estimatedLandingAt: '2026-09-10T10:35:00.000Z' } });
+    expect(sockets[1].sent.some(s => s.type === 'auto_snapshot' && s.arrivals[0].regional.stage === 'STABLE')).toBe(true);
+  });
   it('rejects forged browser commits even with a maximum revision', async () => {
     const { room, sockets, storage } = setupRoom()
     await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: Number.MAX_SAFE_INTEGER } }))

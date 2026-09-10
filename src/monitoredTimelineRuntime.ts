@@ -4,7 +4,7 @@ import {
 } from './core/amanConstants'
 import { TIMELINE_DISPLAY_PX_PER_MINUTE } from './timelineScale'
 
-type AirportCode = 'VTBD' | 'VTBS'
+import { displaySidesFromDom, airportFromRow, type AirportCode } from './core/airports'
 type DisplaySide = 'LEFT' | 'RIGHT'
 
 type MonitoredFlight = {
@@ -18,21 +18,8 @@ type MonitoredFlight = {
 }
 
 const FUTURE_HORIZON_MS = 4 * 60 * 60 * 1000
-const STORAGE_KEY = 'aman-airport-display-sides-v1'
 const REFRESH_MS = 1000
 
-function readDisplaySides() {
-  const fallback: Record<AirportCode, DisplaySide> = { VTBD: 'LEFT', VTBS: 'RIGHT' }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}') as Partial<Record<AirportCode, DisplaySide>>
-    return {
-      VTBD: parsed.VTBD === 'RIGHT' ? 'RIGHT' : 'LEFT',
-      VTBS: parsed.VTBS === 'LEFT' ? 'LEFT' : 'RIGHT',
-    } satisfies Record<AirportCode, DisplaySide>
-  } catch {
-    return fallback
-  }
-}
 
 function parseHmNearNow(value: string, nowMs: number) {
   const match = value.trim().match(/^(\d{2}):(\d{2})(?::\d{2})?$/)
@@ -55,6 +42,7 @@ function nominalStarMinutes(airport: AirportCode, fix: string) {
     const value = (VTBD_IAWP_NOMINAL_MINUTES as Record<string, number>)[normalized]
     return Number.isFinite(value) ? value : null
   }
+  if (airport !== 'VTBS') return null
   const value = (VTBS_STAR19_NOMINAL_MINUTES as Record<string, number>)[normalized]
   return Number.isFinite(value) ? value : null
 }
@@ -72,8 +60,7 @@ function monitoredFlights(nowMs: number) {
   const flights: MonitoredFlight[] = []
 
   document.querySelectorAll<HTMLElement>('.aman-inbound-row[data-planning-state="MONITORED"]').forEach((row) => {
-    const airportText = row.querySelector<HTMLElement>('.apt')?.textContent?.trim().toUpperCase()
-    const airport: AirportCode | null = airportText === 'BD' ? 'VTBD' : airportText === 'BS' ? 'VTBS' : null
+    const airport = airportFromRow(row)
     if (!airport) return
 
     const callsign = row.querySelector<HTMLElement>('.aman-inbound-acid strong')?.textContent?.trim().toUpperCase() || ''
@@ -84,10 +71,10 @@ function monitoredFlights(nowMs: number) {
     if (!callsign || !refFix || refFix === '----') return
 
     const etaFfMs = parseHmNearNow(etaText, nowMs)
-    const starMinutes = nominalStarMinutes(airport, refFix)
+    const starMinutes = row.dataset.nominalSeconds ? Number(row.dataset.nominalSeconds) / 60 : nominalStarMinutes(airport, refFix)
     if (etaFfMs == null || starMinutes == null) return
 
-    const projectedLandingMs = etaFfMs + starMinutes * 60_000
+    const projectedLandingMs = row.dataset.predictedTldt ? Date.parse(row.dataset.predictedTldt) : etaFfMs + starMinutes * 60_000
     const delta = projectedLandingMs - nowMs
     if (delta < 0 || delta > FUTURE_HORIZON_MS) return
 
@@ -159,7 +146,7 @@ export function installMonitoredTimelineRuntime() {
     if (!layer) return
 
     const nowMs = Date.now()
-    const sides = readDisplaySides()
+    const sides = displaySidesFromDom()
     const flights = monitoredFlights(nowMs)
     const liveKeys = new Set(flights.map((flight) => flight.key))
 

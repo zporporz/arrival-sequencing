@@ -67,7 +67,7 @@ function flightKey(airport: string, callsign: string) {
 function selectedAirports() {
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.aman-airport-scope-picker input[type="checkbox"]:checked'))
     .map((input) => input.value.trim().toUpperCase())
-    .filter((airport) => airport === 'VTBD' || airport === 'VTBS')
+    .filter((airport) => ['VTBD', 'VTBS', 'VTCC', 'VTSP'].includes(airport))
   if (checked.length) return checked
 
   const active = Array.from(document.querySelectorAll<HTMLButtonElement>('.aman-airport-tabs > button'))
@@ -79,21 +79,22 @@ function selectedAirports() {
 function rowIdentity(row: HTMLElement) {
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
   const title = row.getAttribute('title') || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : ''
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] || ''
   return airport && callsign ? { airport, callsign, key: flightKey(airport, callsign) } : null
 }
 
 function rowFullFix(row: HTMLElement, airport: string) {
+  if (row.dataset.refFix) return row.dataset.refFix
   const code = row.querySelector<HTMLElement>('.fix-code')?.textContent?.trim() || ''
-  return airport === 'VTBS' ? VTBS_FIX_BY_CODE[code.toUpperCase()] || code : VTBD_FIX_BY_CODE[code] || code
+  return airport === 'VTBS' ? VTBS_FIX_BY_CODE[code.toUpperCase()] || code : airport === 'VTBD' ? VTBD_FIX_BY_CODE[code] || code : code
 }
 
 function parseHmNearNow(value: string, preferFuture = true) {
-  const match = value.match(/^(\d{2}):(\d{2})$/)
+  const match = value.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/)
   if (!match) return null
   const now = new Date()
   const candidate = new Date(now)
-  candidate.setUTCHours(Number(match[1]), Number(match[2]), 0, 0)
+  candidate.setUTCHours(Number(match[1]), Number(match[2]), Number(match[3] || 0), 0)
   let delta = candidate.getTime() - now.getTime()
   if (preferFuture && delta < -3 * 60 * 60 * 1000) {
     candidate.setUTCDate(candidate.getUTCDate() + 1)
@@ -116,17 +117,24 @@ function formatOne(value: number) {
 
 function rowPredictedIawpMs(row: HTMLElement) {
   const title = row.getAttribute('title') || ''
-  const hm = title.match(/(?:ETA-FF|Predicted IAWP)\s+(\d{2}:\d{2})Z/i)?.[1]
+  const hm = title.match(/(?:ETA-FF|Predicted IAWP)\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
   return hm ? parseHmNearNow(hm, true) : null
 }
 
 function rowTtoMs(row: HTMLElement) {
-  const hm = row.children.item(4)?.textContent?.trim() || ''
+  if (row.dataset.etaFfPassed === 'true') return null
+  const hm = row.title.match(/STA-FF\/TTO\s+(\d{2}:\d{2}(?::\d{2})?)Z/i)?.[1]
+    || row.children.item(4)?.textContent?.trim() || ''
   return parseHmNearNow(hm, true)
 }
 
 function rowDelayMinutes(row: HTMLElement) {
-  const value = Number.parseFloat(row.children.item(5)?.textContent?.trim() || '')
+  // The delay cell also contains E/A, GAIN and GAP labels. Never parse the
+  // concatenated text (for example 7 + 300 becoming a 7300-minute delay).
+  const cell = row.children.item(5)
+  const value = Number.parseFloat(row.dataset.delayMinutes
+    ?? cell?.querySelector(':scope > span')?.textContent?.trim()
+    ?? cell?.textContent?.trim() ?? '')
   return Number.isFinite(value) ? value : 0
 }
 
@@ -134,7 +142,7 @@ function currentRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|18|36|09|27)/)?.[1] || ''
 }
 
 function planningSpeedKt(row: HTMLElement, live: LivePlanningData | undefined) {

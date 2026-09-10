@@ -21,7 +21,7 @@ export async function roomCommand(env, date, airport, body) {
 export async function updateRealtimeSession(env, session, revoke = false) {
   if (!env.AMAN_REALTIME) return;
   const dates = [0, 1].map(days => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10));
-  await Promise.all(dates.flatMap(date => ['VTBD', 'VTBS'].map(airport => roomCommand(env, date, airport, {
+  await Promise.all(dates.flatMap(date => ['VTBD', 'VTBS', 'VTCC', 'VTSP'].map(airport => roomCommand(env, date, airport, {
     type: revoke ? 'revoke_session' : 'renew_session', ...realtimeSession(session),
   }))));
 }

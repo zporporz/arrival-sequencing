@@ -13,6 +13,31 @@ afterEach(() => {
 })
 
 describe('realtime AMAN coordination', () => {
+  it('switches selected rooms without reconnecting removed airports or losing regional metadata', () => {
+    vi.useFakeTimers()
+    class Socket extends EventTarget {
+      static OPEN = 1; static CLOSED = 3; static instances: Socket[] = []
+      readyState = 1; sent: any[] = []; closed = false
+      constructor(readonly url: string) { super(); Socket.instances.push(this) }
+      send(raw: string) { this.sent.push(JSON.parse(raw)) }
+      close() { this.closed = true; this.readyState = 3; this.dispatchEvent(new Event('close')) }
+    }
+    vi.stubGlobal('WebSocket', Socket)
+    document.body.innerHTML = '<div class="aman-airport-scope-picker"><input type="checkbox" checked value="VTBS"><input type="checkbox" checked value="VTBD"></div>'
+    const remove = installRealtimeAmanRuntime()
+    const inputs = document.querySelectorAll<HTMLInputElement>('input')
+    inputs[0].value = 'VTCC'; inputs[1].value = 'VTSP'
+    window.dispatchEvent(new Event('aman:airport-selection-change'))
+    expect(Socket.instances.slice(0, 2).every(s => s.closed)).toBe(true)
+    expect(Socket.instances).toHaveLength(4)
+    const cc = Socket.instances.find(s => s.url.includes('airport=VTCC'))!
+    cc.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'role', leader: true }) }))
+    const regional = { modelKey: '2609|18', stage: 'STABLE' }
+    window.dispatchEvent(new CustomEvent('aman:local-auto-snapshot', { detail: { predictions: [{ id: 'VTCC:one', predictedIawpAt: '2026-09-10T10:00:00Z', regional }, { id: 'VTBD:hidden', predictedIawpAt: '2026-09-10T10:00:00Z' }] } }))
+    expect(cc.sent.at(-1)).toMatchObject({ type: 'auto_snapshot', arrivals: [{ id: 'VTCC:one', regional }] })
+    vi.advanceTimersByTime(16000); expect(Socket.instances).toHaveLength(4)
+    remove(); document.body.innerHTML = ''
+  })
   it('uses bounded exponential reconnect delays', () => {
     expect([0, 1, 2, 3, 4, 5, 8].map(realtimeReconnectDelayMs))
       .toEqual([500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000])

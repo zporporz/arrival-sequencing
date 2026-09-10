@@ -1,0 +1,55 @@
+/* React owns the two airport slots. Keep controls readable rather than squeezing. */
+.aman-app .aman-multi-runway-strip {
+  grid-template-columns: 290px minmax(0, 1fr) auto;
+  height: auto; min-height: 146px; max-height: none; overflow: visible;
+}
+.aman-app .aman-native-airport-picker {
+  display: block; width: auto; min-width: 0; height: auto; padding: 12px 14px;
+}
+.aman-native-airport-picker .aman-airport-scope-picker { display: grid; gap: 8px; width: 100%; height: auto; align-content: start; }
+.aman-selector-heading { font: 700 10px/1.3 system-ui; letter-spacing: .12em; color: #8baac7; }
+.aman-side-select { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 8px; }
+.aman-side-select > span { font: 500 11px/1.5 system-ui; color: #9db7ce; }
+.aman-side-select select { width: 100%; min-width: 0; height: 38px; padding: 0 8px; color: #d7ebfc; background: #0d1d2c; border: 1px solid #39566f; border-radius: 5px; font: 600 12px/1.4 system-ui; }
+.aman-side-select select:focus-visible, .aman-regional-approach select:focus-visible { outline: 2px solid #65c9dc; outline-offset: 2px; }
+.aman-app .aman-runway-config-control {
+  display: flex; flex-wrap: wrap; align-items: center; height: auto; min-width: 0; gap: 12px;
+  overflow: visible; padding: 12px; grid-column: auto;
+}
+.aman-app .aman-runway-config-block {
+  flex: 1 1 390px; min-width: 0; height: auto; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 10px 12px; border: 1px solid #263b50; border-radius: 6px; padding: 10px;
+}
+.aman-app .aman-runway-config-block:last-child { border: 1px solid #263b50; padding: 10px; }
+.aman-app .aman-profile-select { flex: 1 1 165px; width: auto; min-width: 0; max-width: 270px; gap: 6px; }
+.aman-app .aman-profile-select select, .aman-app .aman-reset-spacing { width: 100%; min-width: 0; max-width: none; flex: 0 0 auto; }
+.aman-app .aman-profile-select select { height: 34px; font-size: 11px; }
+.aman-app .aman-runway-cards { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.aman-app .aman-runway-card { width: 118px; min-width: 118px; grid-template-columns: 30px minmax(0, 1fr); }
+.aman-regional-approach { flex: 1 1 150px; max-width: 250px; }
+.aman-regional-approach label { display: grid; gap: 6px; color: #90b9d5; font: 600 11px/1.4 system-ui; }
+.aman-regional-approach select { width: 100%; height: 34px; padding: 0 8px; border: 1px solid #39566f; border-radius: 4px; background: #0b1927; color: #c6e5f8; }
+.aman-regional-approach small { display: block; margin-top: 6px; font: 10px/1.4 system-ui; color: #c2a974; }
+.aman-app .aman-multi-runway-strip .aman-config-label { display: none; }
+.aman-app .aman-multi-runway-strip .aman-counters { align-self: stretch; }
+.aman-app .aman-multi-runway-strip .aman-counters > div { min-width: 46px; }
+.aman-preview-link { font: 11px/1.4 system-ui; color: #90b7d4; }
+.aman-flight-row[data-timing-model='EST']::after { content: 'EST'; position: absolute; right: 5px; top: -10px; font: 7px/1 monospace; color: #8aa3b8; }
+.aman-app .aman-workspace { height: max(460px, calc(100dvh - 265px)); }
+@media (max-width: 1650px) {
+  .aman-app .aman-multi-runway-strip { grid-template-columns: 290px minmax(0, 1fr); }
+  .aman-app .aman-multi-runway-strip .aman-counters { display: none; }
+}
+@media (max-width: 1200px) {
+  .aman-app .aman-multi-runway-strip { grid-template-columns: minmax(0, 1fr); }
+  .aman-native-airport-picker .aman-airport-scope-picker { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 16px; }
+  .aman-app .aman-native-airport-picker { padding: 10px 12px; }
+  .aman-app .aman-runway-config-control { padding-top: 0; }
+  .aman-app .aman-runway-config-block { flex-basis: 320px; }
+}
+@media (max-width: 650px) {
+  .aman-native-airport-picker .aman-airport-scope-picker { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .aman-side-select select { height: 42px; font-size: 13px; }
+  .aman-app .aman-runway-config-block { flex-basis: 100%; }
+  .aman-app .aman-workspace { height: auto; min-height: 460px; }
+}

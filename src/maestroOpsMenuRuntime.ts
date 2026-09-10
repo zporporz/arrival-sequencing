@@ -3,7 +3,7 @@ type ReactRowProps = {
 }
 
 type RowIdentity = {
-  airport: 'VTBD' | 'VTBS'
+  airport: 'VTBD' | 'VTBS' | 'VTCC' | 'VTSP'
   callsign: string
   runway: string
   demo: boolean
@@ -38,8 +38,8 @@ function reactProps<T>(element: Element): T | null {
 function rowIdentity(row: HTMLElement): RowIdentity | null {
   const title = row.getAttribute('title') || ''
   const callsign = row.querySelector('strong')?.textContent?.trim().toUpperCase() || ''
-  const airport = title.includes('VTBS RWY') ? 'VTBS' : title.includes('VTBD RWY') ? 'VTBD' : null
-  const runway = title.match(/(?:VTBD|VTBS) RWY\s+([0-9A-Z]+)/i)?.[1]?.toUpperCase()
+  const airport = title.match(/\b(VTBD|VTBS|VTCC|VTSP) RWY\b/)?.[1] as RowIdentity['airport'] | undefined
+  const runway = title.match(/(?:VTBD|VTBS|VTCC|VTSP) RWY\s+([0-9A-Z]+)/i)?.[1]?.toUpperCase()
     || row.querySelector<HTMLSelectElement>('.runway-assignment select')?.value?.toUpperCase()
     || row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase()
     || '----'
