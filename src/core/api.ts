@@ -138,17 +138,18 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method: 'GET',
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { Accept: 'application/json' },
+    signal,
   })
   return readJson<T>(response)
 }
 
-export async function apiPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
+export async function apiPost<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
     credentials: 'same-origin',
@@ -158,6 +159,7 @@ export async function apiPost<T>(path: string, body: Record<string, unknown>): P
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal,
   })
   return readJson<T>(response)
 }
@@ -170,15 +172,15 @@ export function readWorkspaces() {
   }))
 }
 
-export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: string, mode?: 'summary') {
+export function readIvaoTraffic<TFlight = IvaoArrivalTrafficFlight>(airport: string, mode?: 'summary' | 'regional-preview', signal?: AbortSignal) {
   const params = new URLSearchParams({ airport: airport.trim().toUpperCase() })
   if (mode) params.set('mode', mode)
-  return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`)
+  return apiGet<IvaoTrafficPayload<TFlight>>(`/api/sequence/ivao-traffic?${params.toString()}`, signal)
 }
 
-export function readAircraftPerformance(type: string) {
+export function readAircraftPerformance(type: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ type: type.trim().toUpperCase() })
-  return apiGet<AircraftPerformancePayload>(`/api/sequence/aircraft-performance?${params.toString()}`)
+  return apiGet<AircraftPerformancePayload>(`/api/sequence/aircraft-performance?${params.toString()}`, signal)
 }
 
 export function readOperationalConfig(serviceDate = new Date().toISOString().slice(0, 10)) {
@@ -186,12 +188,12 @@ export function readOperationalConfig(serviceDate = new Date().toISOString().sli
   return apiGet<OperationalConfigPayload>(`/api/sequence/operational-config?${params.toString()}`)
 }
 
-export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string) {
+export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string, signal?: AbortSignal) {
   return apiPost<TGeometry>('/api/sequence/route-geometry', {
     origin: origin.trim().toUpperCase(),
     destination: destination.trim().toUpperCase(),
     route: route.trim().toUpperCase(),
-  })
+  }, signal)
 }
 
 export function sequenceRequest<T>(path: string, body: Record<string, unknown>) {

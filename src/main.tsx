@@ -59,6 +59,7 @@ const StaffNavdataAdminPage = lazy(() => import('./StaffNavdataAdminPage'))
 const StaffMasterDataAdmin = lazy(() => import('./StaffMasterDataAdmin'))
 const StaffCaatAdmin = lazy(() => import('./StaffCaatAdmin'))
 const StaffAdminTools = lazy(() => import('./StaffAdminTools'))
+const RegionalAman = lazy(() => import('./RegionalAman'))
 
 installReconnectTrafficFetch()
 
@@ -134,6 +135,7 @@ function RootApp() {
   if (route === 'master') return <StaffMasterDataAdmin />
   if (route === 'caat') return <StaffCaatAdmin />
   if (route === 'tools') return <StaffAdminTools />
+  if (['VTCC', 'VTSP'].includes(new URLSearchParams(window.location.search).get('regional') || '')) return <RegionalAman />
   return <AppWithRuntime />
 }
 

@@ -1411,6 +1411,7 @@ export default function App() {
       <div className="aman-session">
         <div className="aman-clock"><span>UTC</span><strong>{formatUtc(now)}</strong></div>
         <div className="aman-user"><strong>{user.name}</strong><span>VID {user.vid}</span></div>
+        <a className="aman-preview-link" href="/?regional=VTCC">VTCC / VTSP · TEST</a>
         <a className="aman-signout" href="/api/auth/logout">Sign out</a>
       </div>
     </header>

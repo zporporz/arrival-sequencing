@@ -1,0 +1,42 @@
+.regional-aman { box-sizing: border-box; min-height: 100dvh; padding: 30px clamp(16px, 4vw, 64px); background: #080f19; color: #d6e5ed; font: 14px/1.5 system-ui, sans-serif; overflow: auto; }
+.regional-aman *, .regional-aman *::before, .regional-aman *::after { box-sizing: border-box; }
+.regional-aman h1 { font-size: 26px; margin: 5px 0; }
+.regional-aman h2 { font-size: 17px; margin: 0 0 16px; }
+.regional-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.regional-header a { color: #94d9e0; }
+.regional-eyebrow { color: #839dab; letter-spacing: .12em; font-size: 10px; }
+.regional-notice { border-left: 3px solid #d2a553; padding: 10px 15px; background: #171b21; color: #d9bf8f; }
+.regional-controls { display: flex; gap: 18px; align-items: end; flex-wrap: wrap; margin: 20px 0; }
+.regional-controls label { display: grid; gap: 6px; font-size: 12px; color: #9fbbc9; }
+.regional-aman select, .regional-aman input, .regional-aman button { min-height: 40px; border: 1px solid #345064; border-radius: 5px; padding: 8px 12px; color: #e2eef4; background: #102131; font: inherit; }
+.regional-aman button { cursor: pointer; color: #a9e6e8; }
+.regional-aman :focus-visible { outline: 2px solid #a9e6e8; outline-offset: 3px; }
+.regional-controls input { width: 110px; }
+.regional-meta { color: #8da6b3; font-size: 12px; padding-bottom: 5px; }
+.regional-panel { margin-top: 24px; padding: 24px; border: 1px solid #253b4d; border-radius: 8px; background: #0c1723; min-width: 0; }
+.regional-section-title { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.regional-section-title span, .regional-muted, .regional-aman footer { color: #90a7b5; font-size: 12px; }
+.regional-table-scroll { overflow-x: auto; max-width: 100%; }
+.regional-aman table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; text-align: left; }
+.regional-aman caption { text-align: left; color: #90a7b5; font-size: 12px; padding-bottom: 12px; }
+.regional-aman th { color: #91aabd; font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
+.regional-aman td, .regional-aman th { padding: 12px; border-bottom: 1px solid #243647; vertical-align: top; }
+.regional-aman td:first-child { min-width: 110px; }
+.regional-aman td small { display: block; color: #98acb8; }
+.regional-time { font-weight: 700; color: #a7e7e3; }
+.regional-aman summary { cursor: pointer; font-size: 12px; color: #8ad0df; padding-top: 6px; }
+.regional-details { min-width: 400px; font-size: 12px; }
+.regional-total { font-size: 30px; color: #a7e7e3; }
+.regional-total small { font-size: 13px; color: #98acb8; }
+.regional-error { color: #ffabab; }
+.regional-aman .regional-warning { color: #dcc38b; }
+.regional-empty { padding: 24px 0; color: #91aabd; }
+.regional-aman footer { margin-top: 24px; }
+@media (max-width: 600px) {
+  .regional-aman { padding: 18px 12px; }
+  .regional-header { align-items: start; flex-direction: column; gap: 8px; }
+  .regional-panel { padding: 16px 12px; }
+  .regional-details { min-width: 0; }
+  .regional-aman table { min-width: 580px; }
+  .regional-controls { gap: 12px; }
+}

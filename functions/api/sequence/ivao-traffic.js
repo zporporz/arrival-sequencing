@@ -400,10 +400,17 @@ export async function onRequestGet(context) {
     let reconciledFlights = liveFlights.filter((flight) => (
       flight.predepartureLocal || !looksLandedAtAirport(flight, airport)
     ));
-    try {
-      reconciledFlights = await reconcileAmanFlights(context.env, airport, liveFlights, fetchedAt);
-    } catch (error) {
-      sharedStateError = error instanceof Error ? error.message : String(error);
+    // Regional timing is an isolated, read-only preview, not an operational
+    // workspace. Do not create/expire shared flight records just by viewing it.
+    const regionalPreview = url.searchParams.get('mode') === 'regional-preview' && ['VTCC', 'VTSP'].includes(airport);
+    if (regionalPreview) {
+      reconciledFlights = liveFlights;
+    } else {
+      try {
+        reconciledFlights = await reconcileAmanFlights(context.env, airport, liveFlights, fetchedAt);
+      } catch (error) {
+        sharedStateError = error instanceof Error ? error.message : String(error);
+      }
     }
 
     return json({

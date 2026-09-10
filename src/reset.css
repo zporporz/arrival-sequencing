@@ -70,7 +70,7 @@ button { color: inherit; }
 .aman-user span { color: #6f829b; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
 .aman-clock strong { color: #9fd1ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: 15px; }
 .aman-user strong { color: #dfe8f4; font-size: 12px; }
-.aman-signout {
+.aman-signout, .aman-preview-link {
   padding: 8px 11px;
   border: 1px solid #2a3b50;
   border-radius: 5px;
