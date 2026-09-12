@@ -1804,7 +1804,7 @@ export default function App() {
       <aside className="aman-side-stack">
         <section id="aman-mobile-inbound" className={`aman-panel aman-inbound-panel${mobileInboundOpen ? ' is-mobile-open' : ''}`}>
           <div className="aman-panel-header compact"><div><span className="aman-eyebrow">TRAFFIC</span><h2>Inbound</h2></div><div className="aman-inbound-header-actions"><span className={`aman-live-pill ${trafficError ? 'is-error' : ''} ${demoMode ? 'is-demo' : ''}`}>{demoMode ? 'TEST DATA' : trafficError ? 'API ERROR' : 'IVAO LIVE'}</span><button type="button" className="aman-mobile-inbound-close" aria-label="Close inbound traffic" onClick={() => setMobileInboundOpen(false)}>×</button></div></div>
-          <div className="aman-inbound-list">
+          <div className="aman-inbound-list" role="region" aria-label="Inbound traffic" tabIndex={0}>
             <div className="aman-inbound-head multi"><span>APT</span><span>ACID</span><span>TYPE</span><span>IAWP</span><span>ETA-FF</span></div>
             {displayInboundRows.map((item) => <div className={`aman-inbound-row multi planning-${item.planningState.toLowerCase()}`} data-planning-state={item.planningState} data-airport={item.airport} data-predicted-tldt={livePredictionById.get(item.id)?.regional?.estimatedLandingAt} data-nominal-seconds={livePredictionById.get(item.id)?.nominalStarSeconds} key={item.id} title={item.title}>
               <span className="apt">{item.airport.slice(2)}</span>

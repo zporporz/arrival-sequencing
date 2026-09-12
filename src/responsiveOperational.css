@@ -149,6 +149,8 @@
     margin: auto;
     display: flex !important;
     flex-direction: column;
+    /* SYSTEM is outside this fixed drawer, so it needs no reserved space. */
+    padding-bottom: 0;
     border-color: #456987;
     box-shadow: 0 24px 70px rgba(0, 0, 0, .72);
   }

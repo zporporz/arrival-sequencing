@@ -5,8 +5,31 @@
 }
 
 .aman-inbound-panel{
+  display:flex;
+  flex-direction:column;
   height:100%;
   min-height:0!important;
+  /* Reserve the collapsed SYSTEM bar (38px) and its top/bottom clearance. */
+  padding-bottom:54px;
+}
+
+.aman-inbound-panel>.aman-panel-header{
+  flex:0 0 auto;
+}
+
+.aman-inbound-panel>.aman-inbound-list{
+  flex:1 1 0;
+  min-height:0;
+  height:auto;
+  overflow:auto;
+  overscroll-behavior-y:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#4b6682 #081321;
+}
+
+.aman-inbound-list:focus-visible{
+  outline:2px solid #65c9dc;
+  outline-offset:-2px;
 }
 
 .aman-system-panel.is-runtime-collapsible{
