@@ -23,5 +23,29 @@
   pointer-events:none;
 }
 .aman-flight-row.is-realtime-locked{cursor:not-allowed!important;outline:1px dashed rgba(255,188,65,.7);outline-offset:-1px;filter:saturate(.72)}
+/* Attributes survive React row updates. The badge floats outside the seven
+   timing columns so it cannot squeeze the callsign, ETA or runway controls. */
+.aman-flight-row[data-realtime-lock-preview]{z-index:41!important;cursor:not-allowed!important;outline:1px dashed rgba(255,188,65,.7);outline-offset:-1px}
+.aman-flight-row > .aman-realtime-drag-badge{
+  position:absolute;
+  bottom:calc(100% + 3px);
+  left:0;
+  max-width:min(100%,280px);
+  box-sizing:border-box;
+  padding:4px 7px;
+  border:1px solid #997235;
+  border-radius:4px;
+  background:#251e13;
+  color:#ffd58a;
+  box-shadow:0 2px 8px #0008;
+  font:700 11px/1.2 Consolas,monospace;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+.aman-flight-row[data-display-side="LEFT"] > .aman-realtime-drag-badge,
+.aman-flight-row.display-left > .aman-realtime-drag-badge{left:auto;right:0}
+.aman-flight-row > .aman-realtime-drag-badge[data-phase="SAVING"]{color:#acd7ee;border-color:#4b7387;background:#102533}
 .aman-runtime-shared-status dd{color:#72d7a9!important}
 .aman-runtime-shared-status dd.is-warning{color:#ff8078!important}
