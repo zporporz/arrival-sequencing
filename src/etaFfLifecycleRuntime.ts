@@ -105,12 +105,13 @@ function rowRunway(row: HTMLElement) {
 
 function requestFrozenTarget(row: HTMLElement, key: string, nowMs: number) {
   if (row.dataset.frozenTldt) return
+  if (row.dataset.finalTenNm !== 'true') return
   if (row.dataset.finalRunway && row.dataset.finalRunway !== rowRunway(row)) return
   const previousRequestAt = frozenTargetRequestAtByKey.get(key)
   if (previousRequestAt != null && nowMs - previousRequestAt < FROZEN_TARGET_RETRY_MS) return
 
   const approachCategory = String(row.dataset.performanceCategory || '').trim().toUpperCase()
-  const distanceNm = Number(row.dataset.finalAlongNm)
+  const distanceNm = Number(row.dataset.finalDirectNm || row.dataset.finalAlongNm)
   const trackAtMs = new Date(row.dataset.finalTrackAt || '').getTime()
   const airport = rowAirport(row)
   const callsign = rowCallsign(row)
@@ -133,6 +134,11 @@ function requestFrozenTarget(row: HTMLElement, key: string, nowMs: number) {
       approachCategory,
       distanceNm,
       trackAt: new Date(trackAtMs).toISOString(),
+      ...(row.dataset.finalPathName ? {
+        approachPath: true,
+        approachName: row.dataset.regionalApproach || '',
+        approachCycle: row.dataset.finalApproachCycle,
+      } : {}),
     },
   }))
 }
@@ -153,15 +159,20 @@ export function resolveFrozenTrigger(input: {
 }
 
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
+  const missedApproach = row.dataset.missedApproachActive === 'true'
+  if (!missedApproach && row.dataset.frozenTldt && Number.isFinite(Date.parse(row.dataset.frozenTldt))) {
+    frozenStatusByKey.add(key)
+    row.dataset.frozenTrigger = '10NM_FINAL'
+  }
   if (frozenStatusByKey.has(key)) return 'FROZEN'
 
   const awaitingRunwayGeometry = Boolean(row.dataset.finalRunway && row.dataset.finalRunway !== rowRunway(row))
-  const finalTenNm = !awaitingRunwayGeometry && row.dataset.finalTenNm === 'true'
+  const finalTenNm = !missedApproach && !awaitingRunwayGeometry && row.dataset.finalTenNm === 'true'
   const finalGeometryAvailable = awaitingRunwayGeometry || row.dataset.finalGeometryAvailable === 'true'
   const targetLanding = targetTldtMs(row, now)
   const frozenTrigger = resolveFrozenTrigger({
     finalTenNm,
-    finalGeometryAvailable: finalGeometryAvailable || Boolean(row.dataset.regionalStage),
+    finalGeometryAvailable: missedApproach || finalGeometryAvailable || Boolean(row.dataset.regionalStage),
     targetLandingMs: targetLanding,
     nowMs: now.getTime(),
   })
@@ -229,7 +240,8 @@ function refreshRows() {
 
     // Keep the FF lock, but re-evaluate final approach for the new runway.
     const runway = rowRunway(row)
-    if (frozenRunwayByKey.has(key) && frozenRunwayByKey.get(key) !== runway) {
+    if (row.dataset.missedApproachActive === 'true'
+      || (frozenRunwayByKey.has(key) && frozenRunwayByKey.get(key) !== runway)) {
       frozenStatusByKey.delete(key)
       frozenTargetRequestAtByKey.delete(key)
       delete row.dataset.frozenTrigger

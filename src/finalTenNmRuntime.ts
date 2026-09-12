@@ -2,12 +2,13 @@ import { selectedAmanAirports } from './core/airports'
 import { regionalFinalGeometry } from '../functions/_lib/regionalGeometry'
 import { BANGKOK_FINAL_GEOMETRY } from '../shared/bangkokFinalGeometry'
 import type { RegionalAirport } from './core/regionalArrivalModel'
+import { evaluateApproachGate, type ApproachAirport, type ApproachTrack } from '../shared/approachGate'
 
 export function registerRegionalFinalGeometry(airport: RegionalAirport) {
   Object.assign(RUNWAYS, regionalFinalGeometry(airport))
 }
 
-type LiveFlight = {
+type LiveFlight = ApproachTrack & {
   callsign: string
   latitude: number | null
   longitude: number | null
@@ -44,6 +45,8 @@ const RUNWAYS: Record<string, RunwayGeometry> = {
 
 const latestFlights = new Map<string, LiveFlight>()
 const airportAvailability = new Map<string, boolean>()
+type ApproachPayload = { cycle: string; airport: ApproachAirport; thresholds: Record<string, RunwayGeometry> }
+const approachData = new Map<string, ApproachPayload>()
 
 function toRad(value: number) {
   return value * Math.PI / 180
@@ -97,7 +100,7 @@ function trackFresh(flight: LiveFlight, nowMs = Date.now()) {
   return Number.isFinite(millis) && Math.abs(nowMs - millis) <= TRACK_MAX_AGE_MS
 }
 
-export function evaluateFinalTenNm(airport: string, runway: string, flight: LiveFlight | undefined, nowMs = Date.now()) {
+export function evaluateFinalTenNm(airport: string, runway: string, flight: LiveFlight | undefined, nowMs = Date.now(), approachName = '') {
   const geometry = RUNWAYS[`${airport}:${runway}`]
   if (!geometry || !flight || flight.onGround !== false) return { available: false, final: false, along: null, cross: null }
   if (!Number.isFinite(flight.latitude)
@@ -116,7 +119,16 @@ export function evaluateFinalTenNm(airport: string, runway: string, flight: Live
   const cross = Math.abs(direct * Math.sin(toRad(courseDelta)))
   const headingOk = Math.abs(angularDifference(Number(flight.heading), geometry.course)) <= FINAL_HEADING_TOLERANCE_DEG
 
-  const final = along >= 0
+  const nav = approachData.get(airport)
+  const matched = nav ? evaluateApproachGate(nav.airport, runway, geometry, flight, nowMs, approachName) : null
+  if (matched) return { available: true, final: true, along, cross: matched.cross,
+    direct: matched.directNm, pathDistance: matched.remainingNm, pathName: matched.pathName, cycle: nav!.cycle }
+
+  const climbingOut = (Number.isFinite(flight.verticalSpeedFpm) && Number(flight.verticalSpeedFpm) > 600)
+    || /^(initial climb|departing)$/i.test(flight.state || '')
+  const aboveApproach = nav && Number.isFinite(flight.altitude) && Number(flight.altitude) - nav.airport.elevationFt > 6000
+  const final = !climbingOut && !aboveApproach && along >= 0
+    && direct <= FINAL_ALONG_TRACK_NM
     && along <= FINAL_ALONG_TRACK_NM
     && cross <= FINAL_CROSS_TRACK_NM
     && headingOk
@@ -126,6 +138,11 @@ export function evaluateFinalTenNm(airport: string, runway: string, flight: Live
 
 function applyToRows() {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
+    // Never retain a path from an earlier sample, runway, or failed AIRAC refresh.
+    delete row.dataset.finalPathDistanceNm
+    delete row.dataset.finalPathName
+    delete row.dataset.finalApproachCycle
+    delete row.dataset.finalDirectNm
     // TEST TRAFFIC has no live positional sensor. Never let a synthetic callsign
     // accidentally match an IVAO flight; its lifecycle uses the four-minute fallback.
     if (row.classList.contains('is-demo')) {
@@ -150,7 +167,7 @@ function applyToRows() {
       return
     }
     const flight = latestFlights.get(`${airport}:${callsign}`)
-    const result = evaluateFinalTenNm(airport, runway, flight)
+    const result = evaluateFinalTenNm(airport, runway, flight, Date.now(), row.dataset.regionalApproach || '')
 
     row.dataset.finalGeometryAvailable = result.available ? 'true' : 'false'
     row.dataset.finalTenNm = result.final ? 'true' : 'false'
@@ -158,6 +175,12 @@ function applyToRows() {
     else delete row.dataset.finalAlongNm
     if (result.cross != null) row.dataset.finalCrossNm = result.cross.toFixed(1)
     else delete row.dataset.finalCrossNm
+    if (result.pathName) {
+      row.dataset.finalPathDistanceNm = String(result.pathDistance)
+      row.dataset.finalPathName = result.pathName
+      row.dataset.finalDirectNm = String(result.direct)
+      row.dataset.finalApproachCycle = result.cycle
+    }
     if (result.available && flight?.trackTimestamp) row.dataset.finalTrackAt = flight.trackTimestamp
     else delete row.dataset.finalTrackAt
   })
@@ -169,14 +192,16 @@ function clearAirportFlights(airport: string) {
   }
 }
 
-async function refreshAirport(airport: string) {
+async function refreshAirport(airport: string, stillActive: () => boolean) {
   const response = await fetch(`/api/sequence/ivao-traffic?airport=${encodeURIComponent(airport)}`, {
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
   })
   if (!response.ok) throw new Error(`IVAO traffic ${airport} returned ${response.status}`)
   const payload = await response.json() as TrafficPayload
+  if (!stillActive()) return
   clearAirportFlights(airport)
   for (const flight of payload.flights || []) {
     const callsign = String(flight.callsign || '').trim().toUpperCase()
@@ -184,17 +209,40 @@ async function refreshAirport(airport: string) {
   }
 }
 
+async function refreshApproaches(airport: string, stillActive: () => boolean) {
+  try {
+    const response = await fetch(`/api/sequence/final-approaches?airport=${encodeURIComponent(airport)}`, {
+      credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000),
+    })
+    const nav = await response.json() as ApproachPayload
+    if (!response.ok || nav.airport?.code !== airport || !nav.thresholds || !nav.cycle) throw new Error('Invalid approach data')
+    if (!stillActive()) return
+    approachData.set(airport, nav)
+    // Regional thresholds become available even before the regional prediction UI.
+    for (const [runway, geometry] of Object.entries(nav.thresholds)) RUNWAYS[`${airport}:${runway}`] = geometry
+  } catch {
+    if (stillActive()) approachData.delete(airport)
+  }
+}
+
 export function installFinalTenNmRuntime() {
   let disposed = false
+  const pending = new Set<string>()
 
   const refresh = async () => {
     await Promise.allSettled(selectedAmanAirports().map(async (airport) => {
+      if (pending.has(airport)) return
+      pending.add(airport)
       try {
-        await refreshAirport(airport)
+        await Promise.all([refreshAirport(airport, () => !disposed), refreshApproaches(airport, () => !disposed)])
+        if (disposed) return
         airportAvailability.set(airport, true)
       } catch {
+        if (disposed) return
         clearAirportFlights(airport)
         airportAvailability.set(airport, false)
+      } finally {
+        pending.delete(airport)
       }
     }))
     if (!disposed) applyToRows()
@@ -212,5 +260,6 @@ export function installFinalTenNmRuntime() {
     window.clearInterval(applyTimer)
     latestFlights.clear()
     airportAvailability.clear()
+    approachData.clear()
   }
 }

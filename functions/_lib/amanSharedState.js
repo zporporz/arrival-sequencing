@@ -343,6 +343,8 @@ function gaStatePatch(record, snapshot, airport, nowMs, terminalNow) {
       frozen_runway: null,
       frozen_approach_category: null,
       frozen_distance_nm: null,
+      frozen_path_distance_nm: null,
+      frozen_approach_path: null,
       frozen_reference_speed_kt: null,
       frozen_track_at: null,
       frozen_captured_at: null,

@@ -24,7 +24,8 @@ try {
       speedType: row.speed_limit_type, speedKt: row.speed_limit,
     });
     const airports = {};
-    for (const code of ['VTCC', 'VTSP']) {
+    const approachesOnly = process.argv.includes('--final-approaches');
+    for (const code of approachesOnly ? ['VTBD', 'VTBS', 'VTCC', 'VTSP'] : ['VTCC', 'VTSP']) {
       const airport = db.prepare('SELECT * FROM airport WHERE ident=?').get(code);
       if (!airport) throw new Error(`Airport missing: ${code}`);
       const runways = all(`SELECT e.* FROM runway r JOIN runway_end e ON e.runway_end_id IN (r.primary_end_id,r.secondary_end_id)
@@ -44,13 +45,13 @@ try {
         })),
       }));
       airports[code] = { code, name: airport.name, lat: airport.laty, lon: airport.lonx,
-        elevationFt: airport.altitude, runways, procedures };
+        elevationFt: airport.altitude, runways, procedures: approachesOnly ? procedures.filter(p => p.kind === 'APPROACH') : procedures };
     }
     const output = { cycle: metadata.airac_cycle, sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'),
       source: 'LITTLE_NAVMAP_NAVIGRAPH', airports };
     const directory = fileURLToPath(new URL('../functions/_data/', import.meta.url));
     mkdirSync(directory, { recursive: true });
-    writeFileSync(`${directory}/regional-arrivals.json`, `${JSON.stringify(output)}\n`);
+    writeFileSync(`${directory}/${approachesOnly ? 'final-approaches' : 'regional-arrivals'}.json`, `${JSON.stringify(output)}\n`);
     console.log(`Extracted AIRAC ${output.cycle}: ${Object.entries(airports).map(([code,a]) => `${code} ${a.procedures.length} procedures`).join(', ')}`);
   }
 } finally { db.close(); }

@@ -41,6 +41,8 @@ type FlightState = {
   frozen_runway: string | null
   frozen_approach_category: string | null
   frozen_distance_nm: number | null
+  frozen_path_distance_nm?: number | null
+  frozen_approach_path?: string | null
   frozen_reference_speed_kt: number | null
   frozen_track_at: string | null
   frozen_captured_at: string | null
@@ -84,6 +86,9 @@ type FrozenTargetRequest = {
   approachCategory?: string
   distanceNm?: number
   trackAt?: string
+  approachPath?: boolean
+  approachName?: string
+  approachCycle?: string
 }
 
 type SharedStatePayload = {
@@ -729,6 +734,7 @@ export function installSharedAmanRuntime() {
           approachCategory,
           distanceNm,
           trackAt,
+          ...(detail?.approachPath ? { approachPath: true, approachName: detail.approachName, approachCycle: detail.approachCycle } : {}),
         })
         if (result.flightState) {
           mergeFlight(result.flightState)

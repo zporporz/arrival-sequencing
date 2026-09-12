@@ -110,6 +110,8 @@ type SharedOperationalFlight = {
   frozen_runway?: string | null
   frozen_approach_category?: string | null
   frozen_distance_nm?: number | null
+  frozen_path_distance_nm?: number | null
+  frozen_approach_path?: string | null
   frozen_reference_speed_kt?: number | null
   frozen_track_at?: string | null
   frozen_captured_at?: string | null
@@ -1738,6 +1740,7 @@ export default function App() {
                 data-delay-minutes={row.delayMinutes}
                 data-regional-stage={row.regional?.stage}
                 data-regional-model={row.regional?.modelKey}
+                data-regional-approach={row.regional ? approachByAirport[`${airport}:${row.runway}`] : undefined}
                 data-eta-ff-passed={row.regional?.etaFfPassed ? 'true' : undefined}
                 data-timing-model={row.regional ? 'EST' : undefined}
                 data-matrix-band={matrix.band}
