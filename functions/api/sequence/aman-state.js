@@ -1,6 +1,7 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
 import { utcServiceDate } from '../../_lib/amanSharedState.js';
 import { VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow } from '../../../shared/vtbsRunways.js';
+import { VTBD_RUNWAY_GROUPS, vtbdFlowFromWorkspace, vtbdModesForFlow } from '../../../shared/vtbdRunways.js';
 
 const json = (body, status = 200) => Response.json(body, {
   status,
@@ -296,6 +297,15 @@ export async function onRequestPost(context) {
         runwayModes = vtbsModesForFlow(runwayModes, flow);
         settings.runwayFlow = flow;
       }
+      if (airport === 'VTBD') {
+        const flow = vtbdFlowFromWorkspace(runwayModes, settings);
+        const opposite = flow === '03' ? '21' : '03';
+        if (VTBD_RUNWAY_GROUPS[opposite].some(r => runwayModes[r] && runwayModes[r] !== 'CLOSED')) {
+          throw new Error('VTBD must use one runway direction at a time');
+        }
+        runwayModes = vtbdModesForFlow(runwayModes, flow);
+        settings.runwayFlow = flow;
+      }
 
       const result = await supabaseAdminRequest(
         context.env,
@@ -349,12 +359,12 @@ export async function onRequestPost(context) {
     const existing = await getFlightState(context.env, serviceDate, airport, callsign);
 
     if (action === 'setFrozenTarget') {
-      // Preserve the existing single-capture policy outside VTBS. At VTBS a
-      // north/south flow change needs a new capture for the new landing end.
-      if (existing?.frozen_tldt && airport !== 'VTBS') return json({ ok: true, flightState: existing });
+      // A Bangkok north/south flow change needs a fresh capture at its own end.
+      if (existing?.frozen_tldt && !['VTBS', 'VTBD'].includes(airport)) return json({ ok: true, flightState: existing });
       const runway = cleanRunway(payload.runway);
       if (!runway) throw new Error('Landing runway is required');
       if (airport === 'VTBS' && !Object.values(VTBS_RUNWAY_GROUPS).flat().includes(runway)) throw new Error('Valid VTBS landing runway is required');
+      if (airport === 'VTBD' && !Object.values(VTBD_RUNWAY_GROUPS).flat().includes(runway)) throw new Error('Valid VTBD landing runway is required');
       if (existing?.frozen_tldt && existing.frozen_runway === runway) return json({ ok: true, flightState: existing });
       const calculated = frozenTargetForApproachCategory(payload);
       const serverNow = Date.now();

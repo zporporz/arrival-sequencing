@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import AirportSelector from './AirportSelector'
+import { VTBD_ALL_RUNWAYS, VTBD_RUNWAY_GROUPS, vtbdFlowFromWorkspace, vtbdModesForFlow, type VtbdFlow } from '../shared/vtbdRunways'
 import { VTBS_ALL_RUNWAYS, VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow, type VtbsFlow } from '../shared/vtbsRunways'
 import { AMAN_AIRPORTS, AIRPORT_REFERENCE, DEFAULT_AIRPORT_VIEW, airportFromId, isAmanAirport, isRegionalAirport, type AirportCode, type AirportView } from './core/airports'
 import { registerRegionalFinalGeometry } from './finalTenNmRuntime'
@@ -24,6 +25,7 @@ import {
   VTBD_IAWP_COMPACT_CODES,
   VTBD_IAWP_COMPACT_CODE_STYLE,
   VTBD_IAWP_NOMINAL_MINUTES,
+  VTBD_STAR03_NOMINAL_MINUTES,
   VTBS_STAR19_NOMINAL_MINUTES,
   VTBS_STAR01_NOMINAL_MINUTES,
   getAmanOperationalMatrixAdvice,
@@ -99,6 +101,7 @@ type SharedOperationalFlight = {
   airport: string
   callsign: string
   target_mode?: 'AUTO' | 'MANUAL' | null
+  manual_runway?: string | null
   auto_return_tldt?: string | null
   auto_return_floor_tldt?: string | null
   auto_return_runway?: string | null
@@ -129,7 +132,7 @@ type OpsMenuState = {
 }
 
 const RUNWAYS: Record<AirportCode, readonly string[]> = {
-  VTBD: ['21R', '21L'],
+  VTBD: VTBD_ALL_RUNWAYS,
   VTBS: VTBS_ALL_RUNWAYS,
   VTCC: ['18', '36'], VTSP: ['09', '27'],
 }
@@ -147,6 +150,9 @@ const RUNWAY_PROFILES: Record<AirportCode, readonly RunwayProfile[]> = {
     { id: 'DUAL_21RARR_21LARR', modes: { '21R': 'ARR', '21L': 'ARR' } },
     { id: '21RARR_21LDEP', modes: { '21R': 'ARR', '21L': 'DEP' } },
     { id: '21LARR_21RDEP', modes: { '21R': 'DEP', '21L': 'ARR' } },
+    { id: 'DUAL_03LARR_03RARR', modes: { '03L': 'ARR', '03R': 'ARR' } },
+    { id: '03LARR_03RDEP', modes: { '03L': 'ARR', '03R': 'DEP' } },
+    { id: '03RARR_03LDEP', modes: { '03L': 'DEP', '03R': 'ARR' } },
   ],
   VTBS: [
     { id: 'SEMI35_19MIX_20LDEP_20RARR', modes: { '19': 'MIX', '20L': 'DEP', '20R': 'ARR' } },
@@ -174,7 +180,7 @@ const RUNTIME_MASTER_FLOW: Record<AirportCode, string> = {
 
 const DEFAULT_RUNWAY_MODES: Record<AirportCode, Record<string, RunwayMode>> = {
   VTCC: { '18': 'ARR', '36': 'CLOSED' }, VTSP: { '09': 'CLOSED', '27': 'ARR' },
-  VTBD: { '21R': 'ARR', '21L': 'ARR' },
+  VTBD: vtbdModesForFlow({ '21R': 'ARR', '21L': 'ARR' }, '21'),
   VTBS: vtbsModesForFlow({ '19': 'MIX', '20L': 'DEP', '20R': 'ARR' }, '19_20'),
 }
 
@@ -182,6 +188,8 @@ const DEFAULT_SPACING_NM: Record<string, number> = {
   'VTCC:18': 5, 'VTCC:36': 5, 'VTSP:09': 5, 'VTSP:27': 5,
   'VTBD:21R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21R'],
   'VTBD:21L': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21L'],
+  'VTBD:03L': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['03L'],
+  'VTBD:03R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['03R'],
   'VTBS:19': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['19'],
   'VTBS:20L': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['20L'],
   'VTBS:20R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['20R'],
@@ -190,9 +198,9 @@ const DEFAULT_SPACING_NM: Record<string, number> = {
   'VTBS:02R': AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['02R'],
 }
 
-export function resetAirportSpacing(current: Record<string, number>, airport: AirportCode, vtbsFlow: VtbsFlow = '19_20') {
+export function resetAirportSpacing(current: Record<string, number>, airport: AirportCode, vtbsFlow: VtbsFlow = '19_20', vtbdFlow: VtbdFlow = '21') {
   const next = { ...current }
-  for (const runway of airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[vtbsFlow] : RUNWAYS[airport]) {
+  for (const runway of airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[vtbsFlow] : airport === 'VTBD' ? VTBD_RUNWAY_GROUPS[vtbdFlow] : RUNWAYS[airport]) {
     next[spacingKey(airport, runway)] = DEFAULT_SPACING_NM[spacingKey(airport, runway)]
   }
   return next
@@ -299,7 +307,9 @@ export function defaultArrivalRunway(airport: AirportCode, activeRunways: string
   if (airport === 'VTBS' && activeRunways.includes('19')) return '19'
   if (airport === 'VTBS' && activeRunways.includes('01')) return '01'
   if (airport === 'VTBD') {
-    const preferred = vtbdDefaultRunway(callsign)
+    const southPreferred = vtbdDefaultRunway(callsign)
+    const north = activeRunways.some(r => VTBD_RUNWAY_GROUPS['03'].includes(r))
+    const preferred = north ? (southPreferred === '21R' ? '03L' : '03R') : southPreferred
     if (activeRunways.includes(preferred)) return preferred
   }
   return activeRunways[0] ?? null
@@ -330,9 +340,10 @@ function formatSplit(minutes: number) {
   return rounded.toFixed(rounded % 1 === 0 ? 0 : 1)
 }
 
-export function nominalStarSeconds(airport: AirportCode, fix: string, vtbsFlow: VtbsFlow = '19_20') {
+export function nominalStarSeconds(airport: AirportCode, fix: string, vtbsFlow: VtbsFlow = '19_20', vtbdFlow: VtbdFlow = '21') {
   if (airport === 'VTBD') {
-    const minutes = (VTBD_IAWP_NOMINAL_MINUTES as Record<string, number>)[fix]
+    const table = vtbdFlow === '03' ? VTBD_STAR03_NOMINAL_MINUTES : VTBD_IAWP_NOMINAL_MINUTES
+    const minutes = (table as Record<string, number>)[fix]
     return Number.isFinite(minutes) ? minutes * 60 : null
   }
   const table = vtbsFlow === '01_02' ? VTBS_STAR01_NOMINAL_MINUTES : VTBS_STAR19_NOMINAL_MINUTES
@@ -340,13 +351,12 @@ export function nominalStarSeconds(airport: AirportCode, fix: string, vtbsFlow: 
   return Number.isFinite(minutes) ? minutes * 60 : null
 }
 
-export function masterTimingLookup(config: OperationalConfigPayload | null, vtbsFlow: VtbsFlow = '19_20') {
+export function masterTimingLookup(config: OperationalConfigPayload | null, vtbsFlow: VtbsFlow = '19_20', vtbdFlow: VtbdFlow = '21') {
   const result: Record<AirportCode, Record<string, number>> = { VTBD: {}, VTBS: {}, VTCC: {}, VTSP: {} }
   if (!config) return result
   for (const airport of ['VTBD', 'VTBS'] as const) {
     const airportWorkspaces = config.workspaces.filter((item) => item.airport === airport)
-    const workspace = airportWorkspaces.find((item) => item.flow === (airport === 'VTBS' ? vtbsFlow : RUNTIME_MASTER_FLOW[airport]))
-      ?? (airport === 'VTBD' && airportWorkspaces.length === 1 ? airportWorkspaces[0] : null)
+    const workspace = airportWorkspaces.find((item) => item.flow === (airport === 'VTBS' ? vtbsFlow : vtbdFlow))
     for (const timing of workspace?.timings ?? []) {
       if (Number.isFinite(timing.nominalSeconds) && timing.nominalSeconds > 0) {
         result[airport][timing.fix.toUpperCase()] = timing.nominalSeconds
@@ -356,11 +366,10 @@ export function masterTimingLookup(config: OperationalConfigPayload | null, vtbs
   return result
 }
 
-function hasOperationalWorkspace(config: OperationalConfigPayload | null, airport: AirportCode, vtbsFlow: VtbsFlow = '19_20') {
+function hasOperationalWorkspace(config: OperationalConfigPayload | null, airport: AirportCode, vtbsFlow: VtbsFlow = '19_20', vtbdFlow: VtbdFlow = '21') {
   if (!config) return false
   const matches = config.workspaces.filter((item) => item.airport === airport)
-  return matches.some((item) => item.flow === (airport === 'VTBS' ? vtbsFlow : RUNTIME_MASTER_FLOW[airport]))
-    || (airport === 'VTBD' && matches.length === 1)
+  return matches.some((item) => item.flow === (airport === 'VTBS' ? vtbsFlow : airport === 'VTBD' ? vtbdFlow : RUNTIME_MASTER_FLOW[airport]))
 }
 
 function compactFix(airport: AirportCode, fix: string) {
@@ -421,11 +430,11 @@ function processingDistanceNm(flight: IvaoArrivalTrafficFlight) {
   return distanceNm(reference.lat, reference.lon, Number(flight.latitude), Number(flight.longitude))
 }
 
-function buildDemoPredictions(airport: AirportCode, anchor: Date, timingLookup: Record<AirportCode, Record<string, number>>, useMaster: boolean, vtbsFlow: VtbsFlow = '19_20') {
+function buildDemoPredictions(airport: AirportCode, anchor: Date, timingLookup: Record<AirportCode, Record<string, number>>, useMaster: boolean, vtbsFlow: VtbsFlow = '19_20', vtbdFlow: VtbdFlow = '21') {
   return DEMO_SPECS[airport].flatMap<AmanArrivalPrediction>((spec, index) => {
     const nominalSeconds = isRegionalAirport(airport) ? 15 * 60 : useMaster
       ? timingLookup[airport][spec.refFix] ?? null
-      : nominalStarSeconds(airport, spec.refFix, vtbsFlow)
+      : nominalStarSeconds(airport, spec.refFix, vtbsFlow, vtbdFlow)
     if (nominalSeconds == null) return []
     const naturalLandingMs = anchor.getTime() + spec.naturalLandingOffsetMinutes * 60_000
     return [{
@@ -637,6 +646,7 @@ export function currentSharedAutoReturnOverrides(
   states: SharedOperationalFlight[],
   nowMs = Date.now(),
   vtbsFlow?: VtbsFlow,
+  vtbdFlow?: VtbdFlow,
 ) {
   const byFlight = new Map(states.map((state) => [flightKey(state.airport, state.callsign), state]))
   const tldtById: Record<string, string> = {}
@@ -645,10 +655,16 @@ export function currentSharedAutoReturnOverrides(
 
   for (const prediction of predictions) {
     const state = byFlight.get(predictionFlightKey(prediction))
-    if (state?.target_mode !== 'AUTO') continue
+    if (!state) continue
+    const flowAllows = (runway: string) => state.airport === 'VTBS' && vtbsFlow ? VTBS_RUNWAY_GROUPS[vtbsFlow].includes(runway)
+      : state.airport === 'VTBD' && vtbdFlow ? VTBD_RUNWAY_GROUPS[vtbdFlow].includes(runway) : true
+    // An opposite-flow manual target is ignored without mutating its DB record.
+    // A fresh Frozen capture on the selected 03/21 runway must still take effect.
+    const oppositeBdManual = state.airport === 'VTBD' && vtbdFlow && state.target_mode === 'MANUAL'
+      && state.manual_runway && !flowAllows(state.manual_runway.toUpperCase())
+    if (state.target_mode !== 'AUTO' && !oppositeBdManual) continue
     const frozenTargetMs = new Date(state.frozen_tldt || '').getTime()
     const frozenRunway = String(state.frozen_runway || '').trim().toUpperCase()
-    const flowAllows = (runway: string) => !vtbsFlow || state.airport !== 'VTBS' || VTBS_RUNWAY_GROUPS[vtbsFlow].includes(runway)
     if (Number.isFinite(frozenTargetMs) && flowAllows(frozenRunway)) {
       tldtById[prediction.id] = new Date(frozenTargetMs).toISOString()
       if (frozenRunway) runwayById[prediction.id] = frozenRunway
@@ -709,6 +725,7 @@ export default function App() {
   const [runwayModes, setRunwayModes] = useState<Record<AirportCode, Record<string, RunwayMode>>>(() => Object.fromEntries(AMAN_AIRPORTS.map(code => [code, { ...DEFAULT_RUNWAY_MODES[code] }])) as Record<AirportCode, Record<string, RunwayMode>>)
   const [profileByAirport, setProfileByAirport] = useState<Record<AirportCode, string>>({ ...DEFAULT_PROFILE })
   const [vtbsFlow, setVtbsFlow] = useState<VtbsFlow>('19_20')
+  const [vtbdFlow, setVtbdFlow] = useState<VtbdFlow>('21')
   const [spacingNm, setSpacingNm] = useState<Record<string, number>>({ ...DEFAULT_SPACING_NM })
   const [historyMinutes, setHistoryMinutes] = useState(AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES)
   const [inbound, setInbound] = useState<InboundPreview[]>([])
@@ -744,7 +761,7 @@ export default function App() {
     .map((airport) => trafficErrorsByAirport[airport] ? `${airport}: ${trafficErrorsByAirport[airport]}` : null)
     .filter((value): value is string => Boolean(value))
     .join(' · ') || null
-  const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig, vtbsFlow), [operationalConfig, vtbsFlow])
+  const operationalTimings = useMemo(() => masterTimingLookup(operationalConfig, vtbsFlow, vtbdFlow), [operationalConfig, vtbsFlow, vtbdFlow])
   const operationalTimingCount = Object.values(operationalTimings).reduce((total, timings) => total + Object.keys(timings).length, 0)
   const ticks = useMemo(() => timelineTicks(now), [now])
   const processingNowMs = Math.floor(now.getTime() / 60_000) * 60_000
@@ -800,29 +817,32 @@ export default function App() {
   }, [livePhaseById, livePredictions])
 
   const effectiveLivePredictions = useMemo(() => livePredictions.filter(prediction => {
-    if (rowAirport(prediction.id) === 'VTBS' && hasOperationalWorkspace(operationalConfig, 'VTBS', vtbsFlow)
-      && operationalTimings.VTBS[prediction.refFix] == null) return false
+    const airport = rowAirport(prediction.id)
+    if (!isRegionalAirport(airport) && (hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow)
+      ? operationalTimings[airport][prediction.refFix] == null
+      : nominalStarSeconds(airport, prediction.refFix, vtbsFlow, vtbdFlow) == null)) return false
     if (!prediction.regional) return true
-    const airport = rowAirport(prediction.id), runway = prediction.regional.runway
+    const runway = prediction.regional.runway
     const approach = regionalNav[airport]?.airport.procedures.find(p => p.kind === 'APPROACH'
       && p.runway === runway && p.name === approachByAirport[`${airport}:${runway}`])
     return activeRunwaysForAirport(airport, runwayModes).includes(runway)
       && approach?.id === prediction.regional.modelKey.split('|')[3]
   }).map((prediction) => {
-    if (rowAirport(prediction.id) === 'VTBS') {
-      const nominal = hasOperationalWorkspace(operationalConfig, 'VTBS', vtbsFlow)
-        ? operationalTimings.VTBS[prediction.refFix] : nominalStarSeconds('VTBS', prediction.refFix, vtbsFlow)
+    const airport = rowAirport(prediction.id)
+    if (!isRegionalAirport(airport)) {
+      const nominal = hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow)
+        ? operationalTimings[airport][prediction.refFix] : nominalStarSeconds(airport, prediction.refFix, vtbsFlow, vtbdFlow)
       if (nominal != null) prediction = { ...prediction, nominalStarSeconds: nominal }
     }
     const canonical = canonicalEtaById[prediction.id]
     if (!canonical || (prediction.regional && canonical.regional?.modelKey !== prediction.regional.modelKey)) return prediction
     return { ...prediction, predictedIawpAt: canonical.predictedIawpAt,
       ...(canonical.regional ? { regional: canonical.regional, nominalStarSeconds: canonical.regional.nominalStarSeconds } : {}) }
-  }), [canonicalEtaById, livePredictions, regionalNav, runwayModes, approachByAirport, operationalConfig, operationalTimings, vtbsFlow])
+  }), [canonicalEtaById, livePredictions, regionalNav, runwayModes, approachByAirport, operationalConfig, operationalTimings, vtbsFlow, vtbdFlow])
 
   const sharedAutoReturnOverrides = useMemo(
-    () => currentSharedAutoReturnOverrides(effectiveLivePredictions, sharedOperationalFlights, now.getTime(), vtbsFlow),
-    [effectiveLivePredictions, now, sharedOperationalFlights, vtbsFlow],
+    () => currentSharedAutoReturnOverrides(effectiveLivePredictions, sharedOperationalFlights, now.getTime(), vtbsFlow, vtbdFlow),
+    [effectiveLivePredictions, now, sharedOperationalFlights, vtbsFlow, vtbdFlow],
   )
   const sharedOperationalFlightByKey = useMemo(
     () => new Map(sharedOperationalFlights.map((state) => [flightKey(state.airport, state.callsign), state])),
@@ -937,7 +957,7 @@ export default function App() {
   const demoBaseSequence = useMemo(() => {
     if (!demoMode || !demoAnchors) return []
     const assigned = airports.flatMap((airport) => assignPredictionsToRunways(
-      buildDemoPredictions(airport, demoAnchors[airport], operationalTimings, hasOperationalWorkspace(operationalConfig, airport, vtbsFlow), vtbsFlow),
+      buildDemoPredictions(airport, demoAnchors[airport], operationalTimings, hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow), vtbsFlow, vtbdFlow),
       airport,
       runwayModes,
       manualRunways,
@@ -946,7 +966,7 @@ export default function App() {
       runwaySpacingSeconds,
       pairwiseSeparationSeconds: pairwiseLandingSeparationSeconds,
     })
-  }, [airports, demoAnchors, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, vtbsFlow])
+  }, [airports, demoAnchors, demoMode, manualRunways, operationalConfig, operationalTimings, runwayModes, runwaySpacingSeconds, vtbsFlow, vtbdFlow])
 
   const demoSequence = useMemo(
     () => applyManualTargetsWithCascade(demoBaseSequence, manualTldt, runwaySpacingSeconds, {}, autoReturnFloorTldt),
@@ -1162,6 +1182,32 @@ export default function App() {
     return () => window.removeEventListener('aman:apply-vtbs-workspace', apply)
   }, [])
 
+  useEffect(() => {
+    const apply = (event: Event) => {
+      const state = (event as CustomEvent<{ profile_id: string; runway_modes: Record<string, string>; spacing_nm: Record<string, number>; settings?: Record<string, unknown> }>).detail
+      if (!state?.runway_modes) return
+      const flow = vtbdFlowFromWorkspace(state.runway_modes, state.settings)
+      const modes = vtbdModesForFlow(state.runway_modes, flow)
+      setVtbdFlow(flow)
+      setRunwayModes(current => ({ ...current, VTBD: modes }))
+      const profile = RUNWAY_PROFILES.VTBD.find(p => p.id === state.profile_id
+        && VTBD_RUNWAY_GROUPS[flow].every(r => p.modes[r] === modes[r]))
+      setProfileByAirport(current => ({ ...current, VTBD: profile?.id || 'CUSTOM' }))
+      setSpacingNm(current => ({ ...current, ...Object.fromEntries(Object.entries(state.spacing_nm || {})
+        .filter(([r, value]) => VTBD_ALL_RUNWAYS.includes(r) && Number.isFinite(value) && value > 0)
+        .map(([r, value]) => [`VTBD:${r}`, value])) }))
+    }
+    window.addEventListener('aman:apply-vtbd-workspace', apply)
+    return () => window.removeEventListener('aman:apply-vtbd-workspace', apply)
+  }, [])
+
+  // Remote direction changes must discard local 21/03 controller targets too.
+  // This resets only BD; the persisted flight row is retained for audit/recovery.
+  useEffect(() => {
+    resetAirportManualState('VTBD')
+    window.dispatchEvent(new CustomEvent('aman:workspace-applied', { detail: { airport: 'VTBD' } }))
+  }, [vtbdFlow])
+
   const setView = (view: AirportView) => {
     resetManualState()
     setAirportView(view)
@@ -1178,8 +1224,11 @@ export default function App() {
     setProfileByAirport((current) => ({ ...current, [airport]: profileId }))
     const flow = vtbsFlowFromWorkspace(profile.modes)
     if (airport === 'VTBS') setVtbsFlow(flow)
+    const bdFlow = vtbdFlowFromWorkspace(profile.modes)
+    if (airport === 'VTBD') setVtbdFlow(bdFlow)
     setRunwayModes((current) => ({ ...current, [airport]: airport === 'VTBS'
-      ? vtbsModesForFlow(profile.modes, flow) : { ...current[airport], ...profile.modes } }))
+      ? vtbsModesForFlow(profile.modes, flow) : airport === 'VTBD'
+        ? vtbdModesForFlow(profile.modes, bdFlow) : { ...current[airport], ...profile.modes } }))
   }
 
   const setRunwayMode = (airport: AirportCode, runway: string, mode: RunwayMode) => {
@@ -1199,7 +1248,7 @@ export default function App() {
   }
 
   const resetRunwaySpacing = (airport: AirportCode) => {
-    setSpacingNm((current) => resetAirportSpacing(current, airport, vtbsFlow))
+    setSpacingNm((current) => resetAirportSpacing(current, airport, vtbsFlow, vtbdFlow))
     window.dispatchEvent(new CustomEvent('aman:workspace-config-change', { detail: { airport } }))
   }
 
@@ -1283,9 +1332,9 @@ export default function App() {
             const distanceToBkk = processingDistanceNm(flight)
             const match = findAipIawp(airport, flight.route, [...ENTRY_FIXES[airport]])
             if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
-            const nominalSeconds = hasOperationalWorkspace(operationalConfig, airport, vtbsFlow)
+            const nominalSeconds = hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow)
               ? operationalTimings[airport][match.entryFix] ?? null
-              : nominalStarSeconds(airport, match.entryFix, vtbsFlow)
+              : nominalStarSeconds(airport, match.entryFix, vtbsFlow, vtbdFlow)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const [geometry, performancePayload] = await Promise.all([
               resolveRouteGeometry(flight, airport, match.entryFix),
@@ -1363,7 +1412,7 @@ export default function App() {
       window.clearInterval(refresh)
       window.removeEventListener('aman:recompute-airport', onAirportRecompute)
     }
-  }, [airports, operationalConfig, operationalTimings, runwayModes, approachByAirport, vtbsFlow])
+  }, [airports, operationalConfig, operationalTimings, runwayModes, approachByAirport, vtbsFlow, vtbdFlow])
 
   useEffect(() => {
     if (!demoMode) return
@@ -1560,7 +1609,7 @@ export default function App() {
     <section className="aman-control-strip aman-multi-runway-strip">
       <AirportSelector view={airportView} onChange={setView} />
       <div className="aman-runway-config-control">
-        {airports.map((airport) => <div className="aman-runway-config-block" key={airport} data-airport={airport} data-runway-flow={airport === 'VTBS' ? vtbsFlow : undefined}>
+        {airports.map((airport) => <div className="aman-runway-config-block" key={airport} data-airport={airport} data-runway-flow={airport === 'VTBS' ? vtbsFlow : airport === 'VTBD' ? vtbdFlow : undefined}>
           <div className="aman-profile-select">
             <span>{airport} CONFIG</span>
             <select aria-label={`${airport} configuration`} value={profileByAirport[airport]} onChange={(event) => applyProfile(airport, event.target.value)}>
@@ -1573,6 +1622,8 @@ export default function App() {
               title={`Restore ${airport} LAND SEP defaults`}
               onClick={() => resetRunwaySpacing(airport)}
             >RESET LAND SEP</button>
+            {airport === 'VTBD' && vtbdFlow === '03' && !hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow)
+              && <small title="Nominal A320 EST · AIRAC 2609 · STAR via DOTLI · ILS Z 03L / RNP 03R · no wind, vectors or holding">DOTLI · TIMING EST</small>}
           </div>
           {isRegionalAirport(airport) && <div className="aman-regional-approach"><label>Approach · EST
             <select data-regional-approach aria-label={`${airport} approach`} value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`] || ''}
@@ -1584,7 +1635,7 @@ export default function App() {
               {!regionalNav[airport] && <option value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`]}>Loading AIRAC…</option>}
             </select></label><small>STAR + SimBrief · LAND SEP configurable</small></div>}
           <div className="aman-runway-cards">
-            {(airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[vtbsFlow] : RUNWAYS[airport]).map((runway) => {
+            {(airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[vtbsFlow] : airport === 'VTBD' ? VTBD_RUNWAY_GROUPS[vtbdFlow] : RUNWAYS[airport]).map((runway) => {
               const mode = runwayModes[airport][runway]
               const arrivalEnabled = isArrivalMode(mode)
               return <div className={`aman-runway-card ${arrivalEnabled ? 'is-arrival' : ''}`} key={runway}>
@@ -1592,7 +1643,7 @@ export default function App() {
                 <select aria-label={`${airport} ${runway} mode`} value={mode} onChange={(event) => setRunwayMode(airport, runway, event.target.value as RunwayMode)}>
                   <option value="ARR">ARR</option><option value="DEP">DEP</option><option value="MIX">MIX</option><option value="CLOSED">CLOSED</option>
                 </select>
-                <label title={airport === 'VTBS' && vtbsFlow === '01_02' ? 'Working default from reciprocal runway · controller configurable, not verified north-flow minima' : isRegionalAirport(airport) ? 'Experimental landing spacing · default 5 NM, controller configurable' : 'Target landing spacing'}>
+                <label title={(airport === 'VTBS' && vtbsFlow === '01_02') || (airport === 'VTBD' && vtbdFlow === '03') ? 'Working default from reciprocal runway · controller configurable, not verified north-flow minima' : isRegionalAirport(airport) ? 'Experimental landing spacing · default 5 NM, controller configurable' : 'Target landing spacing'}>
                   <input aria-label={`${airport} ${runway} LAND SEP`} type="number" min="1" max="20" step="0.1" value={spacingNm[spacingKey(airport, runway)]} disabled={!arrivalEnabled} onChange={(event) => setRunwaySpacing(airport, runway, Number(event.target.value))} />
                   <span>NM</span>
                 </label>
@@ -1696,7 +1747,7 @@ export default function App() {
                 data-auto-baseline-runway={autoBaselineRow?.runway}
                 data-auto-baseline-rank={autoBaselineRow?.sequenceIndex}
                 data-performance-category={row.performanceCategory || undefined}
-                data-runway-flow={airport === 'VTBS' ? vtbsFlow : undefined}
+                data-runway-flow={airport === 'VTBS' ? vtbsFlow : airport === 'VTBD' ? vtbdFlow : undefined}
                 data-frozen-tldt={sharedFlight?.frozen_runway === row.runway ? sharedFlight.frozen_tldt || undefined : undefined}
                 data-frozen-approach-category={sharedFlight?.frozen_approach_category || undefined}
                 data-missed-approach-active={isMissedApproach ? 'true' : undefined}

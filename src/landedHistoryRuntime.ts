@@ -151,7 +151,7 @@ function testRowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || null
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|03L|03R|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || null
 }
 
 function rememberActiveRunways() {

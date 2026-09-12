@@ -1,4 +1,5 @@
 import { getAuthenticatedIdentity } from './browserIdentity'
+import { VTBD_RUNWAY_GROUPS, type VtbdFlow } from '../shared/vtbdRunways'
 import { writeFlightCommand } from './flightCommandQueue'
 
 type WorkspaceState = {
@@ -180,7 +181,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|03L|03R|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
 }
 
 function fakePointer(clientY: number): FakePointerEvent {
@@ -378,8 +379,8 @@ export function installSharedAmanRuntime() {
     if (!block || block.dataset.sharedRevision === String(state.revision)) return
     // Apply CUSTOM and preset north/south workspaces atomically; the other flow's
     // runway controls are intentionally absent from the DOM.
-    if (state.airport === 'VTBS' && block.dataset.runwayFlow) {
-      window.dispatchEvent(new CustomEvent('aman:apply-vtbs-workspace', { detail: state }))
+    if (['VTBS', 'VTBD'].includes(state.airport) && block.dataset.runwayFlow) {
+      window.dispatchEvent(new CustomEvent(`aman:apply-${state.airport.toLowerCase()}-workspace`, { detail: state }))
       block.dataset.sharedRevision = String(state.revision)
       block.title = `Shared config · ${state.updated_by_name || state.updated_by_vid || 'IVAO'} · revision ${state.revision}`
       return
@@ -399,7 +400,12 @@ export function installSharedAmanRuntime() {
   const applyFlight = (state: FlightState) => {
     const row = findFlightRow(state.airport, state.callsign)
     if (!row || row.classList.contains('is-dragging')) return
-    if (row.dataset.sharedRevision === String(state.revision)) return
+    if (row.dataset.sharedRevision === String(state.revision)
+      && (state.airport !== 'VTBD' || row.dataset.sharedRunwayFlow === (row.dataset.runwayFlow || ''))) return
+    const markApplied = (element: HTMLElement) => {
+      element.dataset.sharedRevision = String(state.revision)
+      if (state.airport === 'VTBD') element.dataset.sharedRunwayFlow = element.dataset.runwayFlow || ''
+    }
 
     const isManualLocally = row.classList.contains('is-stable')
       || row.querySelector('.runway-assignment.is-manual') != null
@@ -407,7 +413,7 @@ export function installSharedAmanRuntime() {
     if (state.target_mode === 'AUTO') {
       if (isManualLocally) clearTargetThroughReact(row)
       row.dataset.targetMode = 'AUTO'
-      row.dataset.sharedRevision = String(state.revision)
+      markApplied(row)
       delete row.dataset.sharedActor
       delete row.dataset.realtimeReleasePreview
       return
@@ -415,6 +421,16 @@ export function installSharedAmanRuntime() {
 
     const targetMs = finiteTime(state.manual_tldt)
     if (targetMs == null || !state.manual_runway) return
+    const targetFitsFlow = (element: HTMLElement) => state.airport !== 'VTBD'
+      || !VTBD_RUNWAY_GROUPS[element.dataset.runwayFlow as VtbdFlow]
+      || VTBD_RUNWAY_GROUPS[element.dataset.runwayFlow as VtbdFlow].includes(state.manual_runway!)
+    if (!targetFitsFlow(row)) {
+      // Keep the revision for the next command, not the old direction's target.
+      if (isManualLocally) clearTargetThroughReact(row)
+      row.dataset.targetMode = 'AUTO'
+      markApplied(row)
+      return
+    }
 
     const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
     if (runwaySelect && runwaySelect.value !== state.manual_runway && [...runwaySelect.options].some(o => o.value === state.manual_runway)) {
@@ -423,13 +439,13 @@ export function installSharedAmanRuntime() {
 
     window.requestAnimationFrame(() => {
       const currentRow = findFlightRow(state.airport, state.callsign)
-      if (!currentRow) return
+      if (!currentRow || !targetFitsFlow(currentRow)) return
       const currentMs = currentTargetMs(currentRow)
       if (currentMs == null || Math.abs(currentMs - targetMs) > 3000 || !currentRow.classList.contains('is-stable')) {
         applyTargetThroughReact(currentRow, targetMs)
       }
       currentRow.dataset.targetMode = 'MANUAL'
-      currentRow.dataset.sharedRevision = String(state.revision)
+      markApplied(currentRow)
       currentRow.dataset.sharedActor = state.manual_updated_by_name || state.manual_updated_by_vid || 'IVAO'
       delete currentRow.dataset.realtimeReleasePreview
       const title = currentRow.getAttribute('title') || ''
@@ -478,9 +494,9 @@ export function installSharedAmanRuntime() {
         airport,
         profileId: current.profileId,
         runwayModes: current.runwayModes,
-        // VTBS renders one direction at a time. Keep saved reciprocal-end
+        // Bangkok renders one direction at a time. Keep saved reciprocal-end
         // spacing when the visible direction is changed or edited.
-        spacingNm: airport === 'VTBS'
+        spacingNm: ['VTBS', 'VTBD'].includes(airport)
           ? { ...workspaceStates.get(airport)?.spacing_nm, ...current.spacingNm }
           : current.spacingNm,
         settings: { ...(workspaceStates.get(airport)?.settings || { holdingThresholdMinutes: 5, speedAdvisoryEnabled: true }),
@@ -739,6 +755,17 @@ export function installSharedAmanRuntime() {
     if (mergeFlight(state)) applyFlight(state)
   }
   const onRealtimeSequenceOrder = (event: Event) => mergeSequenceOrder((event as CustomEvent<SequenceOrder>).detail)
+  const onWorkspaceApplied = (event: Event) => {
+    const airport = (event as CustomEvent<{ airport?: string }>).detail?.airport
+    // React has committed the new direction. Retry targets that arrived while
+    // the default-direction DOM was still mounted, without waiting for polling.
+    window.requestAnimationFrame(() => {
+      if (!disposed) {
+        flightStates.forEach(state => { if (state.airport === airport) applyFlight(state) })
+        emitState()
+      }
+    })
+  }
 
   document.addEventListener('change', onChange)
   window.addEventListener('aman:workspace-config-change', onWorkspaceConfigChange)
@@ -752,6 +779,7 @@ export function installSharedAmanRuntime() {
   window.addEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
   window.addEventListener('aman:realtime-flight-state', onRealtimeFlightState)
   window.addEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
+  window.addEventListener('aman:workspace-applied', onWorkspaceApplied)
 
   setSharedHealth('CONNECTING')
   void refresh()
@@ -785,5 +813,6 @@ export function installSharedAmanRuntime() {
     window.removeEventListener('aman:realtime-manual-release-cancel', onRealtimeManualReleaseCancel)
     window.removeEventListener('aman:realtime-flight-state', onRealtimeFlightState)
     window.removeEventListener('aman:realtime-sequence-order', onRealtimeSequenceOrder)
+    window.removeEventListener('aman:workspace-applied', onWorkspaceApplied)
   }
 }

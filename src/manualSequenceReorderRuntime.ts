@@ -4,6 +4,7 @@ import {
 } from './core/arrivalSequencing'
 import { TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
 import { VTBS_RUNWAY_GROUPS, type VtbsFlow } from '../shared/vtbsRunways'
+import { VTBD_RUNWAY_GROUPS, vtbdFlowFromWorkspace, type VtbdFlow } from '../shared/vtbdRunways'
 
 type SharedFlightState = {
   airport: string
@@ -21,6 +22,7 @@ type SharedSequenceOrder = {
 }
 
 type SharedStateDetail = {
+  workspaceStates?: Array<{ airport: string; runway_modes: Record<string, string>; settings?: Record<string, unknown> }>
   flightStates?: SharedFlightState[]
   sequenceOrders?: SharedSequenceOrder[]
 }
@@ -120,7 +122,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|03L|03R|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
 }
 
 function rowTargetMs(row: HTMLElement) {
@@ -527,6 +529,8 @@ function updateLiveDownwardOrder(state: DragOrderState, event: PointerEvent) {
 }
 
 function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
+  const bdWorkspace = detail?.workspaceStates?.find(state => state.airport === 'VTBD')
+  const bdFlow = bdWorkspace ? vtbdFlowFromWorkspace(bdWorkspace.runway_modes, bdWorkspace.settings) : null
   const explicitGroups = new Set<string>()
   for (const state of detail?.sequenceOrders || []) {
     const airport = String(state.airport || '').trim().toUpperCase()
@@ -573,10 +577,14 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
   document.querySelectorAll<HTMLElement>('.aman-flight-row').forEach((row) => {
     const identity = rowIdentity(row)
     if (!identity) return
+    // Do not latch a fallback order from default 21 rows during 03 hydration.
+    // The shared runtime republishes after the new workspace is rendered.
+    if (identity.airport === 'VTBD' && bdFlow && row.dataset.runwayFlow && row.dataset.runwayFlow !== bdFlow) return
     const shared = manualByIdentity.get(identity.identity)
     const visibleRunway = rowRunway(row)
-    const flowRunways = VTBS_RUNWAY_GROUPS[row.dataset.runwayFlow as VtbsFlow]
-    const compatible = identity.airport !== 'VTBS' || !flowRunways || flowRunways.includes(shared?.manual_runway?.toUpperCase() || '')
+    const flowRunways = identity.airport === 'VTBD' ? VTBD_RUNWAY_GROUPS[row.dataset.runwayFlow as VtbdFlow]
+      : identity.airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[row.dataset.runwayFlow as VtbsFlow] : undefined
+    const compatible = !flowRunways || flowRunways.includes(shared?.manual_runway?.toUpperCase() || '')
     const runway = shared?.target_mode === 'MANUAL' && shared.manual_runway && compatible
       ? shared.manual_runway.toUpperCase()
       : visibleRunway
@@ -600,7 +608,9 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
     const entries = group.rows.map((row, fallbackIndex) => {
       const identity = rowIdentity(row)!
       const shared = manualByIdentity.get(identity.identity)
-      const manualMs = shared?.target_mode === 'MANUAL' && shared.manual_tldt
+      const bdFlow = identity.airport === 'VTBD' ? VTBD_RUNWAY_GROUPS[row.dataset.runwayFlow as VtbdFlow] : undefined
+      const compatible = !bdFlow || bdFlow.includes(shared?.manual_runway?.toUpperCase() || '')
+      const manualMs = compatible && shared?.target_mode === 'MANUAL' && shared.manual_tldt
         ? new Date(shared.manual_tldt).getTime()
         : NaN
       const target = Number.isFinite(manualMs) ? manualMs : rowTargetMs(row)

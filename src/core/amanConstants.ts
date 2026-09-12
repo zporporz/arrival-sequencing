@@ -22,6 +22,17 @@ export const VTBS_SHORTCUT_REDUCTION_AT_LEAST_MINUTES = {
   STAR01: 2,
 } as const
 
+// Nominal A320 EST, AIRAC 2609: published STAR -> DOTLI -> ILS Z 03L / RNP 03R.
+// SimBrief descent 78/300/250, no wind/vector/holding. Rounded to working half-minutes.
+// Not measured operational timings; keep isolated from the existing RWY 21 table.
+export const VTBD_STAR03_NOMINAL_MINUTES = {
+  ENDUU: 26,
+  NAKON: 22.5,
+  SABAI: 15,
+  SEHNA: 20,
+  WEHHA: 21.5,
+} as const
+
 export const VTBD_IAWP_NOMINAL_MINUTES = {
   NAKON: 13,
   WEHHA: 13,
@@ -68,6 +79,9 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_NM = {
   VTBD: {
     '21R': 5,
     '21L': 7.1,
+    // Controller-configurable reciprocal-runway defaults, not verified 03 minima.
+    '03L': 5,
+    '03R': 7.1,
   },
   VTBS: {
     '19': 5.5,
@@ -98,6 +112,8 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_MINUTES = {
   VTBD: {
     '21R': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21R']),
     '21L': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['21L']),
+    '03L': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['03L']),
+    '03R': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBD['03R']),
   },
   VTBS: {
     '19': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['19']),
