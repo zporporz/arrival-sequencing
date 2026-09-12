@@ -99,6 +99,7 @@ describe('main AMAN airport selection', () => {
   }
   it('defaults to BS left / BD right and allows CC / SP in readable selectors', async () => {
     await act(async () => root.render(<App />))
+    expect([...container.querySelectorAll('.aman-side-select > span')].map(label => label.textContent)).toEqual(['LEFT', 'RIGHT'])
     expect(displaySidesFromDom().VTBS).toBe('LEFT'); expect(displaySidesFromDom().VTBD).toBe('RIGHT')
     expect(container.textContent).toContain('VTCC · Chiang Mai')
     expect(mocks.nav).not.toHaveBeenCalled()

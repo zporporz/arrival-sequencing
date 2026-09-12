@@ -5,7 +5,7 @@ export default function AirportSelector({ view, onChange }: { view: AirportView;
     <div className="aman-airport-scope-picker">
       <span className="aman-selector-heading">AIRPORT VIEW</span>
       {(['LEFT', 'RIGHT'] as const).map(side => <label className="aman-side-select" key={side}>
-        <span>{side === 'LEFT' ? 'ซ้าย' : 'ขวา'}</span>
+        <span>{side}</span>
         <select aria-label={`${side} airport`} value={view[side]} onChange={event => onChange(changeAirportView(view, side, event.target.value as AirportCode | ''))}>
           <option value="">— Off —</option>
           {AMAN_AIRPORTS.map(code => <option key={code} value={code}>{code} · {AIRPORT_NAMES[code]}</option>)}
