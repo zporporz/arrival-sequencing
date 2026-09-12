@@ -12,7 +12,6 @@ import { useAuthUser } from './AuthGate'
 import { findAipIawp } from './aipArrivalIawp'
 import {
   AMAN_DEFAULT_RUNWAY_SPACING_NM,
-  AMAN_ETA_FF_REFRESH_MS,
   AMAN_ETA_FF_REFRESH_SECONDS,
   AMAN_POST_CURRENT_LINE_RETENTION_DEFAULT_MINUTES,
   AMAN_POST_CURRENT_LINE_RETENTION_OPTIONS_MINUTES,
@@ -32,7 +31,8 @@ import {
   nmToMinutesAtReferenceSpeed,
   splitAmanDelay,
 } from './core/amanConstants'
-import { readAircraftPerformance, readIvaoTraffic, readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { readAircraftPerformance, readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { refreshIvaoTraffic, subscribeIvaoTraffic, type IvaoTrafficUpdate } from './core/ivaoTrafficFeed'
 import { formatRoundedHmUtc } from './core/minuteRounding'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
 import {
@@ -1306,17 +1306,20 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false
-    const loadTraffic = async (targetAirports: AirportCode[] = airports, announceAirport?: AirportCode) => {
+    const pendingRecompute = new Set<AirportCode>()
+    const loadTraffic = async (sharedUpdate: IvaoTrafficUpdate, announceAirport?: AirportCode) => {
+      const targetAirports = [sharedUpdate.airport]
       if (!announceAirport) setLoading(true)
       const results = await Promise.all(targetAirports.map(async (airport) => {
         try {
+          if (sharedUpdate.error) throw sharedUpdate.error
           if (isRegionalAirport(airport)) {
             const nav = await readRegionalNav(airport)
             if (disposed) return { airport, payload: null, resolved: [], error: null }
             registerRegionalFinalGeometry(nav.airport)
             setRegionalNav(current => ({ ...current, [airport]: nav }))
             const runway = activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]
-            const snapshot = await readRegionalSnapshot(nav, runway, true)
+            const snapshot = await readRegionalSnapshot(nav, runway, true, sharedUpdate.payload)
             const resolved = (snapshot.traffic.flights || []).map(flight => {
               const value = regionalPrediction(nav, snapshot, runway, approachByAirport[`${airport}:${runway}`], flight,
                 latestPredictionState.current.canonicalEtaById[`${airport}:${flight.sessionId}`]
@@ -1328,7 +1331,7 @@ export default function App() {
             })
             return { airport, payload: snapshot.traffic, resolved, error: null }
           }
-          const payload = await readIvaoTraffic(airport)
+          const payload = sharedUpdate.payload
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
             const id = `${airport}:${flight.sessionId}`
             const distanceToBkk = processingDistanceNm(flight)
@@ -1394,8 +1397,10 @@ export default function App() {
       }
     }
 
-    void loadTraffic()
-    const refresh = window.setInterval(() => void loadTraffic(), AMAN_ETA_FF_REFRESH_MS)
+    const unsubscribeTraffic = airports.map(airport => subscribeIvaoTraffic(airport, update => {
+      const announceAirport = pendingRecompute.delete(airport) ? airport : undefined
+      void loadTraffic(update, announceAirport)
+    }))
     const onAirportRecompute = (event: Event) => {
       const detail = (event as CustomEvent<{ airport?: AirportCode; demo?: boolean }>).detail
       const airport = detail?.airport
@@ -1406,12 +1411,13 @@ export default function App() {
       setCanonicalEtaById((current) => Object.fromEntries(
         Object.entries(current).filter(([id]) => rowAirport(id) !== airport),
       ))
-      void loadTraffic([airport], airport)
+      pendingRecompute.add(airport)
+      refreshIvaoTraffic(airport)
     }
     window.addEventListener('aman:recompute-airport', onAirportRecompute)
     return () => {
       disposed = true
-      window.clearInterval(refresh)
+      unsubscribeTraffic.forEach(unsubscribe => unsubscribe())
       window.removeEventListener('aman:recompute-airport', onAirportRecompute)
     }
   }, [airports, operationalConfig, operationalTimings, runwayModes, approachByAirport, vtbsFlow, vtbdFlow])

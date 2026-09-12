@@ -1,7 +1,7 @@
-import { readIvaoTraffic, type IvaoArrivalTrafficFlight } from './core/api'
+import { selectedAmanAirports } from './core/airports'
+import { subscribeIvaoTraffic } from './core/ivaoTrafficFeed'
 import {
   AMAN_DELAY_THRESHOLDS_MINUTES,
-  AMAN_ETA_FF_REFRESH_MS,
   getAmanOperationalMatrixAdvice,
   splitAmanDelay,
 } from './core/amanConstants'
@@ -38,7 +38,6 @@ type LivePlanningData = {
 }
 
 const SHARED_STATE_EVENT = 'aman:shared-state'
-const LIVE_REFRESH_MS = AMAN_ETA_FF_REFRESH_MS
 const DEFAULT_HOLDING_THRESHOLD_MINUTES = AMAN_DELAY_THRESHOLDS_MINUTES.HOLDING_MIN
 const DEFAULT_DEMO_GS_KT = 420
 const MIN_SPEED_PLAN_KT = 140
@@ -62,18 +61,6 @@ const VTBS_FIX_BY_CODE: Record<string, string> = {
 
 function flightKey(airport: string, callsign: string) {
   return `${airport}:${callsign}`
-}
-
-function selectedAirports() {
-  const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.aman-airport-scope-picker input[type="checkbox"]:checked'))
-    .map((input) => input.value.trim().toUpperCase())
-    .filter((airport) => ['VTBD', 'VTBS', 'VTCC', 'VTSP'].includes(airport))
-  if (checked.length) return checked
-
-  const active = Array.from(document.querySelectorAll<HTMLButtonElement>('.aman-airport-tabs > button'))
-    .find((button) => button.classList.contains('is-active'))
-    ?.textContent?.trim().toUpperCase()
-  return active === 'BOTH' ? ['VTBD', 'VTBS'] : active === 'VTBS' ? ['VTBS'] : ['VTBD']
 }
 
 function rowIdentity(row: HTMLElement) {
@@ -216,30 +203,33 @@ export function installOperationalAdvisoryRuntime() {
   const sharedFlights = new Map<string, SharedFlightState>()
   const workspaceSettings = new Map<string, Record<string, unknown>>()
   let disposed = false
+  const subscriptions = new Map<string, () => void>()
 
-  const refreshTraffic = async () => {
-    const airports = selectedAirports()
-    const results = await Promise.all(airports.map(async (airport) => {
-      try {
-        const payload = await readIvaoTraffic(airport)
-        return (payload.flights ?? []).map((flight: IvaoArrivalTrafficFlight): LivePlanningData => ({
-          airport,
-          callsign: flight.callsign.trim().toUpperCase(),
-          groundSpeed: Number.isFinite(flight.groundSpeed) ? Number(flight.groundSpeed) : null,
-          altitude: Number.isFinite(flight.altitude) ? Number(flight.altitude) : null,
-        }))
-      } catch {
-        return []
-      }
-    }))
-
-    if (disposed) return
-    for (const airport of airports) {
-      for (const key of [...liveByKey.keys()]) {
-        if (key.startsWith(`${airport}:`)) liveByKey.delete(key)
-      }
+  const clearAirport = (airport: string) => {
+    for (const key of liveByKey.keys()) if (key.startsWith(`${airport}:`)) liveByKey.delete(key)
+  }
+  const syncTrafficScope = () => {
+    const airports = selectedAmanAirports()
+    for (const [airport, unsubscribe] of subscriptions) {
+      if (airports.some(selected => selected === airport)) continue
+      unsubscribe()
+      subscriptions.delete(airport)
+      clearAirport(airport)
     }
-    for (const flight of results.flat()) liveByKey.set(flightKey(flight.airport, flight.callsign), flight)
+    for (const airport of airports) {
+      if (subscriptions.has(airport)) continue
+      subscriptions.set(airport, subscribeIvaoTraffic(airport, update => {
+        if (disposed) return
+        clearAirport(airport)
+        for (const flight of update.payload?.flights || []) {
+          const callsign = flight.callsign.trim().toUpperCase()
+          liveByKey.set(flightKey(airport, callsign), { airport, callsign,
+            groundSpeed: Number.isFinite(flight.groundSpeed) ? Number(flight.groundSpeed) : null,
+            altitude: Number.isFinite(flight.altitude) ? Number(flight.altitude) : null })
+        }
+        decorate()
+      }))
+    }
   }
 
   const decorate = () => {
@@ -402,15 +392,16 @@ export function installOperationalAdvisoryRuntime() {
 
   window.addEventListener(SHARED_STATE_EVENT, onSharedState)
   document.addEventListener('dblclick', onDoubleClick, true)
-  void refreshTraffic()
+  window.addEventListener('aman:airport-selection-change', syncTrafficScope)
+  syncTrafficScope()
   decorate()
 
-  const trafficTimer = window.setInterval(() => void refreshTraffic(), LIVE_REFRESH_MS)
   const decorateTimer = window.setInterval(decorate, 1_000)
 
   return () => {
     disposed = true
-    window.clearInterval(trafficTimer)
+    subscriptions.forEach(unsubscribe => unsubscribe())
+    window.removeEventListener('aman:airport-selection-change', syncTrafficScope)
     window.clearInterval(decorateTimer)
     window.removeEventListener(SHARED_STATE_EVENT, onSharedState)
     document.removeEventListener('dblclick', onDoubleClick, true)

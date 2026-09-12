@@ -105,7 +105,8 @@ describe('main AMAN airport selection', () => {
     expect(mocks.nav).not.toHaveBeenCalled()
     await select('LEFT', 'VTCC'); await select('RIGHT', 'VTSP')
     expect([...container.querySelectorAll('.aman-runway-config-block')].map(e => (e as HTMLElement).dataset.airport)).toEqual(['VTCC', 'VTSP'])
-    expect(mocks.snapshot).toHaveBeenCalledWith(expect.objectContaining({ airport: expect.objectContaining({ code: 'VTCC' }) }), '18', true)
+    expect(mocks.snapshot).toHaveBeenCalledWith(expect.objectContaining({ airport: expect.objectContaining({ code: 'VTCC' }) }), '18', true,
+      expect.objectContaining({ airport: 'VTCC', flights: [] }))
     const rows = container.querySelectorAll<HTMLElement>('.aman-flight-row')
     expect(rows).toHaveLength(2)
     expect([...rows].map(r => r.dataset.airport)).toEqual(expect.arrayContaining(['VTCC', 'VTSP']))

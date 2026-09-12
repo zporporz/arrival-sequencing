@@ -1,4 +1,5 @@
 import { selectedAmanAirports } from './core/airports'
+import { subscribeIvaoTraffic } from './core/ivaoTrafficFeed'
 import { regionalFinalGeometry } from '../functions/_lib/regionalGeometry'
 import { BANGKOK_FINAL_GEOMETRY } from '../shared/bangkokFinalGeometry'
 import type { RegionalAirport } from './core/regionalArrivalModel'
@@ -15,11 +16,6 @@ type LiveFlight = ApproachTrack & {
   heading: number | null
   onGround: boolean | null
   trackTimestamp: string | null
-}
-
-type TrafficPayload = {
-  airport: string
-  flights?: LiveFlight[]
 }
 
 type RunwayGeometry = {
@@ -192,23 +188,6 @@ function clearAirportFlights(airport: string) {
   }
 }
 
-async function refreshAirport(airport: string, stillActive: () => boolean) {
-  const response = await fetch(`/api/sequence/ivao-traffic?airport=${encodeURIComponent(airport)}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!response.ok) throw new Error(`IVAO traffic ${airport} returned ${response.status}`)
-  const payload = await response.json() as TrafficPayload
-  if (!stillActive()) return
-  clearAirportFlights(airport)
-  for (const flight of payload.flights || []) {
-    const callsign = String(flight.callsign || '').trim().toUpperCase()
-    if (callsign) latestFlights.set(`${airport}:${callsign}`, flight)
-  }
-}
-
 async function refreshApproaches(airport: string, stillActive: () => boolean) {
   try {
     const response = await fetch(`/api/sequence/final-approaches?airport=${encodeURIComponent(airport)}`, {
@@ -228,19 +207,40 @@ async function refreshApproaches(airport: string, stillActive: () => boolean) {
 export function installFinalTenNmRuntime() {
   let disposed = false
   const pending = new Set<string>()
+  const subscriptions = new Map<string, () => void>()
+
+  const syncTrafficScope = () => {
+    const airports = selectedAmanAirports()
+    for (const [airport, unsubscribe] of subscriptions) {
+      if (airports.some(selected => selected === airport)) continue
+      unsubscribe()
+      subscriptions.delete(airport)
+      clearAirportFlights(airport)
+      airportAvailability.delete(airport)
+      approachData.delete(airport)
+    }
+    for (const airport of airports) {
+      if (subscriptions.has(airport)) continue
+      subscriptions.set(airport, subscribeIvaoTraffic(airport, update => {
+        if (disposed) return
+        clearAirportFlights(airport)
+        airportAvailability.set(airport, !update.error)
+        for (const flight of update.payload?.flights || []) {
+          const callsign = String(flight.callsign || '').trim().toUpperCase()
+          if (callsign) latestFlights.set(`${airport}:${callsign}`, { ...flight, state: flight.state ?? undefined })
+        }
+        applyToRows()
+      }))
+    }
+  }
 
   const refresh = async () => {
+    syncTrafficScope()
     await Promise.allSettled(selectedAmanAirports().map(async (airport) => {
       if (pending.has(airport)) return
       pending.add(airport)
       try {
-        await Promise.all([refreshAirport(airport, () => !disposed), refreshApproaches(airport, () => !disposed)])
-        if (disposed) return
-        airportAvailability.set(airport, true)
-      } catch {
-        if (disposed) return
-        clearAirportFlights(airport)
-        airportAvailability.set(airport, false)
+        await refreshApproaches(airport, () => !disposed && subscriptions.has(airport))
       } finally {
         pending.delete(airport)
       }
@@ -258,6 +258,7 @@ export function installFinalTenNmRuntime() {
     window.removeEventListener('aman:airport-selection-change', refresh)
     window.clearInterval(fetchTimer)
     window.clearInterval(applyTimer)
+    subscriptions.forEach(unsubscribe => unsubscribe())
     latestFlights.clear()
     airportAvailability.clear()
     approachData.clear()

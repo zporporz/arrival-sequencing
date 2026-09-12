@@ -12,6 +12,22 @@ beforeEach(() => {
   mocks.route.mockResolvedValue({ origin: 'VTBD', destination: 'VTCC', cycle: '2609', segments: [], errors: [] })
 })
 describe('regional route requests', () => {
+  it('reuses operational traffic without another request, while still checking the active AIRAC', async () => {
+    const { readRegionalSnapshot } = await import('../src/core/regionalPreviewData')
+    const traffic = { airport: 'VTCC', fetchedAt: new Date().toISOString(), flights: [] }
+    const result = await readRegionalSnapshot(nav, '36', true, traffic)
+    expect(result.traffic).toBe(traffic)
+    expect(mocks.traffic).not.toHaveBeenCalled()
+    expect(mocks.nav).toHaveBeenCalled()
+    mocks.nav.mockResolvedValueOnce({ ...nav, cycle: '2610' })
+    await expect(readRegionalSnapshot(nav, '36', true, traffic)).rejects.toThrow('Active AIRAC changed')
+  })
+  it('does not mix airport scopes or preview traffic with operational traffic', async () => {
+    const { readRegionalSnapshot } = await import('../src/core/regionalPreviewData')
+    const traffic = { airport: 'VTSP', fetchedAt: new Date().toISOString(), flights: [] }
+    await expect(readRegionalSnapshot(nav, '36', true, traffic)).rejects.toThrow('scope mismatch')
+    await expect(readRegionalSnapshot(nav, '36', false, { ...traffic, airport: 'VTCC' })).rejects.toThrow('scope mismatch')
+  })
   it('passes selected arrival runway, active cycle and STAR entry, not an invented departure runway', async () => {
     const { readRegionalSnapshot } = await import('../src/core/regionalPreviewData')
     await readRegionalSnapshot(nav, '36')
