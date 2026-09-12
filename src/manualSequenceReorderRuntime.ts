@@ -3,7 +3,7 @@ import {
   setAmanManualSequenceOrderSnapshot,
 } from './core/arrivalSequencing'
 import { TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
-import { VTBS_RUNWAY_GROUPS, type VtbsFlow } from '../functions/_lib/vtbsRunways'
+import { VTBS_RUNWAY_GROUPS, type VtbsFlow } from '../shared/vtbsRunways'
 
 type SharedFlightState = {
   airport: string

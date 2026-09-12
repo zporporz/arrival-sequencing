@@ -1,6 +1,6 @@
 import { selectedAmanAirports } from './core/airports'
 import { regionalFinalGeometry } from '../functions/_lib/regionalGeometry'
-import { BANGKOK_FINAL_GEOMETRY } from '../functions/_lib/bangkokFinalGeometry'
+import { BANGKOK_FINAL_GEOMETRY } from '../shared/bangkokFinalGeometry'
 import type { RegionalAirport } from './core/regionalArrivalModel'
 
 export function registerRegionalFinalGeometry(airport: RegionalAirport) {

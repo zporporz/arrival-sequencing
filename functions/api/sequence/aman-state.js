@@ -1,6 +1,6 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
 import { utcServiceDate } from '../../_lib/amanSharedState.js';
-import { VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow } from '../../_lib/vtbsRunways.js';
+import { VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow } from '../../../shared/vtbsRunways.js';
 
 const json = (body, status = 200) => Response.json(body, {
   status,

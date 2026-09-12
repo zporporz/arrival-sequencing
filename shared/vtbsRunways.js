@@ -1,3 +1,4 @@
+// Shared browser/server data, outside Pages Functions route discovery.
 export const VTBS_RUNWAY_GROUPS = {
   '19_20': ['19', '20L', '20R'],
   '01_02': ['01', '02L', '02R'],

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost } from '../functions/api/sequence/aman-state.js'
 import { evaluateFinalObservation, detectAutomaticMissedApproach } from '../functions/_lib/amanSharedState.js'
-import { BANGKOK_FINAL_GEOMETRY } from '../functions/_lib/bangkokFinalGeometry.js'
+import { BANGKOK_FINAL_GEOMETRY } from '../shared/bangkokFinalGeometry.js'
 import { supabaseAdminRequest } from '../functions/_lib/supabaseAdmin.js'
 vi.mock('../functions/_lib/supabaseAdmin.js', () => ({ supabaseAdminRequest: vi.fn() }))
 

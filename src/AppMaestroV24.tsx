@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import AirportSelector from './AirportSelector'
-import { VTBS_ALL_RUNWAYS, VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow, type VtbsFlow } from '../functions/_lib/vtbsRunways'
+import { VTBS_ALL_RUNWAYS, VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow, type VtbsFlow } from '../shared/vtbsRunways'
 import { AMAN_AIRPORTS, AIRPORT_REFERENCE, DEFAULT_AIRPORT_VIEW, airportFromId, isAmanAirport, isRegionalAirport, type AirportCode, type AirportView } from './core/airports'
 import { registerRegionalFinalGeometry } from './finalTenNmRuntime'
 import { readRegionalNav, readRegionalSnapshot } from './core/regionalPreviewData'

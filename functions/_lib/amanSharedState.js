@@ -1,6 +1,6 @@
 import regionalNav from '../_data/regional-arrivals.json';
 import { regionalFinalGeometry } from './regionalGeometry.js';
-import { BANGKOK_FINAL_GEOMETRY } from './bangkokFinalGeometry.js';
+import { BANGKOK_FINAL_GEOMETRY } from '../../shared/bangkokFinalGeometry.js';
 import { supabaseAdminRequest } from './supabaseAdmin.js';
 
 export const AMAN_GHOST_RETENTION_MS = 30 * 60 * 1000;

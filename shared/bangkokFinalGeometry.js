@@ -4,6 +4,7 @@ const dms = (d, m, s) => d + m / 60 + s / 3600;
 // https://aip.caat.or.th/2026-05-14-AIRAC/html/eAIP/VT-AD-2.VTBS-en-GB.html
 // Reciprocal runway ends are separate thresholds (02L pairs with 20R).
 // Shared by browser Final-10 detection and server Frozen / Go-around detection.
+// Kept outside functions/ so Pages does not discover the type declarations as routes.
 export const BANGKOK_FINAL_GEOMETRY = {
   'VTBD:21R': { lat: dms(13, 55, 34.87), lon: dms(100, 36, 44.62), course: 209 },
   'VTBD:21L': { lat: dms(13, 55, 28.33), lon: dms(100, 36, 55.97), course: 208 },

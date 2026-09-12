@@ -34,6 +34,8 @@ RESET LAND SEP resets only the currently selected flow.
 Browser and server share the same [CAAT AD 2.12 threshold coordinates / true bearings](https://aip.caat.or.th/2026-05-14-AIRAC/html/eAIP/VT-AD-2.VTBS-en-GB.html)
 for Final-10 and automatic missed-approach detection.
 
-Validation: `npm run build`; north-flow regressions live in
+Validation: `npm run build` and `npm run check:pages`; north-flow regressions live in
 `tests/vtbs-north-flow.test.tsx` and `tests/vtbs-north-server.test.js`.
 No database migration or change of the live operational flow is required by this code update.
+Shared browser/server modules and their type declarations live in `shared/`,
+outside `functions/`, so Pages does not try to compile declarations as API routes.
