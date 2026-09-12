@@ -1,5 +1,6 @@
 import { selectedAmanAirports } from './core/airports'
 import { regionalFinalGeometry } from '../functions/_lib/regionalGeometry'
+import { BANGKOK_FINAL_GEOMETRY } from '../functions/_lib/bangkokFinalGeometry'
 import type { RegionalAirport } from './core/regionalArrivalModel'
 
 export function registerRegionalFinalGeometry(airport: RegionalAirport) {
@@ -33,17 +34,9 @@ const FINAL_CROSS_TRACK_NM = 1.5
 const FINAL_HEADING_TOLERANCE_DEG = 35
 const TRACK_MAX_AGE_MS = 90_000
 
-function dms(deg: number, min: number, sec: number) {
-  return deg + min / 60 + sec / 3600
-}
-
 // CAAT eAIP runway threshold coordinates / true bearings.
 const RUNWAYS: Record<string, RunwayGeometry> = {
-  'VTBD:21R': { lat: dms(13, 55, 34.87), lon: dms(100, 36, 44.62), course: 209 },
-  'VTBD:21L': { lat: dms(13, 55, 28.33), lon: dms(100, 36, 55.97), course: 208 },
-  'VTBS:19': { lat: dms(13, 41, 30.17), lon: dms(100, 45, 39.72), course: 194.42 },
-  'VTBS:20L': { lat: dms(13, 42, 13.21), lon: dms(100, 44, 35.44), course: 194.42 },
-  'VTBS:20R': { lat: dms(13, 42, 0.68), lon: dms(100, 44, 18.41), course: 194.0 },
+  ...BANGKOK_FINAL_GEOMETRY,
 }
 
 // Every airport represented by runway geometry is refreshed independently.
@@ -95,7 +88,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|18|36|09|27)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
 }
 
 function trackFresh(flight: LiveFlight, nowMs = Date.now()) {
@@ -146,6 +139,7 @@ function applyToRows() {
 
     const airport = rowAirport(row)
     const runway = rowRunway(row)
+    row.dataset.finalRunway = runway
     const callsign = rowCallsign(row)
     if (!airport || airportAvailability.get(airport) !== true) {
       row.dataset.finalGeometryAvailable = 'false'

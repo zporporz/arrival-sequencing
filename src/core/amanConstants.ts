@@ -73,6 +73,11 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_NM = {
     '19': 5.5,
     '20L': 8,
     '20R': 6,
+    // Configurable working defaults from the reciprocal physical runway.
+    // These are not independently verified north-flow operational minima.
+    '01': 5.5,
+    '02L': 6,
+    '02R': 8,
   },
 } as const
 
@@ -98,6 +103,9 @@ export const AMAN_DEFAULT_RUNWAY_SPACING_MINUTES = {
     '19': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['19']),
     '20L': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['20L']),
     '20R': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['20R']),
+    '01': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['01']),
+    '02L': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['02L']),
+    '02R': nmToMinutesAtReferenceSpeed(AMAN_DEFAULT_RUNWAY_SPACING_NM.VTBS['02R']),
   },
 } as const
 

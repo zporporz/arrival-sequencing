@@ -1,5 +1,6 @@
 import regionalNav from '../_data/regional-arrivals.json';
 import { regionalFinalGeometry } from './regionalGeometry.js';
+import { BANGKOK_FINAL_GEOMETRY } from './bangkokFinalGeometry.js';
 import { supabaseAdminRequest } from './supabaseAdmin.js';
 
 export const AMAN_GHOST_RETENTION_MS = 30 * 60 * 1000;
@@ -22,11 +23,7 @@ const AIRPORT_REFERENCE = {
 
 const RUNWAY_FINAL_GEOMETRY = {
   ...Object.assign({}, ...Object.values(regionalNav.airports).map(regionalFinalGeometry)),
-  'VTBD:21R': { lat: 13 + 55 / 60 + 34.87 / 3600, lon: 100 + 36 / 60 + 44.62 / 3600, course: 209 },
-  'VTBD:21L': { lat: 13 + 55 / 60 + 28.33 / 3600, lon: 100 + 36 / 60 + 55.97 / 3600, course: 208 },
-  'VTBS:19': { lat: 13 + 41 / 60 + 30.17 / 3600, lon: 100 + 45 / 60 + 39.72 / 3600, course: 194.42 },
-  'VTBS:20L': { lat: 13 + 42 / 60 + 13.21 / 3600, lon: 100 + 44 / 60 + 35.44 / 3600, course: 194.42 },
-  'VTBS:20R': { lat: 13 + 42 / 60 + 0.68 / 3600, lon: 100 + 44 / 60 + 18.41 / 3600, course: 194 },
+  ...BANGKOK_FINAL_GEOMETRY,
 };
 
 // If a pilot disconnects immediately after touchdown, IVAO can disappear before

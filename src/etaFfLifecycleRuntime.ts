@@ -13,6 +13,7 @@ const FROZEN_BEFORE_TLDT_MINUTES = 4
 const lockedEtaFfByKey = new Map<string, number>()
 const frozenStatusByKey = new Set<string>()
 const frozenTargetRequestAtByKey = new Map<string, number>()
+const frozenRunwayByKey = new Map<string, string>()
 let immediateRefreshQueued = false
 
 const FROZEN_TARGET_RETRY_MS = 5_000
@@ -104,6 +105,7 @@ function rowRunway(row: HTMLElement) {
 
 function requestFrozenTarget(row: HTMLElement, key: string, nowMs: number) {
   if (row.dataset.frozenTldt) return
+  if (row.dataset.finalRunway && row.dataset.finalRunway !== rowRunway(row)) return
   const previousRequestAt = frozenTargetRequestAtByKey.get(key)
   if (previousRequestAt != null && nowMs - previousRequestAt < FROZEN_TARGET_RETRY_MS) return
 
@@ -153,8 +155,9 @@ export function resolveFrozenTrigger(input: {
 function statusFromCurrentTarget(row: HTMLElement, now: Date, key: string): AmanFlightStatus {
   if (frozenStatusByKey.has(key)) return 'FROZEN'
 
-  const finalTenNm = row.dataset.finalTenNm === 'true'
-  const finalGeometryAvailable = row.dataset.finalGeometryAvailable === 'true'
+  const awaitingRunwayGeometry = Boolean(row.dataset.finalRunway && row.dataset.finalRunway !== rowRunway(row))
+  const finalTenNm = !awaitingRunwayGeometry && row.dataset.finalTenNm === 'true'
+  const finalGeometryAvailable = awaitingRunwayGeometry || row.dataset.finalGeometryAvailable === 'true'
   const targetLanding = targetTldtMs(row, now)
   const frozenTrigger = resolveFrozenTrigger({
     finalTenNm,
@@ -224,6 +227,15 @@ function refreshRows() {
     if (!key) return
     activeKeys.add(key)
 
+    // Keep the FF lock, but re-evaluate final approach for the new runway.
+    const runway = rowRunway(row)
+    if (frozenRunwayByKey.has(key) && frozenRunwayByKey.get(key) !== runway) {
+      frozenStatusByKey.delete(key)
+      frozenTargetRequestAtByKey.delete(key)
+      delete row.dataset.frozenTrigger
+    }
+    frozenRunwayByKey.set(key, runway)
+
     const status = statusFromCurrentTarget(row, now, key)
     applyStatusClass(row, status)
 
@@ -275,6 +287,7 @@ function refreshRows() {
       frozenTargetRequestAtByKey.delete(key)
     }
   }
+  for (const key of frozenRunwayByKey.keys()) if (!activeKeys.has(key)) frozenRunwayByKey.delete(key)
 }
 
 function queueImmediateRefresh() {
@@ -311,5 +324,6 @@ export function installEtaFfLifecycleRuntime() {
     lockedEtaFfByKey.clear()
     frozenStatusByKey.clear()
     frozenTargetRequestAtByKey.clear()
+    frozenRunwayByKey.clear()
   }
 }

@@ -37,7 +37,7 @@ const AIRPORT_REFERENCE: Record<AirportCode, { lat: number; lon: number }> = {
 }
 const AIRPORT_RUNWAYS: Record<AirportCode, ReadonlySet<string>> = {
   VTBD: new Set(['21R', '21L']),
-  VTBS: new Set(['19', '20L', '20R']),
+  VTBS: new Set(['19', '20L', '20R', '01', '02L', '02R']),
   VTCC: new Set(['18', '36']), VTSP: new Set(['09', '27']),
 }
 

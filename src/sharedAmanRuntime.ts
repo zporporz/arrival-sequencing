@@ -180,7 +180,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|18|36|09|27)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
 }
 
 function fakePointer(clientY: number): FakePointerEvent {
@@ -243,7 +243,7 @@ function readWorkspaceFromDom(airport: string) {
   })
 
   const approachName = block.querySelector<HTMLSelectElement>('[data-regional-approach]')?.value
-  return { airport, profileId, runwayModes, spacingNm, approachName }
+  return { airport, profileId, runwayModes, spacingNm, approachName, runwayFlow: block.dataset.runwayFlow }
 }
 
 function setSharedHealth(status: 'CONNECTING' | 'LIVE' | 'ERROR', detail = '') {
@@ -376,6 +376,14 @@ export function installSharedAmanRuntime() {
   const applyWorkspace = (state: WorkspaceState) => {
     const block = findConfigBlock(state.airport)
     if (!block || block.dataset.sharedRevision === String(state.revision)) return
+    // Apply CUSTOM and preset north/south workspaces atomically; the other flow's
+    // runway controls are intentionally absent from the DOM.
+    if (state.airport === 'VTBS' && block.dataset.runwayFlow) {
+      window.dispatchEvent(new CustomEvent('aman:apply-vtbs-workspace', { detail: state }))
+      block.dataset.sharedRevision = String(state.revision)
+      block.title = `Shared config · ${state.updated_by_name || state.updated_by_vid || 'IVAO'} · revision ${state.revision}`
+      return
+    }
     const profileSelect = block.querySelector<HTMLSelectElement>('.aman-profile-select select')
     const canSelectProfile = profileSelect
       && state.profile_id !== 'CUSTOM'
@@ -409,7 +417,7 @@ export function installSharedAmanRuntime() {
     if (targetMs == null || !state.manual_runway) return
 
     const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
-    if (runwaySelect && runwaySelect.value !== state.manual_runway) {
+    if (runwaySelect && runwaySelect.value !== state.manual_runway && [...runwaySelect.options].some(o => o.value === state.manual_runway)) {
       invokeReactChange(runwaySelect, state.manual_runway)
     }
 
@@ -470,9 +478,14 @@ export function installSharedAmanRuntime() {
         airport,
         profileId: current.profileId,
         runwayModes: current.runwayModes,
-        spacingNm: current.spacingNm,
+        // VTBS renders one direction at a time. Keep saved reciprocal-end
+        // spacing when the visible direction is changed or edited.
+        spacingNm: airport === 'VTBS'
+          ? { ...workspaceStates.get(airport)?.spacing_nm, ...current.spacingNm }
+          : current.spacingNm,
         settings: { ...(workspaceStates.get(airport)?.settings || { holdingThresholdMinutes: 5, speedAdvisoryEnabled: true }),
           ...(current.approachName ? { approachName: current.approachName } : {}),
+          ...(current.runwayFlow ? { runwayFlow: current.runwayFlow } : {}),
         },
       })
       mergeWorkspace(result.workspaceState)

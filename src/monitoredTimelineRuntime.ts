@@ -1,6 +1,7 @@
 import {
   VTBD_IAWP_NOMINAL_MINUTES,
   VTBS_STAR19_NOMINAL_MINUTES,
+  VTBS_STAR01_NOMINAL_MINUTES,
 } from './core/amanConstants'
 import { TIMELINE_DISPLAY_PX_PER_MINUTE } from './timelineScale'
 
@@ -43,7 +44,9 @@ function nominalStarMinutes(airport: AirportCode, fix: string) {
     return Number.isFinite(value) ? value : null
   }
   if (airport !== 'VTBS') return null
-  const value = (VTBS_STAR19_NOMINAL_MINUTES as Record<string, number>)[normalized]
+  const flow = document.querySelector<HTMLElement>('.aman-runway-config-block[data-airport="VTBS"]')?.dataset.runwayFlow
+  const table = flow === '01_02' ? VTBS_STAR01_NOMINAL_MINUTES : VTBS_STAR19_NOMINAL_MINUTES
+  const value = (table as Record<string, number>)[normalized]
   return Number.isFinite(value) ? value : null
 }
 

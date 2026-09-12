@@ -1,5 +1,6 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
 import { utcServiceDate } from '../../_lib/amanSharedState.js';
+import { VTBS_RUNWAY_GROUPS, vtbsFlowFromWorkspace, vtbsModesForFlow } from '../../_lib/vtbsRunways.js';
 
 const json = (body, status = 200) => Response.json(body, {
   status,
@@ -280,12 +281,21 @@ export async function onRequestPost(context) {
       const airport = cleanAirport(payload.airport);
       if (!airport) throw new Error('Valid airport is required');
       const profileId = cleanText(payload.profileId, 120) || 'CUSTOM';
-      const runwayModes = cleanObject(payload.runwayModes, 'runwayModes');
+      let runwayModes = cleanObject(payload.runwayModes, 'runwayModes');
       const spacingNm = cleanObject(payload.spacingNm, 'spacingNm');
       const suppliedSettings = payload.settings == null
         ? {}
         : cleanObject(payload.settings, 'settings');
       const settings = { ...suppliedSettings, ...DEFAULT_WORKSPACE_SETTINGS };
+      if (airport === 'VTBS') {
+        const flow = vtbsFlowFromWorkspace(runwayModes, settings);
+        const opposite = flow === '01_02' ? '19_20' : '01_02';
+        if (VTBS_RUNWAY_GROUPS[opposite].some(r => runwayModes[r] && runwayModes[r] !== 'CLOSED')) {
+          throw new Error('VTBS must use one runway direction at a time');
+        }
+        runwayModes = vtbsModesForFlow(runwayModes, flow);
+        settings.runwayFlow = flow;
+      }
 
       const result = await supabaseAdminRequest(
         context.env,
@@ -339,9 +349,13 @@ export async function onRequestPost(context) {
     const existing = await getFlightState(context.env, serviceDate, airport, callsign);
 
     if (action === 'setFrozenTarget') {
-      if (existing?.frozen_tldt) return json({ ok: true, flightState: existing });
+      // Preserve the existing single-capture policy outside VTBS. At VTBS a
+      // north/south flow change needs a new capture for the new landing end.
+      if (existing?.frozen_tldt && airport !== 'VTBS') return json({ ok: true, flightState: existing });
       const runway = cleanRunway(payload.runway);
       if (!runway) throw new Error('Landing runway is required');
+      if (airport === 'VTBS' && !Object.values(VTBS_RUNWAY_GROUPS).flat().includes(runway)) throw new Error('Valid VTBS landing runway is required');
+      if (existing?.frozen_tldt && existing.frozen_runway === runway) return json({ ok: true, flightState: existing });
       const calculated = frozenTargetForApproachCategory(payload);
       const serverNow = Date.now();
       const trackAtMs = new Date(calculated.trackAt).getTime();
@@ -361,7 +375,9 @@ export async function onRequestPost(context) {
         frozen_captured_by_name: auth.name,
       };
 
-      let row = await patchUnfrozenFlightState(context.env, serviceDate, airport, callsign, frozenPatch);
+      let row = existing?.frozen_tldt
+        ? await writeTargetIfCurrent(context.env, { service_date: serviceDate, airport, callsign }, frozenPatch, existing.revision)
+        : await patchUnfrozenFlightState(context.env, serviceDate, airport, callsign, frozenPatch);
       if (!row && !existing) {
         row = await insertFrozenFlightState(context.env, {
           ...flightIdentityRow(existing, payload, serviceDate, airport, callsign),

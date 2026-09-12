@@ -3,6 +3,7 @@ import {
   setAmanManualSequenceOrderSnapshot,
 } from './core/arrivalSequencing'
 import { TIMELINE_LOGICAL_PX_PER_MINUTE } from './timelineScale'
+import { VTBS_RUNWAY_GROUPS, type VtbsFlow } from '../functions/_lib/vtbsRunways'
 
 type SharedFlightState = {
   airport: string
@@ -119,7 +120,7 @@ function rowRunway(row: HTMLElement) {
   const select = row.querySelector<HTMLSelectElement>('.runway-assignment select')
   if (select?.value) return select.value.trim().toUpperCase()
   const text = row.querySelector<HTMLElement>('.runway-assignment')?.textContent?.trim().toUpperCase() || ''
-  return text.match(/(?:BD\/|BS\/)?(21R|21L|19|20L|20R)/)?.[1] || ''
+  return text.match(/(?:BD\/|BS\/|CC\/|SP\/)?(21R|21L|19|20L|20R|01|02L|02R|18|36|09|27)/)?.[1] || ''
 }
 
 function rowTargetMs(row: HTMLElement) {
@@ -573,9 +574,12 @@ function syncSharedManualOrder(detail: SharedStateDetail | undefined) {
     const identity = rowIdentity(row)
     if (!identity) return
     const shared = manualByIdentity.get(identity.identity)
-    const runway = shared?.target_mode === 'MANUAL' && shared.manual_runway
+    const visibleRunway = rowRunway(row)
+    const flowRunways = VTBS_RUNWAY_GROUPS[row.dataset.runwayFlow as VtbsFlow]
+    const compatible = identity.airport !== 'VTBS' || !flowRunways || flowRunways.includes(shared?.manual_runway?.toUpperCase() || '')
+    const runway = shared?.target_mode === 'MANUAL' && shared.manual_runway && compatible
       ? shared.manual_runway.toUpperCase()
-      : rowRunway(row)
+      : visibleRunway
     if (!runway) return
     const scopeRunway = amanSequenceScopeRunway(identity.airport, runway)
     const key = groupKey(identity.airport, scopeRunway)
