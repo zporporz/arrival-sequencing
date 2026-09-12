@@ -46,7 +46,53 @@ percentage saved. Production savings must be measured after deployment.
 - Traffic cadence: 15 seconds; local sensor application/decorating: 1 second.
 - TLDT/STA-FF/ETA formulas, Frozen geometry, manual targets, drag WebSocket
   messages, save/commit handling, shared-state and presence polling.
-- Approach/profile caching and reduction of other polling are separate work.
+- Approach caching and reduction of other polling are separate work.
+
+## Follow-up: profile batches and unchanged timing config
+
+The Bangkok AMAN calculation now creates an `aircraftPerformanceBatch` for each
+airport snapshot calculation. Repeated normalized aircraft types share the same
+pending/completed result within that batch. A new snapshot, Recompute, or real
+config change starts a new batch; there is no added cross-refresh TTL. Failed
+requests retain the previous null-profile fallback and retry in the next batch.
+Different models remain distinct (for example A320 and A20N). Regional profile
+caching and the separate category fallback are unchanged. There is no sharing
+between airports, browser tabs, or users in this follow-up.
+
+The 60-second operational timing config read and forced reads are unchanged.
+`retainUnchangedOperationalConfig` preserves React state identity when only the
+root `generatedAt` timestamp or JSON object-key ordering changes. It compares all
+other fields, including service date, flow, timing values, effective dates,
+verification, update metadata, and future fields. Array order remains meaningful.
+Real changes still update state and recalculate immediately upon receipt; errors
+still clear on a successful read. The shared workspace/LAND SEP five-second poll
+is a separate path and is untouched.
+
+### Cumulative estimate, not measured production savings
+
+Let N be the total flights needing a Bangkok profile across the selected
+airports, and K the **sum of distinct types per airport**. At 240 snapshots/hour,
+the counted baseline changes from `4,260 + 240*N` to `3,300 + 240*K` requests/hour.
+This deliberately excludes extra config-triggered calculations on the old code
+(and their savings), just as it excludes other variable requests listed above.
+
+For BD+BS selected and N=10:
+
+| Counted requests/hour | K=3 | K=6 |
+| --- | ---: | ---: |
+| Before both rounds of optimization | 6,660 | 6,660 |
+| After traffic-feed consolidation only | 5,700 | 5,700 |
+| After profile batching + unchanged-config guard | 4,020 | 4,740 |
+| Cumulative reduction against this baseline | 39.6% | 28.8% |
+
+K=3 is possible with the example's ten flights/three types at one airport and no
+profile-requiring flights at the other. If the same three types occur at both
+airports, K=6, not 3. Savings do not add as percentage points: for K=3 the second
+round saves 29.5% of the post-first-round counted baseline, producing 39.6% total.
+The config guard can save additional work/requests, but its incremental percentage
+depends on actual reprocessing and overlapping polls. No universal percentage is
+promised; ten different types would save no profile calls at all. More tabs still
+multiply requests. Do not apply the example directly to the historical 168k chart.
 
 ## Verification
 
@@ -57,6 +103,16 @@ percentage saved. Production savings must be measured after deployment.
   runtimes, 15-second sensor updates, scoped Recompute, deselection and recovery.
 - Regional tests verify reuse without another traffic request and preserve AIRAC
   invalidation and preview/airport isolation.
+- `aircraft-performance-batch.test.ts`: ten flights/three types over 240 batches
+  use 720 requests instead of 2,400; normalization, concurrent/completed sharing,
+  fresh batches, and failure recovery.
+- `operational-config-identity.test.ts`: timestamp-only changes preserve identity;
+  all operational fields and future-field changes are retained, without mutation.
+- `traffic-calculation-requests.test.tsx`: actual AMAN component, four 15-second
+  refreshes use 12 profile requests/40 flight calculations while the unchanged
+  60-second config poll does not replay them. Also covers forced refresh, real
+  timing changes/removal, failures, scoped Recompute, and shared SEP 5-to-7 on the
+  next normal five-second poll without echo writes.
 
 All tests use local fixtures. Live multi-browser and production request counts
 have not been measured for this change.

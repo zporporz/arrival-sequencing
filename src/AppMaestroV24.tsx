@@ -31,7 +31,9 @@ import {
   nmToMinutesAtReferenceSpeed,
   splitAmanDelay,
 } from './core/amanConstants'
-import { readAircraftPerformance, readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { createAircraftPerformanceBatch } from './core/aircraftPerformanceBatch'
+import { retainUnchangedOperationalConfig } from './core/operationalConfigIdentity'
 import { refreshIvaoTraffic, subscribeIvaoTraffic, type IvaoTrafficUpdate } from './core/ivaoTrafficFeed'
 import { formatRoundedHmUtc } from './core/minuteRounding'
 import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
@@ -1286,7 +1288,7 @@ export default function App() {
       try {
         const config = await readOperationalConfig()
         if (disposed) return
-        setOperationalConfig(config)
+        setOperationalConfig(current => retainUnchangedOperationalConfig(current, config))
         setOperationalConfigError(null)
       } catch (error) {
         if (disposed) return
@@ -1332,6 +1334,7 @@ export default function App() {
             return { airport, payload: snapshot.traffic, resolved, error: null }
           }
           const payload = sharedUpdate.payload
+          const readPerformance = createAircraftPerformanceBatch()
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
             const id = `${airport}:${flight.sessionId}`
             const distanceToBkk = processingDistanceNm(flight)
@@ -1343,7 +1346,7 @@ export default function App() {
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const [geometry, performancePayload] = await Promise.all([
               resolveRouteGeometry(flight, airport, match.entryFix),
-              flight.aircraft ? readAircraftPerformance(flight.aircraft).catch(() => null) : Promise.resolve(null),
+              readPerformance(flight.aircraft),
             ])
             const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)
             const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason, processingDistanceNm: distanceToBkk } satisfies InboundPreview
