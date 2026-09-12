@@ -1,4 +1,4 @@
-import { writeFlightCommand } from './flightCommandQueue'
+import { optionalRevision, writeFlightCommand } from './flightCommandQueue'
 
 type ReactRowProps = {
   onDoubleClick?: () => void
@@ -56,6 +56,7 @@ async function clearSharedTarget(airport: string, callsign: string, autoTldt: st
       autoFloorTldt,
       autoRunway,
       expectedRevision: Number(findRow(airport, callsign)?.dataset.sharedRevision) || undefined,
+      expectedTargetRevision: optionalRevision(findRow(airport, callsign)?.dataset.sharedTargetRevision),
   })
   const payload = await response.json() as { error?: string; flightState?: unknown }
   if (!response.ok) throw new Error(payload.error || `Shared AMAN API returned ${response.status}`)

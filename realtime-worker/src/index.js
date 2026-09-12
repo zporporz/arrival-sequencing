@@ -110,12 +110,14 @@ export class AmanRealtimeRoom {
       }
     }
     let previewId = '';
-    if (flight) {
+    if (flight && payload.snapshotOnly !== true) {
       const pending = await this.ctx.storage.get(this.pendingReleaseKey(identity));
       // A prior drag's DB round-trip can finish during a newer preview/release.
       // Keep the newer visible release until its own authoritative commit lands.
-      if (pending && state.target_mode !== 'AUTO' && pending.targetAt !== state.manual_tldt) return;
-      if (state.target_mode === 'AUTO' || pending?.targetAt === state.manual_tldt) {
+      const matchesRelease = pending && cleanIso(pending.targetAt) === cleanIso(state.manual_tldt)
+        && (!state.manual_runway || pending.runway === state.manual_runway);
+      if (pending && state.target_mode !== 'AUTO' && !matchesRelease) return;
+      if (state.target_mode === 'AUTO' || matchesRelease) {
         previewId = pending?.previewId || '';
         await this.ctx.storage.delete(this.pendingReleaseKey(identity));
         for (const socket of this.sockets()) {
@@ -124,7 +126,9 @@ export class AmanRealtimeRoom {
         }
       }
     }
-    this.broadcast({ type: payload.type, airport: state.airport, previewId, [flight ? 'flightState' : 'sequenceOrder']: state });
+    this.broadcast({ type: payload.type, airport: state.airport, previewId,
+      ...(payload.snapshotOnly === true ? { preservePreview: true } : {}),
+      [flight ? 'flightState' : 'sequenceOrder']: state });
   }
 
   leaderId(excludeClientId = '') {

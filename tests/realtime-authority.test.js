@@ -6,6 +6,15 @@ vi.mock('../functions/_lib/session.js', async importOriginal => ({ ...await impo
 beforeEach(() => vi.clearAllMocks())
 
 describe('server-owned realtime publication', () => {
+  it('marks a server Frozen response as metadata without trusting the request flag', async () => {
+    getRequestSession.mockResolvedValue({ vid: '1' })
+    const stored = { airport: 'VTBS', service_date: '2026-09-12', callsign: 'THA123', revision: 20 }
+    const send = vi.fn(async () => new Response(null, { status: 204 }))
+    await onRequest({ request: new Request('https://app.test/api/sequence/aman-state', { method: 'POST', body: '{}' }),
+      env: { AMAN_REALTIME: { getByName: () => ({ fetch: send }) } }, data: {},
+      next: async () => Response.json({ flightState: stored, snapshotOnly: true }) })
+    expect(await send.mock.calls[0][0].json()).toEqual({ type: 'flight_commit', flightState: stored, snapshotOnly: true })
+  })
   it('publishes the database response instead of request-supplied state', async () => {
     getRequestSession.mockResolvedValue({ vid: '1' })
     const stored = { airport: 'VTBS', service_date: '2026-09-08', callsign: 'THA123', revision: 8 }

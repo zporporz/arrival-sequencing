@@ -222,6 +222,13 @@ describe('realtime AMAN coordination', () => {
     expect(row.dataset.realtimePreview).toBe('preview-two')
     expect(row.style.getPropertyValue('--offset-px')).toBe(secondOffset)
 
+    receive({
+      type: 'flight_commit', airport: 'VTBS', preservePreview: true,
+      flightState: { airport: 'VTBS', callsign: 'THA123', revision: 2, target_mode: 'AUTO', frozen_tldt: '2026-08-25T10:25:00Z' },
+    })
+    expect(row.dataset.realtimePreview).toBe('preview-two')
+    expect(row.style.getPropertyValue('--offset-px')).toBe(secondOffset)
+
     socket.dispose()
     document.body.innerHTML = ''
   })
@@ -261,6 +268,8 @@ describe('realtime AMAN coordination', () => {
     Object.defineProperty(pointerDown, 'pointerId', { value: 17 })
     row.dispatchEvent(pointerDown)
     row.style.setProperty('--offset-px', '-200px')
+    // The React target is exact; CSS offsets may be rounded or use an older clock tick.
+    row.dataset.targetTldt = '2026-08-25T10:20:12.000Z'
     const pointerUp = new Event('pointerup', { bubbles: true })
     Object.defineProperty(pointerUp, 'pointerId', { value: 17 })
     row.dispatchEvent(pointerUp)
@@ -270,7 +279,7 @@ describe('realtime AMAN coordination', () => {
     const sentAfterRelease = socket.sent.map((payload) => JSON.parse(payload))
     expect(sentAfterRelease).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        type: 'drag_release', callsign: 'THA123', runway: '19', targetAt: '2026-08-25T10:20:00.000Z',
+        type: 'drag_release', callsign: 'THA123', runway: '19', targetAt: '2026-08-25T10:20:12.000Z',
       }),
     ]))
     const release = sentAfterRelease.find((payload) => payload.type === 'drag_release')

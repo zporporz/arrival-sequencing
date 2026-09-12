@@ -49,6 +49,8 @@ function rowInfo(row: HTMLElement) {
 }
 
 function targetMs(row: HTMLElement) {
+  const exact = Date.parse(row.dataset.targetTldt || '')
+  if (Number.isFinite(exact) && !row.dataset.realtimePreview) return exact
   const offset = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   return Number.isFinite(offset) ? Date.now() - offset / PX_PER_MINUTE * 60_000 : null
 }
@@ -71,7 +73,7 @@ export function installRealtimeAmanRuntime() {
   }
 
   const rooms = new Map<string, Room>()
-  const previewOriginals = new Map<string, Map<HTMLElement, { offset: string; tldt: string }>>()
+  const previewOriginals = new Map<string, Map<HTMLElement, { offset: string; tldt: string; targetAt?: string }>>()
   const previewSubjects = new Map<string, string>()
   const previewCancelTimers = new Map<string, number>()
   const lockTimers = new Map<string, number>()
@@ -252,6 +254,7 @@ export function installRealtimeAmanRuntime() {
         originals.set(row, {
           offset: row.style.getPropertyValue('--offset-px'),
           tldt: row.querySelector<HTMLElement>('.tldt')?.textContent || '',
+          targetAt: row.dataset.targetTldt,
         })
       }
       const offsetPx = (Date.now() - valueMs) / 60_000 * PX_PER_MINUTE
@@ -348,9 +351,9 @@ export function installRealtimeAmanRuntime() {
       const row = findRow(airport, callsign)
       const original = row ? previewOriginals.get(previewId)?.get(row) : null
       const originalOffset = Number.parseFloat(original?.offset || '')
-      const originalTargetAt = Number.isFinite(originalOffset)
+      const originalTargetAt = original?.targetAt || (Number.isFinite(originalOffset)
         ? new Date(Date.now() - originalOffset / PX_PER_MINUTE * 60_000).toISOString()
-        : null
+        : null)
       window.dispatchEvent(new CustomEvent('aman:realtime-manual-release', {
         detail: {
           ...message,
@@ -362,7 +365,7 @@ export function installRealtimeAmanRuntime() {
       return
     }
     if (message?.type === 'flight_commit') {
-      clearCommittedPreview(message)
+      if (!message.preservePreview) clearCommittedPreview(message)
       dispatchFlightState(message.flightState)
       return
     }

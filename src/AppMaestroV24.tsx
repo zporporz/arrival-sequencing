@@ -1746,6 +1746,7 @@ export default function App() {
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}
                 data-target-mode={isStable ? 'MANUAL' : 'AUTO'}
+                data-target-tldt={row.tldt}
                 data-auto-baseline-tldt={autoBaselineRow?.tldt}
                 data-auto-baseline-runway={autoBaselineRow?.runway}
                 data-auto-baseline-rank={autoBaselineRow?.sequenceIndex}

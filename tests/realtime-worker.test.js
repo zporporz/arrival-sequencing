@@ -63,6 +63,22 @@ afterEach(() => {
 })
 
 describe('AMAN realtime Durable Object coordination', () => {
+  it('does not acknowledge or unlock a pending drag when Frozen metadata arrives', async () => {
+    const { room, sockets, storage } = setupRoom()
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'drag_begin', callsign: 'THA123', previewId: 'pending' }))
+    await room.webSocketMessage(sockets[0], JSON.stringify({ type: 'drag_release', callsign: 'THA123', previewId: 'pending',
+      targetAt: '2026-08-25T10:20:00.000Z', runway: '19' }))
+    await room.publishCommitted({ type: 'flight_commit', snapshotOnly: true,
+      flightState: { airport: 'VTBS', callsign: 'THA123', revision: 10, target_mode: 'AUTO', frozen_tldt: '2026-08-25T10:15:00Z' } })
+    expect(await storage.get('pending:THA123')).toMatchObject({ previewId: 'pending' })
+    expect(await storage.get('lock:THA123')).toMatchObject({ previewId: 'pending' })
+    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'flight_commit', preservePreview: true })
+    // PostgREST and the browser use different textual UTC representations.
+    await room.publishCommitted({ type: 'flight_commit', flightState: { airport: 'VTBS', callsign: 'THA123', revision: 11,
+      target_mode: 'MANUAL', manual_tldt: '2026-08-25T10:20:00+00:00', manual_runway: '19' } })
+    expect(await storage.get('pending:THA123')).toBeUndefined()
+    expect(sockets[1].sent.at(-1)).toMatchObject({ type: 'flight_commit', previewId: 'pending' })
+  })
   it.each(['VTCC', 'VTSP'])('persists %s stable AUTO across leader handoff and isolates model changes', async airport => {
     const { room, sockets, storage } = setupRoom(); sockets.forEach(s => { s.meta.airport = airport; });
     const row = { id: airport + ':session', predictedIawpAt: '2026-09-10T10:20:00Z', regional: {

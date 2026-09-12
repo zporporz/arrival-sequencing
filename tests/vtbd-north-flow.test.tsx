@@ -86,6 +86,38 @@ describe('VTBD 03 live AMAN and shared workspace', () => {
   afterEach(async () => { dispose?.(); dispose = undefined; await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
   const cards = () => [...container.querySelectorAll('[data-airport="VTBD"] .aman-runway-card > b')].map(el => el.textContent)
   const arrival = (airport = 'VTBD') => container.querySelector<HTMLElement>(`.aman-flight-row[data-airport="${airport}"]`)!
+  it('saves the exact React release through real DOM pointer events while telemetry arrives', async () => {
+    const serviceDate = new Date().toISOString().slice(0, 10)
+    const base = { service_date: serviceDate, airport: 'VTBD', callsign: 'AIQ123', revision: 10, target_revision: 0, target_mode: 'AUTO' }
+    const commands: Record<string, unknown>[] = []
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      if (init?.method === 'POST') {
+        const command = JSON.parse(String(init.body)); commands.push(command)
+        return Response.json({ flightState: { ...base, target_mode: 'MANUAL', revision: 12, target_revision: 1,
+          manual_tldt: command.manualTldt, manual_runway: command.manualRunway } })
+      }
+      return Response.json({ serviceDate, workspaceStates: [], flightStates: [base], sequenceOrders: [] })
+    })
+    await act(async () => root.render(<App />))
+    await act(async () => { dispose = installSharedAmanRuntime(); await new Promise(resolve => setTimeout(resolve, 20)) })
+    arrival().setPointerCapture = () => {}
+    arrival().hasPointerCapture = () => false
+    const pointer = (name: string, y: number) => {
+      const event = new MouseEvent(name, { bubbles: true, button: 0, clientY: y })
+      Object.defineProperty(event, 'pointerId', { value: 3 })
+      arrival().dispatchEvent(event)
+    }
+    await act(async () => pointer('pointerdown', 100))
+    await act(async () => pointer('pointermove', 0))
+    await act(async () => pointer('pointerup', 0))
+    const released = arrival().dataset.targetTldt
+    await act(async () => window.dispatchEvent(new CustomEvent('aman:realtime-flight-state', { detail: { ...base, revision: 11 } })))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toMatchObject({ action: 'setManualTarget', manualTldt: released, expectedTargetRevision: 0 })
+    expect(arrival().dataset.targetTldt).toBe(released)
+    expect(arrival().classList.contains('is-stable')).toBe(true)
+  })
   async function profile(value: string) {
     await act(async () => { const select = container.querySelector<HTMLSelectElement>('[aria-label="VTBD configuration"]')!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })) })
   }
@@ -108,7 +140,7 @@ describe('VTBD 03 live AMAN and shared workspace', () => {
     const state = { airport: 'VTBD', service_date: new Date().toISOString().slice(0, 10), profile_id: 'CUSTOM',
       runway_modes: vtbdModesForFlow({ '03L': 'ARR', '03R': 'ARR' }, '03'),
       spacing_nm: { '03L': 6, '03R': 8 }, settings: { runwayFlow: '03' }, revision: 2 }
-    const oldFlight = { airport: 'VTBD', callsign: 'AIQ123', target_mode: 'MANUAL', manual_runway: '21R', manual_tldt: new Date(Date.now() + 5 * 60000).toISOString(), revision: 3 }
+    const oldFlight = { service_date: state.service_date, airport: 'VTBD', callsign: 'AIQ123', target_mode: 'MANUAL', manual_runway: '21R', manual_tldt: new Date(Date.now() + 5 * 60000).toISOString(), revision: 3 }
     vi.mocked(fetch).mockImplementation(async () => Response.json({ serviceDate: state.service_date, workspaceStates: [state], flightStates: [oldFlight], sequenceOrders: [] }))
     await act(async () => root.render(<App />))
     await act(async () => { dispose = installSharedAmanRuntime(); await new Promise(resolve => setTimeout(resolve, 50)) })
@@ -125,7 +157,7 @@ describe('VTBD 03 live AMAN and shared workspace', () => {
     const state = { airport: 'VTBD', service_date: new Date().toISOString().slice(0, 10), profile_id: 'DUAL_03LARR_03RARR',
       runway_modes: vtbdModesForFlow({ '03L': 'ARR', '03R': 'ARR' }, '03'), spacing_nm: {}, settings: { runwayFlow: '03' }, revision: 2 }
     const manualTldt = new Date(Date.now() + 90 * 60000).toISOString()
-    const flight = { airport: 'VTBD', callsign: 'AIQ123', target_mode: 'MANUAL', manual_runway: '03R', manual_tldt: manualTldt, revision: 3 }
+    const flight = { service_date: state.service_date, airport: 'VTBD', callsign: 'AIQ123', target_mode: 'MANUAL', manual_runway: '03R', manual_tldt: manualTldt, revision: 3 }
     vi.mocked(fetch).mockImplementation(async () => Response.json({ serviceDate: state.service_date, workspaceStates: [state], flightStates: [flight], sequenceOrders: [] }))
     await act(async () => root.render(<App />))
     await act(async () => { dispose = installSharedAmanRuntime(); await new Promise(resolve => setTimeout(resolve, 50)) })

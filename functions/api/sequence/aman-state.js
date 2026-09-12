@@ -203,6 +203,24 @@ async function writeTargetIfCurrent(env, identity, patch, expectedRevision) {
   return result.data?.[0] || null;
 }
 
+async function writeControllerTarget(env, identity, patch, payload, existing) {
+  // Older clients retain strict row CAS. New clients compare only controller
+  // commands: telemetry and FROZEN captures must not invalidate a drag.
+  if (payload.expectedTargetRevision === undefined) {
+    return writeTargetIfCurrent(env, identity, patch, payload.expectedRevision);
+  }
+  const revision = payload.expectedTargetRevision;
+  if (!Number.isSafeInteger(revision) || revision < 0) return null;
+  if (!existing) {
+    return revision === 0 ? insertFrozenFlightState(env, { ...identity, ...patch }) : null;
+  }
+  const result = await supabaseAdminRequest(env,
+    `aman_flight_states?service_date=eq.${encodeURIComponent(identity.service_date)}&airport=eq.${encodeURIComponent(identity.airport)}&callsign=eq.${encodeURIComponent(identity.callsign)}&target_revision=eq.${revision}&select=*`, {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(patch),
+    });
+  return result.data?.[0] || null;
+}
+
 async function patchUnfrozenFlightState(env, serviceDate, airport, callsign, patch) {
   const result = await supabaseAdminRequest(
     env,
@@ -372,7 +390,7 @@ export async function onRequestPost(context) {
       if (airport === 'VTBD' && !Object.values(VTBD_RUNWAY_GROUPS).flat().includes(runway)) throw new Error('Valid VTBD landing runway is required');
       if (airport === 'VTCC' && !['18', '36'].includes(runway)) throw new Error('Valid VTCC landing runway is required');
       if (airport === 'VTSP' && !['09', '27'].includes(runway)) throw new Error('Valid VTSP landing runway is required');
-      if (existing?.frozen_tldt && existing.frozen_runway === runway) return json({ ok: true, flightState: existing });
+      if (existing?.frozen_tldt && existing.frozen_runway === runway) return json({ ok: true, flightState: existing, snapshotOnly: true });
       let matched = null;
       let captureInput = payload;
       if (payload.approachPath === true) {
@@ -421,7 +439,7 @@ export async function onRequestPost(context) {
       // PATCH makes the first accepted value canonical; always return that stored row.
       row = row || await getFlightState(context.env, serviceDate, airport, callsign);
       if (!row?.frozen_tldt) throw new Error('Could not capture FROZEN target');
-      return json({ ok: true, flightState: row });
+      return json({ ok: true, flightState: row, snapshotOnly: true });
     }
 
     if (action === 'setManualTarget') {
@@ -429,7 +447,7 @@ export async function onRequestPost(context) {
       const manualRunway = cleanText(payload.manualRunway, 12)?.toUpperCase();
       if (!manualRunway) throw new Error('Landing runway is required');
 
-      const row = await writeTargetIfCurrent(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
+      const row = await writeControllerTarget(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
         ...autoBaselineForManualTarget(existing, payload),
         target_mode: 'MANUAL',
         manual_tldt: manualTldt,
@@ -437,7 +455,7 @@ export async function onRequestPost(context) {
         manual_updated_by_vid: auth.vid,
         manual_updated_by_name: auth.name,
         manual_updated_at: new Date().toISOString(),
-      }, payload.expectedRevision);
+      }, payload, existing);
       if (!row) return json({ error: 'Target changed. Refresh and try again.', code: 'STALE_TARGET' }, 409);
       return json({ ok: true, flightState: row });
     }
@@ -479,7 +497,7 @@ export async function onRequestPost(context) {
       const autoReturnFloorTldt = cleanIso(payload.autoFloorTldt, true);
       const autoReturnRunway = cleanRunway(payload.autoRunway);
       if (!autoReturnRunway) throw new Error('Current AUTO runway is required');
-      const row = await writeTargetIfCurrent(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
+      const row = await writeControllerTarget(context.env, flightIdentityRow(existing, payload, serviceDate, airport, callsign), {
         target_mode: 'AUTO',
         missed_approach_active: false,
         missed_approach_expires_at: null,
@@ -494,7 +512,7 @@ export async function onRequestPost(context) {
         auto_returned_at: new Date().toISOString(),
         auto_returned_by_vid: auth.vid,
         auto_returned_by_name: auth.name,
-      }, payload.expectedRevision);
+      }, payload, existing);
       if (!row) return json({ error: 'Target changed. Refresh and try again.', code: 'STALE_TARGET' }, 409);
       return json({ ok: true, flightState: row });
     }

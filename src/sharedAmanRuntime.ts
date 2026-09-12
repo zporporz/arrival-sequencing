@@ -1,6 +1,6 @@
 import { getAuthenticatedIdentity } from './browserIdentity'
 import { VTBD_RUNWAY_GROUPS, type VtbdFlow } from '../shared/vtbdRunways'
-import { writeFlightCommand } from './flightCommandQueue'
+import { optionalRevision, writeFlightCommand } from './flightCommandQueue'
 
 type WorkspaceState = {
   service_date: string
@@ -55,6 +55,7 @@ type FlightState = {
   holding_leave_at: string | null
   revision: number
   updated_at: string
+  target_revision?: number
 }
 
 type SequenceOrder = {
@@ -168,6 +169,8 @@ function findFlightRow(airport: string, callsign: string) {
 }
 
 function currentTargetMs(row: HTMLElement) {
+  const exact = finiteTime(row.dataset.targetTldt)
+  if (exact != null && !row.dataset.realtimePreview) return exact
   const offsetPx = Number.parseFloat(row.style.getPropertyValue('--offset-px'))
   if (Number.isFinite(offsetPx)) return Date.now() - offsetPx / PX_PER_MINUTE * 60_000
 
@@ -302,11 +305,13 @@ async function writeSharedState(body: Record<string, unknown>) {
 export function installSharedAmanRuntime() {
   let disposed = false
   let serviceDate = utcServiceDate()
+  let batchingState = false
   const workspaceStates = new Map<string, WorkspaceState>()
   const flightStates = new Map<string, FlightState>()
   const sequenceOrders = new Map<string, SequenceOrder>()
   const workspaceWriteTimers = new Map<string, number>()
   const flightWriteTimers = new Map<string, number>()
+  const pendingManual = new Map<string, Record<string, unknown>>()
   const localInteractionStart = new WeakMap<HTMLElement, number>()
   const localAutoBaselines = new WeakMap<HTMLElement, {
     tldt: string | null
@@ -316,6 +321,7 @@ export function installSharedAmanRuntime() {
   const identity = getAuthenticatedIdentity()
 
   const emitState = () => {
+    if (disposed || batchingState) return
     window.dispatchEvent(new CustomEvent(SHARED_STATE_EVENT, {
       detail: {
         serviceDate,
@@ -340,6 +346,10 @@ export function installSharedAmanRuntime() {
     const current = flightStates.get(key)
     if (current && Number(state.revision) < Number(current.revision)) return false
     flightStates.set(key, state)
+    releaseOriginals.forEach((original, previewId) => {
+      if (original.airport === state.airport && original.callsign === state.callsign
+        && releaseAcknowledged(original, state)) releaseOriginals.delete(previewId)
+    })
     emitState()
     return true
   }
@@ -403,12 +413,19 @@ export function installSharedAmanRuntime() {
   }
 
   const applyFlight = (state: FlightState) => {
+    if (disposed || flightStates.get(flightKey(state.airport, state.callsign)) !== state) return
     const row = findFlightRow(state.airport, state.callsign)
-    if (!row || row.classList.contains('is-dragging')) return
+    const blocked = (element: HTMLElement) => element.classList.contains('is-dragging')
+      || element.dataset.resetPending === 'true'
+      || pendingManual.has(flightKey(state.airport, state.callsign))
+      || [...releaseOriginals.values()].some(original => original.airport === state.airport
+        && original.callsign === state.callsign && !releaseAcknowledged(original, state))
+    if (!row || blocked(row)) return
     if (row.dataset.sharedRevision === String(state.revision)
       && (state.airport !== 'VTBD' || row.dataset.sharedRunwayFlow === (row.dataset.runwayFlow || ''))) return
     const markApplied = (element: HTMLElement) => {
       element.dataset.sharedRevision = String(state.revision)
+      if (state.target_revision != null) element.dataset.sharedTargetRevision = String(state.target_revision)
       if (state.airport === 'VTBD') element.dataset.sharedRunwayFlow = element.dataset.runwayFlow || ''
     }
 
@@ -444,7 +461,8 @@ export function installSharedAmanRuntime() {
 
     window.requestAnimationFrame(() => {
       const currentRow = findFlightRow(state.airport, state.callsign)
-      if (!currentRow || !targetFitsFlow(currentRow)) return
+      if (disposed || flightStates.get(flightKey(state.airport, state.callsign)) !== state
+        || !currentRow || blocked(currentRow) || !targetFitsFlow(currentRow)) return
       const currentMs = currentTargetMs(currentRow)
       if (currentMs == null || Math.abs(currentMs - targetMs) > 3000 || !currentRow.classList.contains('is-stable')) {
         applyTargetThroughReact(currentRow, targetMs)
@@ -474,17 +492,21 @@ export function installSharedAmanRuntime() {
         flightStates.clear()
         sequenceOrders.clear()
       }
-      const payload = await readSharedState(serviceDate)
-      workspaceStates.clear()
-      flightStates.clear()
-      sequenceOrders.clear()
-      payload.workspaceStates.forEach((state) => workspaceStates.set(state.airport, state))
-      payload.flightStates.forEach((state) => flightStates.set(flightKey(state.airport, state.callsign), state))
-      payload.sequenceOrders?.forEach((state) => sequenceOrders.set(`${state.airport}:${state.runway}`, state))
+      const requestedDate = serviceDate
+      const payload = await readSharedState(requestedDate)
+      if (disposed || requestedDate !== serviceDate || requestedDate !== utcServiceDate()) return
+      // A poll may have started before a WebSocket/POST commit. Never discard
+      // revision watermarks and roll that newer commit back to the poll snapshot.
+      batchingState = true
+      payload.workspaceStates.forEach(mergeWorkspace)
+      payload.flightStates.forEach(mergeFlight)
+      payload.sequenceOrders?.forEach(mergeSequenceOrder)
+      batchingState = false
       emitState()
       applyAll()
       setSharedHealth('LIVE')
     } catch (error) {
+      batchingState = false
       setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
     }
   }
@@ -525,46 +547,59 @@ export function installSharedAmanRuntime() {
     }, 350))
   }
 
-  const saveManualTarget = async (row: HTMLElement) => {
-    const rowInfo = rowIdentity(row)
-    const targetMs = currentTargetMs(row)
-    const runway = rowRunway(row)
-    if (!rowInfo || targetMs == null || !runway) return
-    const baseline = localAutoBaselines.get(row)
+  const saveManualTarget = async (key: string, command: Record<string, unknown>) => {
+    const ownsRelease = () => pendingManual.get(key) === command
+      && !findFlightRow(String(command.airport), String(command.callsign))?.classList.contains('is-dragging')
     try {
-      const result = await writeSharedState({
-        action: 'setManualTarget',
-        serviceDate,
-        airport: rowInfo.airport,
-        callsign: rowInfo.callsign,
-        manualTldt: new Date(targetMs).toISOString(),
-        manualRunway: runway,
-        expectedRevision: Number(row.dataset.sharedRevision) || undefined,
-        autoBaselineTldt: baseline?.tldt,
-        autoBaselineRunway: baseline?.runway,
-        autoBaselineRank: baseline?.rank,
-      })
+      const result = await writeSharedState(command)
+      if (disposed || command.serviceDate !== serviceDate) return
       mergeFlight(result.flightState)
-      window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
-        detail: { airport: rowInfo.airport, flightState: result.flightState },
-      }))
+      if (ownsRelease()) {
+        window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
+          detail: { airport: command.airport, flightState: result.flightState },
+        }))
+      }
       setSharedHealth('LIVE')
     } catch (error) {
-      window.dispatchEvent(new CustomEvent('aman:realtime-commit-failed', {
-        detail: { airport: rowInfo.airport, callsign: rowInfo.callsign },
-      }))
-      setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
+      if (!disposed && ownsRelease()) {
+        window.dispatchEvent(new CustomEvent('aman:realtime-commit-failed', {
+          detail: { airport: command.airport, callsign: command.callsign },
+        }))
+        setSharedHealth('ERROR', error instanceof Error ? error.message : String(error))
+        const row = findFlightRow(String(command.airport), String(command.callsign))
+        if (row) delete row.dataset.sharedRevision
+        void refresh()
+      }
+    } finally {
+      if (pendingManual.get(key) === command) {
+        pendingManual.delete(key)
+        const state = flightStates.get(key)
+        if (state) applyFlight(state)
+      }
     }
   }
 
   const queueManualTargetSave = (row: HTMLElement, delay = 120) => {
     const rowInfo = rowIdentity(row)
-    if (!rowInfo) return
+    const targetMs = currentTargetMs(row)
+    const runway = rowRunway(row)
+    if (!rowInfo || targetMs == null || !runway) return
+    const baseline = localAutoBaselines.get(row)
+    // Capture the released command once. Polls must neither alter the pending
+    // display nor change the intent that gets sent after the debounce.
+    const command = {
+      action: 'setManualTarget', serviceDate, airport: rowInfo.airport, callsign: rowInfo.callsign,
+      manualTldt: new Date(targetMs).toISOString(), manualRunway: runway,
+      expectedRevision: Number(row.dataset.sharedRevision) || undefined,
+      expectedTargetRevision: optionalRevision(row.dataset.sharedTargetRevision),
+      autoBaselineTldt: baseline?.tldt, autoBaselineRunway: baseline?.runway, autoBaselineRank: baseline?.rank,
+    }
+    pendingManual.set(rowInfo.key, command)
     const previous = flightWriteTimers.get(rowInfo.key)
     if (previous != null) window.clearTimeout(previous)
     flightWriteTimers.set(rowInfo.key, window.setTimeout(() => {
       flightWriteTimers.delete(rowInfo.key)
-      if (row.isConnected) void saveManualTarget(row)
+      if (!disposed && command.serviceDate === serviceDate) void saveManualTarget(rowInfo.key, command)
     }, delay))
   }
 
@@ -650,6 +685,7 @@ export function installSharedAmanRuntime() {
     const timer = flightWriteTimers.get(key)
     if (timer != null) window.clearTimeout(timer)
     flightWriteTimers.delete(key)
+    pendingManual.delete(key)
   }
 
   const releaseOriginals = new Map<string, {
@@ -658,7 +694,20 @@ export function installSharedAmanRuntime() {
     targetMs: number
     runway: string
     wasManual: boolean
+    targetRevision?: number
+    releasedMs: number
+    releasedRunway: string
+    expiresAt: number
   }>()
+
+  const releaseAcknowledged = (original: { targetRevision?: number; releasedMs: number; releasedRunway: string }, state: FlightState) => {
+    if (original.targetRevision != null && state.target_revision != null) {
+      if (state.target_revision < original.targetRevision) return false
+      if (state.target_mode === 'AUTO') return state.target_revision > original.targetRevision
+    }
+    return state.target_mode === 'MANUAL' && state.manual_runway === original.releasedRunway
+      && Math.abs((finiteTime(state.manual_tldt) ?? 0) - original.releasedMs) < 6500
+  }
 
   const onRealtimeManualRelease = (event: Event) => {
     const detail = (event as CustomEvent<RealtimeManualRelease>).detail
@@ -669,6 +718,10 @@ export function installSharedAmanRuntime() {
     const releasedMs = finiteTime(detail?.targetAt)
     const row = findFlightRow(airport, callsign)
     if (!airport || !callsign || !previewId || !runway || releasedMs == null || !row || row.classList.contains('is-dragging')) return
+    if (pendingManual.has(flightKey(airport, callsign))) return
+    releaseOriginals.forEach((original, oldId) => {
+      if (oldId !== previewId && original.airport === airport && original.callsign === callsign) releaseOriginals.delete(oldId)
+    })
 
     if (!releaseOriginals.has(previewId)) {
       const originalMs = finiteTime(detail?.originalTargetAt) ?? currentTargetMs(row)
@@ -679,6 +732,10 @@ export function installSharedAmanRuntime() {
         targetMs: originalMs,
         runway: String(detail?.originalRunway || rowRunway(row)).trim().toUpperCase(),
         wasManual: detail?.originalWasManual === true,
+        targetRevision: flightStates.get(flightKey(airport, callsign))?.target_revision,
+        releasedMs,
+        releasedRunway: runway,
+        expiresAt: Date.now() + 30_000,
       })
     }
 
@@ -686,7 +743,8 @@ export function installSharedAmanRuntime() {
     if (runwaySelect && runwaySelect.value !== runway) invokeReactChange(runwaySelect, runway)
     window.requestAnimationFrame(() => {
       const currentRow = findFlightRow(airport, callsign)
-      if (!currentRow) return
+      if (!currentRow || disposed || !releaseOriginals.has(previewId)
+        || pendingManual.has(flightKey(airport, callsign)) || currentRow.classList.contains('is-dragging')) return
       const original = releaseOriginals.get(previewId)
       applyTargetThroughReact(currentRow, releasedMs, original?.targetMs)
       currentRow.dataset.targetMode = 'MANUAL'
@@ -701,11 +759,13 @@ export function installSharedAmanRuntime() {
     if (!original) return
     const row = findFlightRow(original.airport, original.callsign)
     if (!row) return
+    if (row.dataset.realtimeReleasePreview && row.dataset.realtimeReleasePreview !== previewId) return
     const runwaySelect = row.querySelector<HTMLSelectElement>('.runway-assignment select')
     if (runwaySelect && original.runway && runwaySelect.value !== original.runway) invokeReactChange(runwaySelect, original.runway)
     window.requestAnimationFrame(() => {
       const currentRow = findFlightRow(original.airport, original.callsign)
-      if (!currentRow) return
+      if (!currentRow || disposed || pendingManual.has(flightKey(original.airport, original.callsign))
+        || currentRow.classList.contains('is-dragging')) return
       applyTargetThroughReact(currentRow, original.targetMs)
       if (!original.wasManual) clearTargetThroughReact(currentRow)
       delete currentRow.dataset.realtimeReleasePreview
@@ -737,11 +797,9 @@ export function installSharedAmanRuntime() {
           ...(detail?.approachPath ? { approachPath: true, approachName: detail.approachName, approachCycle: detail.approachCycle } : {}),
         })
         if (result.flightState) {
-          mergeFlight(result.flightState)
-          applyFlight(result.flightState)
-          window.dispatchEvent(new CustomEvent('aman:realtime-commit-request', {
-            detail: { airport, flightState: result.flightState },
-          }))
+          if (disposed) return
+          if (mergeFlight(result.flightState)) applyFlight(result.flightState)
+          // FROZEN is metadata, not an acknowledgement of a pending manual drag.
         }
         setSharedHealth('LIVE')
       } catch (error) {
@@ -751,14 +809,12 @@ export function installSharedAmanRuntime() {
   }
   const onRealtimeFlightState = (event: Event) => {
     const state = (event as CustomEvent<FlightState>).detail
-    releaseOriginals.forEach((original, previewId) => {
-      if (original.airport === state?.airport && original.callsign === state?.callsign) releaseOriginals.delete(previewId)
-    })
+    if (!mergeFlight(state)) return
     // A remote drag preview is restored as soon as its committed flight state
     // arrives. Apply the accepted MANUAL/AUTO state in the same event turn so
     // the other controller does not fall back to the pre-drag row while waiting
     // for the one-second recovery timer.
-    if (mergeFlight(state)) applyFlight(state)
+    applyFlight(state)
   }
   const onRealtimeSequenceOrder = (event: Event) => mergeSequenceOrder((event as CustomEvent<SequenceOrder>).detail)
   const onWorkspaceApplied = (event: Event) => {
@@ -791,6 +847,15 @@ export function installSharedAmanRuntime() {
   void refresh()
 
   const applyTimer = window.setInterval(() => {
+    releaseOriginals.forEach((original, previewId) => {
+      if (original.expiresAt > Date.now()) return
+      releaseOriginals.delete(previewId)
+      const row = findFlightRow(original.airport, original.callsign)
+      if (row?.dataset.realtimeReleasePreview === previewId) {
+        delete row.dataset.realtimeReleasePreview
+        delete row.dataset.sharedRevision
+      }
+    })
     applyAll()
     for (const airport of AIRPORTS) {
       if (!workspaceStates.has(airport) && findConfigBlock(airport)) queueWorkspaceSave(airport)
@@ -802,7 +867,7 @@ export function installSharedAmanRuntime() {
 
   return () => {
     disposed = true
-    void disposed
+    pendingManual.clear()
     workspaceWriteTimers.forEach((timer) => window.clearTimeout(timer))
     flightWriteTimers.forEach((timer) => window.clearTimeout(timer))
     window.clearInterval(applyTimer)
