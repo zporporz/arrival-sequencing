@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { setAuthenticatedIdentity } from './browserIdentity'
-import ivaoThailandLogo from './assets/ivao-thailand-logo.png'
-import './login.css'
+import LoginLanding from './LoginLanding'
 
 export type AuthUser = {
   id: number | string
@@ -237,31 +236,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     }
   }, [user])
 
-  if (loading) {
-    return (
-      <main className="auth-page">
-        <section className="auth-card auth-loading-card">
-          <div className="auth-spinner" />
-          <strong>Checking IVAO session...</strong>
-        </section>
-      </main>
-    )
-  }
-
-  if (!user) {
-    return (
-      <main className="auth-page auth-landing">
-        <section className="login-minimal" aria-labelledby="login-title">
-          <img src={ivaoThailandLogo} alt="IVAO Thailand" />
-          <div className="login-rule" />
-          <div className="auth-eyebrow">THAILAND APPROACH AMAN</div>
-          <h1 id="login-title">Arrival Sequencing</h1>
-          {error && <div className="auth-error" role="alert">{error}</div>}
-          <a className="auth-login-button" href="/api/auth/login">Sign in with IVAO</a>
-          {error && <button type="button" className="login-retry" onClick={() => window.location.reload()}>Try again</button>}
-        </section>
-      </main>
-    )
+  if (loading || !user) {
+    return <LoginLanding loading={loading} error={error} />
   }
 
   return (
