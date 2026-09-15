@@ -1,4 +1,4 @@
-import entryTransitions from '../../shared/arrivalEntryTransitions.json' with { type: 'json' };
+import entryTransitions from '../../shared/arrivalEntryTransitions.json';
 
 const BASE = 'https://airac.net/api/v1';
 const USER_AGENT = 'BangkokFIRArrivalSequencing/2.0 (+https://github.com/zporporz/arrival-sequencing)';
