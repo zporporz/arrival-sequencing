@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAiracRouteResolver, normalizeRunway } from '../functions/_lib/airacRouteResolver.js'
+import { arrivalEntryExtension, createAiracRouteResolver, normalizeRunway } from '../functions/_lib/airacRouteResolver.js'
+import transitions from '../shared/arrivalEntryTransitions.json'
 import { onRequestPost } from '../functions/api/sequence/route-geometry.js'
 import bundle from '../functions/_data/regional-arrivals.json'
 
@@ -199,5 +200,68 @@ describe('route API validation', () => {
     const response = await onRequestPost({ request: new Request('https://example.test/api/sequence/route-geometry', { method: 'POST', body: JSON.stringify({ ...request, ...extra }) }) })
     expect(response.status).toBe(400)
     expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+  })
+})
+
+describe('DCT and published feeder extensions', () => {
+  it('resolves the reported filed STAR with 21R without looking up a waypoint called DCT', async () => {
+    const a = api({ procedures: [detail('VTBD', 'SABA3A', 'STAR', 'SABAI', ['21L', '21R'])],
+      parse: u => {
+        expect(u.searchParams.get('route')).toBe('TRN W24 BITEN Y99 HOTEL SABAI SABA3A')
+        expect(u.searchParams.get('arrival_runway')).toBe('21R')
+        return routeData(['VTST', 'TRN', 'BITEN', 'HOTEL', 'SABAI', 'VTBD'])
+      } })
+    const result = await a.resolve({ origin: 'VTST', destination: 'VTBD',
+      route: 'DCT TRN W24 BITEN Y99 HOTEL DCT SABAI SABAI3A', entryFix: 'SABAI', arrivalRunway: '21R' })
+    expect(result.errors).toEqual([])
+    expect(result.entryRouteSource).toBe('FILED')
+    expect(result.normalizedRoute).toContain('HOTEL DCT SABAI SABA3A')
+  })
+
+  for (const [destination, entries] of Object.entries(transitions.airports)) {
+    for (const [via, path] of Object.entries(entries)) {
+      it(`${destination}: ${via} connects via every published fix to ${path.at(-1)}`, async () => {
+        const a = api({ parse: u => {
+          expect(u.searchParams.get('route')).toBe([via, ...path].join(' '))
+          return routeData(['VTSM', via, ...path, destination])
+        } })
+        const result = await a.resolve({ origin: 'VTSM', destination, route: via, entryFix: path.at(-1) })
+        expect(result.errors).toEqual([])
+        expect(result.entryRouteSource).toBe('AIP_INFERRED')
+        expect(result.entryTransition).toMatchObject({ via, path })
+        expect(result.procedures).toEqual([]) // no invented STAR/clearance
+      })
+    }
+  }
+  it('supports a terminal airport and level suffix without modifying the filed route', () => {
+    expect(arrivalEntryExtension('VTBD', 'TRN Y99 HOTEL/N0250F150 VTBD', 'SABAI')?.route)
+      .toBe('TRN Y99 HOTEL/N0250F150 DCT SABAI')
+  })
+  it.each(['HOTEL DCT UNKNOWN', 'HOTEL SABAI9X', 'HOTEL Y99', 'HOTEL DCT WEHHA'])('does not overwrite later filed instructions: %s', route => {
+    expect(arrivalEntryExtension('VTBD', route, 'SABAI')).toBeNull()
+  })
+  it('never maps a feeder from the other airport or duplicates an already filed entry', () => {
+    expect(arrivalEntryExtension('VTBS', 'HOTEL', 'SABAI')).toBeNull()
+    expect(arrivalEntryExtension('VTCC', 'HOTEL', 'SABAI')).toBeNull()
+    expect(arrivalEntryExtension('VTBD', 'HOTEL DCT SABAI', 'SABAI')).toBeNull()
+  })
+  it('rejects a missing intermediate feeder fix even if upstream reports success', async () => {
+    const r = await api({ parse: () => routeData(['VTSM', 'ANREN', 'TUMGA', 'VTBS']) })
+      .resolve({ origin: 'VTSM', destination: 'VTBS', route: 'ANREN', entryFix: 'TUMGA' })
+    expect(r.errors.some(e => e.type === 'direct_leg_missing')).toBe(true)
+    expect(r.entryRoute).toBeNull()
+  })
+  it('does not silently accept a complete airport route that never reaches the requested entry', async () => {
+    const r = await api({ parse: () => routeData(['VTSM', 'UNKNOWN', 'VTBD']) })
+      .resolve({ origin: 'VTSM', destination: 'VTBD', route: 'UNKNOWN', entryFix: 'SABAI' })
+    expect(r.errors.some(e => e.type === 'entry_not_on_route')).toBe(true)
+    expect(r.entryRoute).toBeNull()
+  })
+  it('still rejects unresolved fixes and airways alongside DCT', async () => {
+    const r = await api({ parse: () => routeData(['VTST', 'TRN', 'HOTEL', 'SABAI', 'VTBD'],
+      [{ type: 'airway_not_found', segment: 'Y9999', message: 'Unknown airway' }]) })
+      .resolve({ origin: 'VTST', destination: 'VTBD', route: 'TRN Y9999 HOTEL DCT SABAI', entryFix: 'SABAI' })
+    expect(r.errors.some(e => e.type === 'airway_not_found')).toBe(true)
+    expect(r.entryRoute).toBeNull()
   })
 })

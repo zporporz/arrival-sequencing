@@ -1,55 +1,21 @@
+import transitions from '../shared/arrivalEntryTransitions.json'
+
 export type AipIawpMatch = {
   via: string
   entryFix: string
   source: string
 }
 
-export const AIP_IAWP_SOURCE = 'CAAT AIP ENR 1.10 §4.3 · AIRAC 2026-07-09'
+export const AIP_IAWP_SOURCE = transitions.source
 
 // CAAT AIP ENR 1.10 §4.3 flight-planning transition -> IAWP mappings.
 // These are airport-specific because the same inbound transition can feed a
 // different IAWP at VTBD and VTBS.
-const TRANSITION_TO_IAWP: Record<string, Record<string, string>> = {
-  VTBD: {
-    IBETO: 'WEHHA',
-    TARED: 'WEHHA',
-    IGONI: 'WEHHA',
-    SEMBO: 'NAKON',
-    BLAFF: 'NAKON',
-    NOBER: 'NAKON',
-    ALBOS: 'NAKON',
-    UBLOD: 'ENDUU',
-    ANREN: 'SEHNA',
-    DULEM: 'SEHNA',
-    GOMES: 'SEHNA',
-    NUGPA: 'SEHNA',
-    RYN: 'SEHNA',
-    ALEMI: 'SEHNA',
-    HOTEL: 'SABAI',
-    GUTSO: 'SABAI',
-    BUT: 'SABAI',
-  },
-  VTBS: {
-    IBETO: 'WILLA',
-    TARED: 'WILLA',
-    IGONI: 'WILLA',
-    SEMBO: 'NORTA',
-    BLAFF: 'NORTA',
-    NOBER: 'NORTA',
-    ALBOS: 'NORTA',
-    UBLOD: 'EASTE',
-    RUKSA: 'EASTE',
-    ANREN: 'TUMGA',
-    DULEM: 'TUMGA',
-    GOMES: 'TUMGA',
-    NUGPA: 'TUMGA',
-    RYN: 'TUMGA',
-    ALEMI: 'TUMGA',
-    HOTEL: 'LEBIM',
-    GUTSO: 'LEBIM',
-    BUT: 'TUMGA',
-  },
-}
+const TRANSITION_TO_IAWP: Record<string, Record<string, string>> = Object.fromEntries(
+  Object.entries(transitions.airports).map(([airport, entries]) => [airport,
+    Object.fromEntries(Object.entries(entries).map(([via, path]) => [via, path[path.length - 1]])),
+  ]),
+)
 
 // Some filed routes already contain the IAWP itself followed by the STAR
 // designator, e.g. "DCT SEHNA SEHNA3A". The old resolver only understood the

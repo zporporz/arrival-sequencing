@@ -31,12 +31,13 @@ import {
   nmToMinutesAtReferenceSpeed,
   splitAmanDelay,
 } from './core/amanConstants'
-import { readOperationalConfig, readRouteGeometry, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { readOperationalConfig, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
+import { clearArrivalRouteCache, resolveArrivalRoute } from './core/arrivalRouteGeometry'
 import { createAircraftPerformanceBatch } from './core/aircraftPerformanceBatch'
 import { retainUnchangedOperationalConfig } from './core/operationalConfigIdentity'
 import { refreshIvaoTraffic, subscribeIvaoTraffic, type IvaoTrafficUpdate } from './core/ivaoTrafficFeed'
 import { formatRoundedHmUtc } from './core/minuteRounding'
-import { estimateIawpArrival, type RouteGeometry } from './core/arrivalEta'
+import { estimateIawpArrival } from './core/arrivalEta'
 import {
   amanSequenceOrderIdentity,
   autoSequenceUnstableArrivals,
@@ -72,6 +73,7 @@ type DisplayInboundRow = {
   aircraft: string
   refFix: string
   eta: string | null
+  etaNote: string
   title: string
   planningState: PlanningState
   processingDistanceNm: number | null
@@ -250,7 +252,6 @@ const AUTHORITATIVE_AUTO_RETURN_MAX_AGE_MS = 60_000
 const UNKNOWN_DISTANCE_FALLBACK_MINUTES = 45
 const VTBS_CROSS_RUNWAY_STAGGER_SECONDS = 60
 const VTBD_21L_CALLSIGN_PREFIXES = ['LKY', 'RTN', 'WHK', 'RTAF', 'VMS'] as const
-const routeGeometryCache = new Map<string, Promise<RouteGeometry | null>>()
 
 function scopeAirports(scope: AirportScope): AirportCode[] {
   return scope === 'BOTH' ? ['VTBD', 'VTBS'] : scope.split(',').filter(isAmanAirport)
@@ -396,27 +397,6 @@ function timelineTicks(now: Date) {
     const offsetMinutes = (tick.getTime() - now.getTime()) / 60_000
     return { key: tick.toISOString(), label: formatHm(tick.toISOString()), isMajor: tick.getUTCMinutes() % 5 === 0, offsetPx: Math.round(-offsetMinutes * PX_PER_MINUTE) }
   })
-}
-
-function routeKey(flight: IvaoArrivalTrafficFlight, airport: AirportCode) {
-  if (!flight.departure || !flight.route) return null
-  return `${flight.departure}|${airport}|${flight.route}`
-}
-
-function resolveRouteGeometry(flight: IvaoArrivalTrafficFlight, airport: AirportCode, entryFix: string) {
-  const baseKey = routeKey(flight, airport)
-  if (!baseKey || !flight.departure || !flight.route) return Promise.resolve<RouteGeometry | null>(null)
-  const key = `${baseKey}|${entryFix}`
-  const existing = routeGeometryCache.get(key)
-  if (existing) return existing
-  const request = readRouteGeometry<RouteGeometry>(flight.departure, airport, flight.route, undefined, { entryFix })
-    .then((geometry) => {
-      const usable = geometry.entryRoute || (geometry.errors.length ? null : geometry)
-      if (!usable) routeGeometryCache.delete(key)
-      return usable
-    }).catch(() => { routeGeometryCache.delete(key); return null })
-  routeGeometryCache.set(key, request)
-  return request
 }
 
 function distanceNm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -856,6 +836,8 @@ export default function App() {
     () => ({ ...sharedAutoReturnOverrides.runwayById, ...manualRunways }),
     [manualRunways, sharedAutoReturnOverrides.runwayById],
   )
+  const latestRouteRunways = useRef(effectiveLiveRunways)
+  latestRouteRunways.current = effectiveLiveRunways
   const effectiveAutoReturnFloorTldt = useMemo(
     () => ({ ...autoReturnFloorTldt, ...sharedAutoReturnOverrides.floorById }),
     [autoReturnFloorTldt, sharedAutoReturnOverrides.floorById],
@@ -1082,6 +1064,7 @@ export default function App() {
         planningState: 'SEQUENCED',
         processingDistanceNm: row.processingDistanceNm ?? null,
         operationalState: 'NORMAL',
+        etaNote: '',
       }))
     : inbound.map((item) => {
         const prediction = livePredictionById.get(item.id)
@@ -1108,6 +1091,9 @@ export default function App() {
           planningState,
           processingDistanceNm: item.processingDistanceNm,
           operationalState,
+          etaNote: [/_EET$/.test(item.source) ? 'FPL EST' : /ENTRY INFERRED/.test(item.reason || '') ? 'ENTRY EST' : '',
+            /STABLE ETA LOCKED|IAWP CROSSING LATCHED/.test(item.reason || '') ? 'LOCKED' : '',
+          ].filter(Boolean).join(' · '),
         }
       }),
   [demoMode, demoSequence, inbound, livePhaseById, livePredictionById, operationalStateByKey, processingNowMs, stableIds])
@@ -1344,11 +1330,16 @@ export default function App() {
               ? operationalTimings[airport][match.entryFix] ?? null
               : nominalStarSeconds(airport, match.entryFix, vtbsFlow, vtbdFlow)
             if (nominalSeconds == null) return { preview: { airport, id, flight, refFix: match.entryFix, predictedIawpAt: null, source: 'NO TIMING', reason: 'No nominal STAR timing configured', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
-            const [geometry, performancePayload] = await Promise.all([
-              resolveRouteGeometry(flight, airport, match.entryFix),
+            const activeRunways = activeRunwaysForAirport(airport, runwayModes)
+            const requestedRunway = latestRouteRunways.current[id]
+            const arrivalRunway = requestedRunway && activeRunways.includes(requestedRunway)
+              ? requestedRunway : defaultArrivalRunway(airport, activeRunways, flight.callsign)
+            const [routeResult, performancePayload] = await Promise.all([
+              resolveArrivalRoute(flight, airport, match.entryFix, arrivalRunway || undefined),
               readPerformance(flight.aircraft),
             ])
-            const eta = estimateIawpArrival(flight, geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)
+            const eta = estimateIawpArrival(flight, routeResult.geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)
+            eta.reason = [eta.reason, routeResult.reason && `${routeResult.geometry ? '' : 'ROUTE UNAVAILABLE · '}${routeResult.reason}`].filter(Boolean).join(' · ')
             const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason, processingDistanceNm: distanceToBkk } satisfies InboundPreview
             const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {
               id,
@@ -1408,9 +1399,7 @@ export default function App() {
       const detail = (event as CustomEvent<{ airport?: AirportCode; demo?: boolean }>).detail
       const airport = detail?.airport
       if (detail?.demo || !airport || !airports.includes(airport)) return
-      for (const key of routeGeometryCache.keys()) {
-        if (key.includes(`|${airport}|`)) routeGeometryCache.delete(key)
-      }
+      clearArrivalRouteCache(airport)
       setCanonicalEtaById((current) => Object.fromEntries(
         Object.entries(current).filter(([id]) => rowAirport(id) !== airport),
       ))
@@ -1823,6 +1812,7 @@ export default function App() {
               <span className="apt">{item.airport.slice(2)}</span>
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
+                {item.etaNote && <small className="aman-planning-badge is-departing">{item.etaNote}</small>}
                 {item.planningState === 'BOARDING' && <small className="aman-planning-badge is-boarding">BOARDING</small>}
                 {item.planningState === 'DEPARTING' && <small className="aman-planning-badge is-departing">DEPARTING · EST</small>}
                 {item.planningState === 'TAKEOFF_EST' && <small className="aman-planning-badge is-departing">TAKEOFF · EST</small>}

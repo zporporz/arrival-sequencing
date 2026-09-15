@@ -1,9 +1,28 @@
+import entryTransitions from '../../shared/arrivalEntryTransitions.json' with { type: 'json' };
+
 const BASE = 'https://airac.net/api/v1';
 const USER_AGENT = 'BangkokFIRArrivalSequencing/2.0 (+https://github.com/zporporz/arrival-sequencing)';
 const code = (value) => String(value || '').trim().toUpperCase();
 const tokenName = (token) => code(token).split('/')[0];
 const procedureName = /^[A-Z]{2,6}\d{1,2}[A-Z]?$/;
 const speedLevel = /^(?:[NMK]\d{3,4})?(?:[FAS]\d{3,4}|VFR)$/;
+
+// A published feeder extension is an estimate, NOT a filed/cleared STAR. Only
+// extend a known terminal fix; never drop later filed tokens to force a match.
+export function arrivalEntryExtension(destination, route, entryFix) {
+  const tokens = code(route).split(/\s+/);
+  const meaningful = tokens.map(tokenName).filter((t) => t !== destination && t !== 'DCT' && !speedLevel.test(t));
+  if (!entryFix || meaningful.includes(entryFix)) return null;
+  const via = meaningful.at(-1);
+  const path = entryTransitions.airports[destination]?.[via];
+  if (!path || path.at(-1) !== entryFix) return null;
+  // A destination token at the end is harmless; any other trailing instruction
+  // is not. This includes unresolved STARs, unknown fixes and airways.
+  while (tokens.at(-1) === destination || tokens.at(-1) === 'DCT') tokens.pop();
+  if (tokenName(tokens.at(-1)) !== via) return null;
+  return { route: [...tokens, 'DCT', ...path.flatMap((fix, i) => i ? ['DCT', fix] : [fix])].join(' '),
+    via, path: [...path], source: entryTransitions.source };
+}
 
 export function normalizeRunway(value) {
   const runway = code(value).replace(/^RWY?/, '');
@@ -152,15 +171,34 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     return { filed, identifier: detail.identifier, kind, airport, runway: selectRunway(detail, requestedRunway) };
   }
   async function parse(origin, destination, route, departureRunway, arrivalRunway, cycle) {
-    const params = new URLSearchParams({ origin, destination, route });
+    // AIRAC's parser joins consecutive fixes directly, but treats the ICAO DCT
+    // separator as a waypoint. Remove ONLY that standalone separator for the
+    // upstream request; preserve every fix, airway, procedure and the filed text.
+    const routeTokens = route.split(/\s+/);
+    const parserRoute = routeTokens.filter((token) => token !== 'DCT').join(' ');
+    const params = new URLSearchParams({ origin, destination, route: parserRoute });
     if (departureRunway) params.set('departure_runway', departureRunway);
     if (arrivalRunway) params.set('arrival_runway', arrivalRunway);
-    return sanitize(await read(`routes/parse?${params}`, cycle), origin, destination);
+    const geometry = sanitize(await read(`routes/parse?${params}`, cycle), origin, destination);
+    // Also prove explicit direct fix pairs survived the conversion. In particular
+    // an inferred multi-fix feeder must not silently skip its intermediate fixes.
+    routeTokens.forEach((token, i) => {
+      if (token !== 'DCT') return;
+      const from = i ? tokenName(routeTokens[i - 1]) : origin;
+      const to = tokenName(routeTokens[i + 1]);
+      if (/^[A-Z]{2,5}$/.test(from) && /^[A-Z]{2,5}$/.test(to)
+        && from !== to && !geometry.segments.some(s => s.from.identifier === from && s.to.identifier === to)) {
+        geometry.errors.push({ type: 'direct_leg_missing', segment: `${from} DCT ${to}`,
+          message: `Direct leg ${from} to ${to} could not be verified` });
+      }
+    });
+    return geometry;
   }
 
   return async function getGeometry({ origin, destination, route, departureRunway, arrivalRunway, cycle: expectedCycle, entryFix }) {
     const cycle = await currentCycle(expectedCycle);
-    const tokens = route.split(/\s+/), names = tokens.map(tokenName);
+    const extension = arrivalEntryExtension(destination, route, entryFix);
+    const tokens = (extension?.route || route).split(/\s+/), names = tokens.map(tokenName);
     const meaningful = names.map((name, i) => ({ name, i })).filter(({ name }) => name !== origin && name !== destination && name !== 'DCT' && !speedLevel.test(name));
     const first = meaningful[0], last = meaningful.at(-1);
     const sid = first && procedureName.test(first.name) ? first : null;
@@ -193,10 +231,14 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     let geometry = { origin, destination, totalDistance: null, segments: [], errors: diagnostics };
     if (!diagnostics.length) geometry = await parse(origin, destination, normalizedRoute, dep, arr, cycle);
     let entryRoute = null, entryRouteError = null;
+    if (entryFix && !geometry.errors.length && !geometry.segments.some((s) => s.to.identifier === entryFix)) {
+      geometry.errors.push({ type: 'entry_not_on_route', segment: entryFix,
+        message: `No verified route to ${entryFix}; arrival entry/route confirmation required` });
+    }
     if (entryFix && (diagnostics.length || geometry.errors.length)) {
-      // Independently resolve just the FILED enroute section. Do not drop a missing
-      // airway/waypoint or invent a direct leg. SID precedes the retained first fix;
-      // the STAR is supplied by the caller's matching AIRAC geometry.
+      // Independently resolve the enroute section, including only an explicitly
+      // labelled published feeder extension when present. Never drop a missing
+      // airway/waypoint or assume the geometry of an unresolved SID/STAR.
       const endIndices = names.flatMap((name, i) => name === entryFix ? [i] : []);
       const start = sid ? sid.i + 1 : first?.i;
       const end = endIndices.length === 1 ? endIndices[0] : -1;
@@ -221,6 +263,8 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     }
     if (!geometry.segments.length && !entryRoute) throw new Error(diagnostics.map((e) => e.message).join('; ') || 'No usable route geometry');
     return { ...geometry, cycle: cycle.cycle, normalizedRoute, departureRunway: dep, arrivalRunway: arr,
+      entryRouteSource: extension ? 'AIP_INFERRED' : 'FILED',
+      entryTransition: extension ? { via: extension.via, path: extension.path, source: extension.source } : null,
       procedures: procedures.sort((a, b) => a.kind.localeCompare(b.kind)), entryRoute, entryRouteError };
   };
 }

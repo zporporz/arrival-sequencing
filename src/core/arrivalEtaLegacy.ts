@@ -30,6 +30,8 @@ export type RouteGeometry = {
   arrivalRunway?: string | null
   entryRoute?: RouteGeometry & { entryFix: string; cycle: string } | null
   entryRouteError?: string | null
+  entryRouteSource?: 'FILED' | 'AIP_INFERRED'
+  entryTransition?: { via: string; path: string[]; source: string } | null
 }
 
 export type ArrivalEtaSource =

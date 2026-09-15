@@ -1,0 +1,22 @@
+{
+  "source": "CAAT AIP ENR 1.10 §4.3 · AIRAC 2026-07-09",
+  "url": "https://aip.caat.or.th/2026-07-09-AIRAC/html/eAIP/VT-ENR-1.10-en-GB.html",
+  "airports": {
+    "VTBD": {
+      "IBETO": ["WEHHA"], "TARED": ["WEHHA"], "IGONI": ["WEHHA"],
+      "SEMBO": ["NAKON"], "BLAFF": ["NAKON"], "NOBER": ["NAKON"], "ALBOS": ["NAKON"],
+      "UBLOD": ["ENDUU"],
+      "ANREN": ["SEHNA"], "DULEM": ["SEHNA"], "GOMES": ["SEHNA"], "NUGPA": ["SEHNA"],
+      "RYN": ["SEHNA"], "ALEMI": ["SEHNA"],
+      "HOTEL": ["SABAI"], "GUTSO": ["SABAI"], "BUT": ["SABAI"]
+    },
+    "VTBS": {
+      "IBETO": ["WILLA"], "TARED": ["WILLA"], "IGONI": ["WILLA"],
+      "SEMBO": ["NORTA"], "BLAFF": ["NORTA"], "NOBER": ["NORTA"], "ALBOS": ["NORTA"],
+      "UBLOD": ["EASTE"], "RUKSA": ["EASTE"],
+      "ANREN": ["GOMES", "TUMGA"], "DULEM": ["GOMES", "TUMGA"],
+      "GOMES": ["TUMGA"], "NUGPA": ["TUMGA"], "RYN": ["TUMGA"], "ALEMI": ["TUMGA"],
+      "HOTEL": ["LEBIM"], "GUTSO": ["LEBIM"], "BUT": ["TUMGA"]
+    }
+  }
+}
