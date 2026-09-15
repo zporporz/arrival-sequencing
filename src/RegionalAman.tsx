@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AircraftPerformanceProfile } from './core/api'
-import { calculateRegionalTiming, resolveRegionalStar, type RegionalCode, type RegionalNavPayload, type RegionalTiming } from './core/regionalArrivalModel'
-import { estimateRegionalLive } from './core/regionalLiveEstimate'
+import { calculateRegionalTiming, type RegionalCode, type RegionalNavPayload, type RegionalTiming } from './core/regionalArrivalModel'
+import { estimateRegionalEntry, estimateRegionalLive } from './core/regionalLiveEstimate'
+import { regionalFlightArrival } from './core/regionalAmanAdapter'
+import { rememberArrivalStar } from './core/arrivalStarChoice'
+import ArrivalStarControl from './ArrivalStarControl'
 import { formatRoundedHmUtc } from './core/minuteRounding'
 import { previewPerformance, readRegionalNav, readRegionalSnapshot, type RegionalSnapshot } from './core/regionalPreviewData'
 import './regionalAman.css'
@@ -39,6 +42,7 @@ export default function RegionalAman() {
   const [calculatorType, setCalculatorType] = useState('A320')
   const [calculatorProfile, setCalculatorProfile] = useState<AircraftPerformanceProfile | null>(null)
   const [profileError, setProfileError] = useState('')
+  const [, refreshChoice] = useState(0)
 
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer) }, [])
   useEffect(() => {
@@ -84,11 +88,13 @@ export default function RegionalAman() {
   const calculation = nav && selectedStar && approach && calculatorProfile ? calculateRegionalTiming(nav.airport, selectedStar, approach, calculatorProfile) : null
   const stale = !snapshot || clock - Date.parse(snapshot.traffic.fetchedAt) > 90_000
   const rows = (snapshot?.traffic.flights || []).map((flight) => {
-    const star = nav && resolveRegionalStar(nav.airport, runway, flight.route)
+    const arrival = nav && regionalFlightArrival(nav, runway, flight), star = arrival?.star
     const profile = snapshot!.profiles[flight.aircraft || '']
     const result = nav && star && approach ? calculateRegionalTiming(nav.airport, star, approach, profile) : null
     const live = result?.timing && profile && !stale ? estimateRegionalLive(flight, result.timing, profile, snapshot!.routes[flight.sessionId] || null, snapshot!.traffic.fetchedAt) : null
-    return { flight, star, timing: result?.timing, estimate: live?.estimate,
+    const entryOnly = !stale && !live?.estimate && arrival?.entryFix
+      ? estimateRegionalEntry(flight, snapshot!.routes[flight.sessionId] || null, arrival.entryFix, snapshot!.traffic.fetchedAt) : null
+    return { flight, star, selection: arrival?.selection, entryOnly, timing: result?.timing, estimate: live?.estimate,
       reason: stale ? 'STALE — refreshing traffic' : !star ? 'STAR unresolved for this runway — check filed route' : !approach ? 'Select approach'
         : result?.error || (live?.error && snapshot?.routeErrors?.[flight.sessionId] ? `Route service: ${snapshot.routeErrors[flight.sessionId]}` : live?.error) || '' }
   }).sort((a, b) => (a.estimate?.tldtMs ?? Infinity) - (b.estimate?.tldtMs ?? Infinity) || a.flight.callsign.localeCompare(b.flight.callsign))
@@ -114,9 +120,14 @@ export default function RegionalAman() {
         {trafficError && <p role="alert" className="regional-error">{trafficError}</p>}
         <div className="regional-table-scroll"><table><caption>Ordered by estimated landing time · approach selection is an assumption, not an ATC clearance</caption>
           <thead><tr><th>Aircraft</th><th>STAR</th><th>ETA-FF</th><th>STA-FF*</th><th>TLDT EST</th><th>Model / status</th></tr></thead>
-          <tbody>{rows.map(({ flight, star, timing, estimate, reason }) => <tr key={flight.sessionId}>
-            <td><strong>{flight.callsign}</strong><small>{flight.aircraft} · {flight.state}</small></td><td>{star?.name || '—'}</td>
-            <td>{estimate?.pastEntry ? 'PASSED*' : utc(estimate?.etaFfMs ?? null)}</td><td>{utc(estimate?.etaFfMs ?? null)}</td><td className="regional-time">{utc(estimate?.tldtMs ?? null)}</td>
+          <tbody>{rows.map(({ flight, star, selection, entryOnly, timing, estimate, reason }) => <tr key={flight.sessionId}>
+            <td><strong>{flight.callsign}</strong><small>{flight.aircraft} · {flight.state}</small></td><td>{star?.name || '—'}
+              <ArrivalStarControl callsign={flight.callsign} selection={selection} onChange={name => {
+                if (selection) rememberArrivalStar(flight, selection, name)
+                refreshChoice(n => n + 1)
+              }} />
+            </td>
+            <td>{estimate?.pastEntry ? 'PASSED*' : utc(estimate?.etaFfMs ?? entryOnly ?? null)}{entryOnly != null && <small>ENTRY ONLY EST</small>}</td><td>{utc(estimate?.etaFfMs ?? null)}</td><td className="regional-time">{utc(estimate?.tldtMs ?? null)}</td>
             <td>{estimate ? <small>{estimate.remainingNm.toFixed(1)} NM remaining · {estimate.offRouteNm.toFixed(1)} NM off route</small> : <small className="regional-warning">{reason}</small>}
               {timing && <details><summary>STAR + approach {duration(timing.nominalSeconds)}</summary><TimingDetails timing={timing} /></details>}
             </td></tr>)}</tbody></table></div>

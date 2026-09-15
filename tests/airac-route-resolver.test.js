@@ -170,6 +170,78 @@ describe('generic SID / STAR route resolution', () => {
   })
 })
 
+describe('filed STAR / active-runway mismatch planning', () => {
+  const oldStar = { ...detail('VTBD', 'SABA3A', 'STAR', 'SABAI', ['21B']),
+    transitions: { HOTEL: [{ ...leg('HOTEL'), path_terminator: 'IF' }, leg('SABAI')] } }
+  const newStar = detail('VTBD', 'SABA3B', 'STAR', 'SABAI', ['03B'])
+  const input = { origin: 'VTST', destination: 'VTBD', route: 'TRN Y99 HOTEL SABAI3A', arrivalRunway: '03L', entryFix: 'SABAI' }
+  const parse = () => routeData(['VTST', 'TRN', 'HOTEL', 'SABAI', 'VTBD'])
+  it('recovers only the published feeder, preserves filed STAR and labels one compatible replacement EST', async () => {
+    const a = api({ procedures: [oldStar, newStar], parse }), result = await a.resolve(input)
+    expect(result.normalizedRoute).toBe(input.route)
+    expect(result.arrivalSelection).toMatchObject({ status: 'ESTIMATED', selected: 'SABA3B', filed: 'SABAI3A', runway: '03L', cycle })
+    expect(result.arrivalSelection.reason).toContain('NOT A CLEARANCE')
+    expect(result.errors[0].message).toContain('not supported')
+    expect(result.entryRoute.errors).toEqual([])
+    expect(result.entryRoute.segments.at(-1).to.identifier).toBe('SABAI')
+    expect(result.entryRouteSource).toBe('FILED_STAR_TRANSITION')
+    const requests = a.calls.filter(u => u.pathname.endsWith('/routes/parse'))
+    expect(requests.map(u => u.searchParams.get('route'))).toEqual(['TRN Y99 HOTEL SABAI'])
+    expect(requests[0].searchParams.has('arrival_runway')).toBe(false)
+  })
+  it('keeps explicit entry ETA when several compatible STARs exist, but selects none', async () => {
+    const a = api({ procedures: [oldStar, newStar, { ...newStar, identifier: 'SABA3C' }], parse })
+    const result = await a.resolve({ ...input, route: 'TRN Y99 HOTEL DCT SABAI SABAI3A' })
+    expect(result.arrivalSelection).toMatchObject({ status: 'REQUIRED', selected: null, candidates: ['SABA3B', 'SABA3C'] })
+    expect(result.entryRoute).not.toBeNull()
+    const manual = await a.resolve({ ...input, selectedStar: 'SABA3C' })
+    expect(manual.arrivalSelection).toMatchObject({ status: 'MANUAL_ESTIMATE', selected: 'SABA3C' })
+    expect((await a.resolve({ ...input, selectedStar: 'WRONG1A' })).arrivalSelection.selected).toBeNull()
+  })
+  it('does not substitute different entries, airports, runway sides, revisions or unavailable catalogs', async () => {
+    const cases = [detail('VTBD', 'DOTL3B', 'STAR', 'DOTLI', ['03B']),
+      detail('VTBS', 'SABA3B', 'STAR', 'SABAI', ['03B']), detail('VTBD', 'SABA3B', 'STAR', 'SABAI', ['03R'])]
+    const result = await api({ procedures: [oldStar, ...cases], parse }).resolve(input)
+    expect(result.arrivalSelection).toMatchObject({ status: 'REQUIRED', selected: null, candidates: [] })
+    const failure = await api({ procedures: [oldStar, newStar], parse,
+      fail: u => u.pathname.endsWith('/SABA3B') }).resolve(input)
+    expect(failure.arrivalSelection.status).toBe('REQUIRED')
+    expect(failure.arrivalSelection.reason).toContain('Catalog unavailable')
+    expect(failure.entryRoute).not.toBeNull()
+    await expect(api({ procedures: [oldStar, newStar], parse }).resolve({ ...input, route: 'TRN Y99 HOTEL SABAI9Z' })).rejects.toThrow('not verified')
+  })
+  it('does not bridge unknown trailing fixes, unsupported feeder legs or guessed entry names', async () => {
+    for (const route of ['TRN Y99 HOTEL UNKNOWN SABAI3A', 'TRN Y99 HOTEL OTHER SABAI3A']) {
+      const result = await api({ procedures: [oldStar, newStar], parse }).resolve({ ...input, route })
+      expect(result.entryRoute).toBeNull()
+    }
+    const vector = { ...oldStar, transitions: { HOTEL: [leg('HOTEL'), { ...leg('SABAI'), path_terminator: 'VM' }] } }
+    expect((await api({ procedures: [vector, newStar], parse }).resolve(input)).entryRoute).toBeNull()
+    const wrongEntry = await api({ procedures: [oldStar, newStar], parse }).resolve({ ...input, entryFix: 'DOTLI' })
+    expect(wrongEntry.arrivalSelection.selected).toBeNull()
+    expect(wrongEntry.entryRoute).toBeNull()
+  })
+  it('expands the verified STAR entry after an airway, but still rejects unresolved airway geometry', async () => {
+    const input = { origin: 'VTBD', destination: 'VTCC', route: 'OLVUK Y26 MARNI2A', arrivalRunway: '18', entryFix: 'MARNI' }
+    const defs = [procedures[1], detail('VTCC', 'MARN2B', 'STAR', 'MARNI', ['18'])]
+    const a = api({ procedures: defs })
+    const result = await a.resolve(input)
+    expect(result.entryRoute.segments.at(-1).to.identifier).toBe('MARNI')
+    expect(a.calls.find(u => u.pathname.endsWith('/routes/parse')).searchParams.get('route')).toBe('OLVUK Y26 MARNI')
+    const bad = await api({ procedures: defs, parse: () => routeData(undefined, [{ type: 'airway_not_found', message: 'Y26 missing' }]) }).resolve(input)
+    expect(bad.entryRoute).toBeNull()
+  })
+  it.each([
+    ['VTBD', '21B', '03L'], ['VTBS', '20B', '02R'], ['VTCC', '36', '18'], ['VTSP', '27', '09'],
+  ])('%s applies the same explicit-entry policy without airport-specific STAR names', async (airport, oldRunway, runway) => {
+    const a = api({ procedures: [detail(airport, 'ENTRY1A', 'STAR', 'ENTRY', [oldRunway]),
+      detail(airport, 'ENTRY1B', 'STAR', 'ENTRY', [runway])], parse: () => routeData(['VTST', 'START', 'ENTRY', airport]) })
+    const result = await a.resolve({ origin: 'VTST', destination: airport, route: 'START DCT ENTRY ENTRY1A', arrivalRunway: runway, entryFix: 'ENTRY' })
+    expect(result.arrivalSelection.selected).toBe('ENTRY1B')
+    expect(result.entryRoute.segments.at(-1).to.identifier).toBe('ENTRY')
+  })
+})
+
 describe('all source STAR names, not a MARNI special case', () => {
   for (const airport of Object.values(bundle.airports)) {
     for (const p of airport.procedures.filter((p) => p.kind === 'STAR')) {

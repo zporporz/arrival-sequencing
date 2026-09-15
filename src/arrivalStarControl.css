@@ -1,0 +1,4 @@
+.aman-star-choice { display: grid; gap: 4px; min-width: 0; width: 100%; padding: 5px 0; color: #e1bb72; }
+.aman-star-choice small { white-space: normal; overflow-wrap: anywhere; font: 600 9px/1.35 Consolas, monospace; }
+.aman-star-choice select { width: 100%; min-width: 0; max-width: 240px; min-height: 28px; padding: 3px; border: 1px solid #7a6034; border-radius: 3px; background: #0b1828; color: #f3d49a; font: 11px/1.4 Consolas, monospace; }
+.aman-star-choice select:focus-visible { outline: 2px solid #b0eaed; outline-offset: 2px; }

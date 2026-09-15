@@ -188,7 +188,7 @@ export function readOperationalConfig(serviceDate = new Date().toISOString().sli
   return apiGet<OperationalConfigPayload>(`/api/sequence/operational-config?${params.toString()}`)
 }
 
-export type RouteGeometryOptions = { departureRunway?: string; arrivalRunway?: string; cycle?: string; entryFix?: string }
+export type RouteGeometryOptions = { departureRunway?: string; arrivalRunway?: string; cycle?: string; entryFix?: string; selectedStar?: string }
 export function readRouteGeometry<TGeometry>(origin: string, destination: string, route: string, signal?: AbortSignal, options: RouteGeometryOptions = {}) {
   return apiPost<TGeometry>('/api/sequence/route-geometry', {
     origin: origin.trim().toUpperCase(),

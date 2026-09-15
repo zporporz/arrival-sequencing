@@ -1,4 +1,5 @@
 import entryTransitions from '../../shared/arrivalEntryTransitions.json';
+import { chooseArrivalStar, supportsArrivalRunway } from '../../shared/arrivalStarSelection.js';
 
 const BASE = 'https://airac.net/api/v1';
 const USER_AGENT = 'BangkokFIRArrivalSequencing/2.0 (+https://github.com/zporporz/arrival-sequencing)';
@@ -55,8 +56,37 @@ function availableRunways(detail) {
     .map(normalizeRunway).filter(Boolean))];
 }
 function supportsRunway(candidate, runway) {
-  // "20B" is a parallel runway family, not a licence to choose L or R.
-  return candidate === runway || (candidate.endsWith('B') && candidate.slice(0, 2) === runway.slice(0, 2) && /[LR]$/.test(runway));
+  return supportsArrivalRunway(candidate, runway);
+}
+// Prefer the common-route entry; otherwise use the selected runway branch.
+// Feeder transition starts are NOT interchangeable with the STAR entry itself.
+function starEntries(detail, runway) {
+  const common = list(detail.common_route);
+  const groups = common.length ? [common] : Object.entries(detail.runway_transitions || {})
+    .filter(([r]) => !runway || supportsRunway(normalizeRunway(r) || '', runway)).map(([, legs]) => list(legs));
+  return [...new Set(groups.map(legs => point({ identifier: legs[0]?.fix_identifier,
+    coordinates: legs[0]?.fix_coordinates })?.identifier).filter(Boolean))];
+}
+
+function publishedEntryExtension(detail, tokens, entryFix, cycle) {
+  const meaningful = tokens.map(tokenName).filter(t => t !== 'DCT' && !speedLevel.test(t));
+  const via = meaningful.at(-1);
+  // Only a published, unambiguous feeder can fill a missing entry. Do not
+  // truncate an unknown waypoint/airway or fabricate a direct from the aircraft.
+  const paths = groupLegs(detail.transitions).flatMap(legs => {
+    const end = legs.findIndex(l => code(l.fix_identifier) === entryFix);
+    if (code(legs[0]?.fix_identifier) !== via || end < 1) return [];
+    const path = legs.slice(0, end + 1);
+    if (path.some((l, i) => !['IF', 'TF'].includes(l.path_terminator) || (i && l.path_terminator === 'IF')
+      || !point({ identifier: l.fix_identifier, coordinates: l.fix_coordinates }))) return [];
+    return [path.map(l => code(l.fix_identifier))];
+  });
+  const unique = [...new Map(paths.map(path => [path.join(' '), path])).values()];
+  if (unique.length !== 1) return null;
+  while (tokens.at(-1) === 'DCT') tokens.pop();
+  const path = unique[0].slice(1);
+  return { tokens: [...tokens, ...path.flatMap(fix => ['DCT', fix])], via, path,
+    source: `AIRAC ${cycle} · published transition of filed ${detail.identifier}` };
 }
 function selectRunway(detail, requested) {
   const runways = availableRunways(detail);
@@ -149,7 +179,7 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     }
     throw new Error('Procedure catalog is incomplete; refusing an ambiguous lookup');
   }
-  async function resolveProcedure(filed, airport, kind, requestedRunway, cycle) {
+  async function findProcedure(filed, airport, kind, cycle) {
     const rows = await catalog(airport, kind, cycle);
     const ids = [...new Set(rows.map((p) => code(p.identifier)))];
     const exact = ids.includes(filed);
@@ -167,8 +197,24 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
       return exact || aliasMatches(filed, id, data, kind) ? data : null;
     }))).filter(Boolean);
     if (matches.length !== 1) throw new Error(matches.length ? `Ambiguous procedure name ${filed}` : `Procedure ${filed} not verified at ${airport}`);
-    const detail = matches[0];
-    return { filed, identifier: detail.identifier, kind, airport, runway: selectRunway(detail, requestedRunway) };
+    return matches[0];
+  }
+  async function arrivalChoices(airport, runway, entryFix, cycle) {
+    return cached(`star-choices:${cycle.cycle}:${airport}:${runway}:${entryFix}`, Math.min(Date.now() + 3600_000, cycle.expiresAt), async () => {
+      const ids = [...new Set((await catalog(airport, 'STAR', cycle)).map(p => code(p.identifier)))];
+      if (ids.length > 100) throw new Error('STAR catalog too large for a verified planning choice');
+      const choices = []; let next = 0;
+      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+        while (next < ids.length) {
+          const id = ids[next++];
+          const { data } = await read(`procedures/${airport}/${encodeURIComponent(id)}`, cycle);
+          if (code(data?.airport) !== airport || code(data?.identifier) !== id || code(data?.type?.code) !== 'STAR') throw new Error('STAR catalog/detail mismatch');
+          const entries = starEntries(data, runway);
+          if (entries.length === 1 && entries[0] === entryFix) choices.push({ name: id, airport, entryFix, runways: availableRunways(data) });
+        }
+      }));
+      return choices;
+    });
   }
   async function parse(origin, destination, route, departureRunway, arrivalRunway, cycle) {
     // AIRAC's parser joins consecutive fixes directly, but treats the ICAO DCT
@@ -195,7 +241,7 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     return geometry;
   }
 
-  return async function getGeometry({ origin, destination, route, departureRunway, arrivalRunway, cycle: expectedCycle, entryFix }) {
+  return async function getGeometry({ origin, destination, route, departureRunway, arrivalRunway, cycle: expectedCycle, entryFix, selectedStar }) {
     const cycle = await currentCycle(expectedCycle);
     const extension = arrivalEntryExtension(destination, route, entryFix);
     const tokens = (extension?.route || route).split(/\s+/), names = tokens.map(tokenName);
@@ -207,10 +253,12 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     const resolutions = await Promise.all([{ token: sid, airport: origin, kind: 'SID', runway: departureRunway },
       { token: star, airport: destination, kind: 'STAR', runway: arrivalRunway }].map(async ({ token, airport, kind, runway }) => {
       if (!token) return null;
+      let detail;
       try {
-        const resolved = await resolveProcedure(token.name, airport, kind, runway, cycle);
-        return { token, resolved };
-      } catch (error) { return { token, error: { type: 'procedure_resolution', segment: token.name, scope: kind === 'SID' ? 'departure' : 'arrival', message: String(error.message || error) } }; }
+        detail = await findProcedure(token.name, airport, kind, cycle);
+        const resolved = { filed: token.name, identifier: detail.identifier, kind, airport, runway: selectRunway(detail, runway) };
+        return { token, resolved, detail, kind };
+      } catch (error) { return { token, detail, kind, error: { type: 'procedure_resolution', segment: token.name, scope: kind === 'SID' ? 'departure' : 'arrival', message: String(error.message || error) } }; }
     }));
     const single = sid && star && sid.i === star.i;
     const successes = resolutions.filter((r) => r?.resolved);
@@ -227,6 +275,35 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
     const dep = procedures.find((p) => p.kind === 'SID')?.runway || departureRunway || null;
     const arr = procedures.find((p) => p.kind === 'STAR')?.runway || arrivalRunway || null;
     const normalizedRoute = tokens.join(' ');
+    const filedStar = resolutions.find(r => r?.kind === 'STAR' && r.detail);
+    const runwayMismatch = filedStar && arrivalRunway && !arrivalRunway.endsWith('B')
+      && availableRunways(filedStar.detail).length && !availableRunways(filedStar.detail).some(r => supportsRunway(r, arrivalRunway));
+    let arrivalSelection = null, recovered = null;
+    if (runwayMismatch && entryFix) {
+      const entries = starEntries(filedStar.detail);
+      let candidates = [], lookupError = null;
+      try {
+        if (entries.length !== 1 || entries[0] !== entryFix) throw new Error('Filed STAR entry is ambiguous or differs from the requested entry');
+        candidates = await arrivalChoices(destination, arrivalRunway, entryFix, cycle);
+      }
+      catch (error) { lookupError = String(error.message || error); }
+      arrivalSelection = chooseArrivalStar({ airport: destination, runway: arrivalRunway, entryFix,
+        filed: filedStar.token.name, candidates, selected: selectedStar, cycle: cycle.cycle });
+      if (lookupError) arrivalSelection.reason += ` · Catalog unavailable: ${lookupError}`;
+      // Recover only the filed procedure's published feeder up to the same entry.
+      // Never parse the wrong-runway STAR as if it were active, even for one match.
+      if (!names.includes(entryFix) && entries.length === 1 && entries[0] === entryFix) {
+        const prefix = tokens.slice(0, filedStar.token.i);
+        recovered = publishedEntryExtension(filedStar.detail, [...prefix], entryFix, cycle.cycle);
+        // "... Y26 MARNI2A" already specifies the airway ending at the verified
+        // procedure entry. Expand that endpoint, not an invented DCT; the full
+        // airway section must still pass the independent parser below.
+        if (!recovered && /^[A-Z]{1,2}\d{1,4}$/.test(tokenName(prefix.at(-1)))) {
+          recovered = { tokens: [...prefix, entryFix], via: tokenName(prefix.at(-1)), path: [entryFix],
+            source: `AIRAC ${cycle.cycle} · entry of filed ${filedStar.detail.identifier}` };
+        }
+      }
+    }
     // Never let the upstream parser pick a default for an ambiguous procedure.
     let geometry = { origin, destination, totalDistance: null, segments: [], errors: diagnostics };
     if (!diagnostics.length) geometry = await parse(origin, destination, normalizedRoute, dep, arr, cycle);
@@ -239,11 +316,12 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
       // Independently resolve the enroute section, including only an explicitly
       // labelled published feeder extension when present. Never drop a missing
       // airway/waypoint or assume the geometry of an unresolved SID/STAR.
-      const endIndices = names.flatMap((name, i) => name === entryFix ? [i] : []);
+      const entryTokens = recovered?.tokens || tokens, entryNames = entryTokens.map(tokenName);
+      const endIndices = entryNames.flatMap((name, i) => name === entryFix ? [i] : []);
       const start = sid ? sid.i + 1 : first?.i;
       const end = endIndices.length === 1 ? endIndices[0] : -1;
-      if (start != null && end > start && (!star || end < star.i)) {
-        const section = tokens.slice(start, end + 1);
+      if (start != null && end > start && (recovered || !star || end < star.i)) {
+        const section = entryTokens.slice(start, end + 1);
         while (section[0] === 'DCT') section.shift();
         const startFix = tokenName(section[0]);
         if (/^[A-Z]{2,5}$/.test(startFix) && startFix !== 'DCT') {
@@ -261,10 +339,12 @@ export function createAiracRouteResolver(fetcher = (...args) => fetch(...args)) 
       }
       if (!entryRoute && !entryRouteError) entryRouteError = 'No verified filed enroute section to the STAR entry';
     }
-    if (!geometry.segments.length && !entryRoute) throw new Error(diagnostics.map((e) => e.message).join('; ') || 'No usable route geometry');
+    if (!geometry.segments.length && !entryRoute && !arrivalSelection) throw new Error(diagnostics.map((e) => e.message).join('; ') || 'No usable route geometry');
     return { ...geometry, cycle: cycle.cycle, normalizedRoute, departureRunway: dep, arrivalRunway: arr,
-      entryRouteSource: extension ? 'AIP_INFERRED' : 'FILED',
-      entryTransition: extension ? { via: extension.via, path: extension.path, source: extension.source } : null,
+      arrivalSelection,
+      entryRouteSource: recovered ? 'FILED_STAR_TRANSITION' : extension ? 'AIP_INFERRED' : 'FILED',
+      entryTransition: recovered ? { via: recovered.via, path: recovered.path, source: recovered.source }
+        : extension ? { via: extension.via, path: extension.path, source: extension.source } : null,
       procedures: procedures.sort((a, b) => a.kind.localeCompare(b.kind)), entryRoute, entryRouteError };
   };
 }

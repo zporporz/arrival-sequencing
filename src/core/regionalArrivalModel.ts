@@ -1,4 +1,5 @@
 import type { AircraftPerformanceProfile } from './api'
+import { chooseArrivalStar, type ArrivalStarSelection } from '../../shared/arrivalStarSelection'
 
 export type RegionalCode = 'VTCC' | 'VTSP'
 export type NavLeg = {
@@ -33,7 +34,7 @@ export type TimingResult = { timing: RegionalTiming; error?: never } | { timing?
 const rad = (value: number) => value * Math.PI / 180
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
-const validPoint = (p: { lat: number | null; lon: number | null }) => p.lat != null && p.lon != null
+const validPoint = (p: { lat: number | null; lon: number | null } | undefined) => p != null && p.lat != null && p.lon != null
   && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180
 
 export function regionalDistanceNm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
@@ -45,11 +46,7 @@ function legDistance(a: NavLeg, b: NavLeg) {
   return regionalDistanceNm({ lat: a.lat!, lon: a.lon! }, { lat: b.lat!, lon: b.lon! })
 }
 
-export function resolveRegionalStar(airport: RegionalAirport, runway: string, route: string | null) {
-  const ordered = (route || '').toUpperCase().split(/\s+/).map((t) => t.split('/')[0])
-  const tokens = new Set(ordered)
-  const stars = airport.procedures.filter((p) => p.kind === 'STAR' && p.runway === runway)
-  const aliases = (p: NavProcedure) => {
+function regionalStarAliases(p: NavProcedure) {
     const suffix = p.name.match(/\d{1,2}[A-Z]?$/)?.[0]
     const names = new Set([p.name])
     if (suffix) {
@@ -61,8 +58,12 @@ export function resolveRegionalStar(airport: RegionalAirport, runway: string, ro
       }
     }
     return [...names]
-  }
-  const filed = (p: NavProcedure) => aliases(p).some((name) => tokens.has(name))
+}
+export function resolveRegionalStar(airport: RegionalAirport, runway: string, route: string | null) {
+  const ordered = (route || '').toUpperCase().split(/\s+/).map((t) => t.split('/')[0])
+  const tokens = new Set(ordered)
+  const stars = airport.procedures.filter((p) => p.kind === 'STAR' && p.runway === runway)
+  const filed = (p: NavProcedure) => regionalStarAliases(p).some((name) => tokens.has(name))
   const exact = stars.filter(filed)
   if (exact.length === 1) return exact[0]
   if (exact.length > 1) return null
@@ -72,6 +73,39 @@ export function resolveRegionalStar(airport: RegionalAirport, runway: string, ro
   if (byEntry.length === 1 && ordered.slice(ordered.lastIndexOf(byEntry[0].legs[0].fix!) + 1)
     .some((token) => /^[A-Z]{3,5}\d[A-Z]$/.test(token))) return null
   return byEntry.length === 1 ? byEntry[0] : null
+}
+
+/** Explicit planning policy; the legacy strict resolver above still never substitutes. */
+export function resolveRegionalArrival(airport: RegionalAirport, runway: string, route: string | null, selected?: string, cycle?: string): {
+  star: NavProcedure | null; selection: ArrivalStarSelection | null; entryFix: string | null; reason: string
+} {
+  const tokens = (route || '').toUpperCase().split(/\s+/).map(t => t.split('/')[0])
+  const all = airport.procedures.filter(p => p.kind === 'STAR')
+  const filed = all.filter(p => regionalStarAliases(p).some(name => tokens.includes(name)))
+  const names = [...new Set(filed.map(p => p.name))]
+  const terminal = tokens.filter(t => t && t !== 'DCT' && t !== airport.code && !/^(?:[NMK]\d{3,4})?(?:[FAS]\d{3,4}|VFR)$/.test(t)).at(-1)
+  // Two filed procedures, unknown revisions, or later instructions are not a
+  // request to pick an earlier entry or a similar-looking STAR.
+  if (names.length > 1 || (filed.length && !filed.some(p => regionalStarAliases(p).includes(terminal || '')))
+    || (!filed.length && /^[A-Z]{2,6}\d{1,2}[A-Z]?$/.test(terminal || ''))) {
+    return { star: null, selection: null, entryFix: null, reason: 'STAR unresolved — confirm filed STAR / entry' }
+  }
+  const exact = filed.filter(p => p.runway === runway)
+  if (exact.length === 1) return { star: exact[0], selection: null, entryFix: exact[0].legs[0]?.fix || null, reason: '' }
+  const entries = [...new Set((filed.length ? filed : all.filter(p => p.legs[0]?.fix === terminal))
+    .map(p => p.legs[0]?.fix).filter((s): s is string => Boolean(s)))]
+  if (entries.length !== 1) return { star: null, selection: null, entryFix: null, reason: 'STAR unresolved — confirm arrival entry' }
+  const entryFix = entries[0]
+  const candidates = all.filter(p => validPoint(p.legs[0]) && !p.transitions.length)
+    .map(p => ({ name: p.name, airport: airport.code, entryFix: p.legs[0].fix!, runways: [p.runway] }))
+  const selection = chooseArrivalStar({ airport: airport.code, runway, entryFix, filed: names[0] || null, candidates, selected, cycle })
+  const matches = all.filter(p => p.runway === runway && p.name === selection.selected && p.legs[0]?.fix === entryFix)
+  // A duplicate name with different path records is still ambiguous.
+  if (matches.length > 1) {
+    selection.status = 'REQUIRED'; selection.selected = null; selection.candidates = []
+    selection.reason = 'SELECT STAR · Ambiguous published STAR records'
+  }
+  return { star: matches.length === 1 && selection.selected ? matches[0] : null, selection, entryFix, reason: selection.reason }
 }
 
 type Range = { lo: number; hi: number }

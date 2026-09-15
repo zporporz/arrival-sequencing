@@ -20,6 +20,38 @@ function project(point: Coordinates, segment: PathSegment) {
   return { f, along, off: Math.hypot(ax + f * dx, ay + f * dy), bearing: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360 }
 }
 
+/** Independent ENTRY ONLY estimate. No STAR/approach, landing time, EET or locks.
+ * This deliberately requires a fresh track on a validated upstream path. */
+export function estimateRegionalEntry(flight: IvaoArrivalTrafficFlight, geometry: RouteGeometry | null, entryFix: string, fetchedAt: string): number | null {
+  const sample = Date.parse(flight.trackTimestamp || ''), now = Date.parse(fetchedAt)
+  const position = { lat: flight.latitude!, lon: flight.longitude! }
+  if (flight.latitude == null || flight.longitude == null || !valid(position) || flight.onGround !== false
+    || /landed|onblocks/i.test((flight.state || '').replaceAll(' ', ''))
+    || !Number.isFinite(sample) || !Number.isFinite(now) || now - sample > 90000 || sample - now > 15000
+    || !Number.isFinite(flight.heading) || flight.heading == null || flight.groundSpeed == null
+    || !Number.isFinite(flight.groundSpeed) || flight.groundSpeed < 60 || flight.groundSpeed > 800) return null
+  const partial = geometry?.entryRoute
+  const route = partial && partial.cycle === geometry?.cycle && partial.entryFix === entryFix ? partial : geometry
+  if (!route || route.errors.length || route.origin !== flight.departure || route.destination !== flight.arrival) return null
+  const ends = route.segments.flatMap((s, i) => s.to.identifier === entryFix ? [i] : [])
+  if (ends.length !== 1) return null
+  const segments: PathSegment[] = []
+  for (const s of route.segments.slice(0, ends[0] + 1)) {
+    if (!valid(s.from.coordinates) || !valid(s.to.coordinates)
+      || (segments.length && regionalDistanceNm(segments.at(-1)!.to, s.from.coordinates) > .1)) return null
+    const distanceNm = regionalDistanceNm(s.from.coordinates, s.to.coordinates)
+    if (distanceNm > 500) return null
+    if (distanceNm > .001) segments.push({ from: s.from.coordinates, to: s.to.coordinates, distanceNm, modelIndex: null })
+  }
+  const options = segments.map((s, i) => ({ ...project(position, s), i }))
+    .filter(p => p.along >= 0 && p.along <= 1 && Math.abs(((p.bearing - flight.heading! + 540) % 360) - 180) <= 70)
+    .sort((a, b) => a.off - b.off)
+  const p = options[0]
+  if (!p || p.off > 3 || options.some(q => Math.abs(q.i - p.i) > 1 && q.off < p.off + .5)) return null
+  const distance = segments[p.i].distanceNm * (1 - p.f) + segments.slice(p.i + 1).reduce((n, s) => n + s.distanceNm, 0)
+  return sample + distance / flight.groundSpeed * 3600_000
+}
+
 /** Preview only: current position → remaining published path. No EOBT/EET fallback,
  * stage locks, shared commands, or invented past FF crossing timestamps. */
 export function estimateRegionalLive(flight: IvaoArrivalTrafficFlight, timing: RegionalTiming,

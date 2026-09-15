@@ -1,5 +1,6 @@
 import { readAircraftPerformance, type AircraftPerformanceProfile, type IvaoArrivalTrafficFlight } from './api'
 import { referenceFixCoordinate } from './referenceFixCoordinates'
+import type { ArrivalStarSelection } from '../../shared/arrivalStarSelection'
 
 export type Coordinates = { lat: number; lon: number }
 
@@ -30,8 +31,9 @@ export type RouteGeometry = {
   arrivalRunway?: string | null
   entryRoute?: RouteGeometry & { entryFix: string; cycle: string } | null
   entryRouteError?: string | null
-  entryRouteSource?: 'FILED' | 'AIP_INFERRED'
+  entryRouteSource?: 'FILED' | 'AIP_INFERRED' | 'FILED_STAR_TRANSITION'
   entryTransition?: { via: string; path: string[]; source: string } | null
+  arrivalSelection?: ArrivalStarSelection | null
 }
 
 export type ArrivalEtaSource =

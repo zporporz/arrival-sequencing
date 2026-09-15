@@ -1,11 +1,20 @@
 import type { AmanArrivalPrediction, RegionalArrivalState } from './arrivalSequencing'
 import type { IvaoArrivalTrafficFlight } from './api'
-import { calculateRegionalTiming, regionalDistanceNm, resolveRegionalStar, type RegionalNavPayload } from './regionalArrivalModel'
-import { estimateRegionalLive } from './regionalLiveEstimate'
+import { calculateRegionalTiming, regionalDistanceNm, resolveRegionalArrival, type RegionalNavPayload } from './regionalArrivalModel'
+import { estimateRegionalEntry, estimateRegionalLive } from './regionalLiveEstimate'
 import type { RegionalSnapshot } from './regionalPreviewData'
+import { applyArrivalStarChoice } from './arrivalStarChoice'
+
+export function regionalFlightArrival(nav: RegionalNavPayload, runway: string, flight: IvaoArrivalTrafficFlight) {
+  const arrival = resolveRegionalArrival(nav.airport, runway, flight.route, undefined, nav.cycle)
+  const selection = applyArrivalStarChoice(flight, arrival.selection)
+  const matches = selection?.selected ? nav.airport.procedures.filter(p => p.kind === 'STAR'
+    && p.runway === runway && p.name === selection.selected && p.legs[0]?.fix === selection.entryFix) : []
+  return { ...arrival, selection, star: selection ? matches.length === 1 ? matches[0] : null : arrival.star }
+}
 
 export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSnapshot, runway: string, approachName: string, flight: IvaoArrivalTrafficFlight, locked?: Pick<AmanArrivalPrediction, 'predictedIawpAt' | 'regional'>) {
-  const star = resolveRegionalStar(nav.airport, runway, flight.route)
+  const arrival = regionalFlightArrival(nav, runway, flight), star = arrival.star
   const approach = nav.airport.procedures.find(p => p.kind === 'APPROACH' && p.runway === runway && p.name === approachName)
   const profile = snapshot.profiles[flight.aircraft || '']
   const result = star && approach ? calculateRegionalTiming(nav.airport, star, approach, profile) : null
@@ -17,7 +26,11 @@ export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSn
     && Number.isFinite(Date.parse(locked!.predictedIawpAt)) && flight.onGround === false
     && !['landed', 'onblocks'].includes((flight.state || '').toLowerCase().replaceAll(' ', ''))
     && trackAge >= -15000 && trackAge <= 90000
-  const reason = keepLock && !live?.estimate ? 'LOCKED EST — awaiting published route reacquisition' : !star ? 'STAR unresolved for selected runway' : !approach ? 'Select approach' : result?.error || live?.error || ''
+  const entryOnly = !keepLock && !live?.estimate && arrival.entryFix ? estimateRegionalEntry(flight,
+    snapshot.routes[flight.sessionId] || null, arrival.entryFix, snapshot.traffic.fetchedAt) : null
+  const reason = [arrival.selection?.reason || arrival.reason, keepLock && !live?.estimate ? 'LOCKED EST — awaiting published route reacquisition'
+    : !star ? 'STAR unresolved for selected runway' : !approach ? 'Select approach' : result?.error || live?.error || '',
+    !live?.estimate && entryOnly != null ? 'ENTRY ONLY EST · current groundspeed · landing time unavailable' : ''].filter(Boolean).join(' · ')
   const distance = flight.latitude != null && flight.longitude != null
     ? regionalDistanceNm({ lat: flight.latitude, lon: flight.longitude }, nav.airport) : null
   let prediction: AmanArrivalPrediction | null = null
@@ -42,7 +55,8 @@ export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSn
   if (prediction && keepLock) prediction = { ...prediction, predictedIawpAt: locked!.predictedIawpAt,
     nominalStarSeconds: old!.nominalStarSeconds, regional: { ...old!, etaFfPassed: old!.etaFfPassed || prediction.regional!.etaFfPassed,
       stage: old!.stage === 'SUPERSTABLE' || prediction.regional!.stage === 'SUPERSTABLE' ? 'SUPERSTABLE' : 'STABLE' } }
-  return { prediction, reason, distance, refFix: result?.timing?.entry.fix || star?.legs[0]?.fix || null }
+  return { prediction, reason, distance, selection: arrival.selection, entryEtaMs: entryOnly,
+    refFix: result?.timing?.entry.fix || arrival.entryFix || null }
 }
 
 /** Local fallback while a room connects. The room's durable snapshot wins as soon

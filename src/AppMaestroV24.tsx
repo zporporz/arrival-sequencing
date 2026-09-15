@@ -33,6 +33,9 @@ import {
 } from './core/amanConstants'
 import { readOperationalConfig, type IvaoArrivalTrafficFlight, type OperationalConfigPayload } from './core/api'
 import { clearArrivalRouteCache, resolveArrivalRoute } from './core/arrivalRouteGeometry'
+import { applyArrivalStarChoice, rememberArrivalStar } from './core/arrivalStarChoice'
+import ArrivalStarControl from './ArrivalStarControl'
+import type { ArrivalStarSelection } from '../shared/arrivalStarSelection'
 import { createAircraftPerformanceBatch } from './core/aircraftPerformanceBatch'
 import { retainUnchangedOperationalConfig } from './core/operationalConfigIdentity'
 import { refreshIvaoTraffic, subscribeIvaoTraffic, type IvaoTrafficUpdate } from './core/ivaoTrafficFeed'
@@ -56,6 +59,7 @@ type OperationalState = 'NORMAL' | 'MISSED_APPROACH' | 'DESEQUENCED' | 'REMOVED'
 type PlanningState = 'BOARDING' | 'DEPARTING' | 'TAKEOFF_EST' | 'SEQUENCED' | 'MONITORED' | 'MISSED' | 'DESEQUENCED' | 'REMOVED'
 
 type InboundPreview = {
+  selection?: ArrivalStarSelection | null
   airport: AirportCode
   id: string
   flight: IvaoArrivalTrafficFlight
@@ -67,6 +71,8 @@ type InboundPreview = {
 }
 
 type DisplayInboundRow = {
+  selection?: ArrivalStarSelection | null
+  flight?: IvaoArrivalTrafficFlight
   id: string
   airport: AirportCode
   callsign: string
@@ -1091,7 +1097,10 @@ export default function App() {
           planningState,
           processingDistanceNm: item.processingDistanceNm,
           operationalState,
+          selection: item.selection,
+          flight: item.flight,
           etaNote: [/_EET$/.test(item.source) ? 'FPL EST' : /ENTRY INFERRED/.test(item.reason || '') ? 'ENTRY EST' : '',
+            /ENTRY ONLY EST/.test(item.reason || '') ? 'ENTRY ONLY EST' : '',
             /STABLE ETA LOCKED|IAWP CROSSING LATCHED/.test(item.reason || '') ? 'LOCKED' : '',
           ].filter(Boolean).join(' · '),
         }
@@ -1313,8 +1322,9 @@ export default function App() {
                 latestPredictionState.current.canonicalEtaById[`${airport}:${flight.sessionId}`]
                 || latestPredictionState.current.livePredictions.find(item => item.id === `${airport}:${flight.sessionId}`))
               const preview: InboundPreview = { airport, id: `${airport}:${flight.sessionId}`, flight, refFix: value.refFix,
-                predictedIawpAt: value.prediction?.regional?.etaFfPassed ? null : value.prediction?.predictedIawpAt || null,
-                source: 'REGIONAL EST', reason: value.reason, processingDistanceNm: value.distance }
+                predictedIawpAt: value.prediction?.regional?.etaFfPassed ? null : value.prediction?.predictedIawpAt
+                  || (value.entryEtaMs != null ? new Date(value.entryEtaMs).toISOString() : null),
+                selection: value.selection, source: 'REGIONAL EST', reason: value.reason, processingDistanceNm: value.distance }
               return { preview, prediction: value.prediction }
             })
             return { airport, payload: snapshot.traffic, resolved, error: null }
@@ -1338,9 +1348,13 @@ export default function App() {
               resolveArrivalRoute(flight, airport, match.entryFix, arrivalRunway || undefined),
               readPerformance(flight.aircraft),
             ])
+            const selection = applyArrivalStarChoice(flight, routeResult.selection)
+            const routeReason = selection && routeResult.selection
+              ? routeResult.reason?.replace(routeResult.selection.reason, selection.reason) : routeResult.reason
             const eta = estimateIawpArrival(flight, routeResult.geometry, match.entryFix, nominalSeconds, payload.fetchedAt, performancePayload?.profile ?? null)
-            eta.reason = [eta.reason, routeResult.reason && `${routeResult.geometry ? '' : 'ROUTE UNAVAILABLE · '}${routeResult.reason}`].filter(Boolean).join(' · ')
-            const preview = { airport, id, flight, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason, processingDistanceNm: distanceToBkk } satisfies InboundPreview
+            eta.reason = [eta.reason, routeReason && `${routeResult.geometry ? '' : 'ROUTE UNAVAILABLE · '}${routeReason}`,
+              selection ? 'LANDING TIMING: configured runway-flow nominal, not selected STAR geometry' : ''].filter(Boolean).join(' · ')
+            const preview = { airport, id, flight, selection, refFix: match.entryFix, predictedIawpAt: eta.predictedIawpAt, source: eta.source, reason: eta.reason, processingDistanceNm: distanceToBkk } satisfies InboundPreview
             const prediction: AmanArrivalPrediction | null = eta.predictedIawpAt ? {
               id,
               callsign: flight.callsign,
@@ -1813,10 +1827,15 @@ export default function App() {
               <div className="aman-inbound-acid">
                 <strong className={stableIds[item.id] ? 'is-stable' : ''}>{item.callsign}</strong>
                 {item.etaNote && <small className="aman-planning-badge is-departing">{item.etaNote}</small>}
+                <ArrivalStarControl callsign={item.callsign} selection={item.selection} onChange={name => {
+                  if (!item.flight || !item.selection) return
+                  rememberArrivalStar(item.flight, item.selection, name)
+                  refreshIvaoTraffic(item.airport)
+                }} />
                 {item.planningState === 'BOARDING' && <small className="aman-planning-badge is-boarding">BOARDING</small>}
                 {item.planningState === 'DEPARTING' && <small className="aman-planning-badge is-departing">DEPARTING · EST</small>}
                 {item.planningState === 'TAKEOFF_EST' && <small className="aman-planning-badge is-departing">TAKEOFF · EST</small>}
-                {isRegionalAirport(item.airport) && !livePredictionById.has(item.id) && item.planningState === 'MONITORED' && <small className="aman-planning-badge is-departing">NO ETA · SEE INFO</small>}
+                {isRegionalAirport(item.airport) && !livePredictionById.has(item.id) && item.planningState === 'MONITORED' && <small className="aman-planning-badge is-departing">{item.eta ? 'NO LANDING ETA' : 'NO ETA · SEE INFO'}</small>}
                 {item.planningState === 'MONITORED' && <small className="aman-planning-badge">MON{Number.isFinite(item.processingDistanceNm) ? ` ${Math.round(Number(item.processingDistanceNm))}NM` : ''}</small>}
                 {item.planningState === 'MISSED' && <button type="button" className="aman-reinsert-button is-missed" onClick={() => reinsertInbound(item)}>MISSED · REINSERT</button>}
                 {item.planningState === 'DESEQUENCED' && <button type="button" className="aman-reinsert-button" onClick={() => reinsertInbound(item)}>DSEQ · REINSERT</button>}

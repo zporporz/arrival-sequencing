@@ -1,6 +1,6 @@
 import { apiGet, readAircraftPerformance, readIvaoTraffic, readRouteGeometry, type AircraftPerformanceProfile, type IvaoTrafficPayload } from './api'
 import type { RouteGeometry } from './arrivalEtaLegacy'
-import { resolveRegionalStar, type RegionalNavPayload } from './regionalArrivalModel'
+import { resolveRegionalArrival, type RegionalNavPayload } from './regionalArrivalModel'
 
 type Cache<T> = Map<string, { expires: number; value: T }>
 const profiles: Cache<AircraftPerformanceProfile | null> = new Map()
@@ -53,9 +53,9 @@ export async function readRegionalSnapshot(nav: RegionalNavPayload, runway: stri
       const flight = flights[next++]
       const type = flight.aircraft || ''
       output.profiles[type] = await previewPerformance(type).catch(() => null)
-      const star = resolveRegionalStar(nav.airport, runway, flight.route)
-      if (!flight.route || !flight.departure || flight.onGround === true || !star) continue
-      const entryFix = star.legs[0]?.fix || undefined
+      const arrival = resolveRegionalArrival(nav.airport, runway, flight.route, undefined, nav.cycle)
+      if (!flight.route || !flight.departure || flight.onGround === true || !arrival.entryFix) continue
+      const entryFix = arrival.entryFix
       const key = `route:${nav.cycle}:${runway}:${entryFix}:${flight.departure}:${flight.arrival}:${flight.route}`
       try {
         output.routes[flight.sessionId] = await cached(routes, key,
