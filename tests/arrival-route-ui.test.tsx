@@ -87,3 +87,23 @@ it('shows ambiguous STARs without preselecting one and keeps a user choice visib
     .every(([url]) => String(url).includes('/route-geometry'))).toBe(true)
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/operational-actions'))).toHaveLength(0)
 })
+
+it('keeps the GA badge out of the callsign used by drag and shared-state runtimes', async () => {
+  await act(async () => root.render(<App />))
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('aman:shared-state', { detail: {
+      flightStates: [{
+        airport: 'VTBD', callsign: 'TLM128', operational_state: 'NORMAL',
+        target_mode: 'MANUAL', manual_tldt: '2026-09-15T13:32:00.000Z', manual_runway: '21R',
+        missed_approach_active: true,
+      }],
+    } }))
+  })
+
+  const row = container.querySelector<HTMLElement>('.aman-flight-row[data-airport="VTBD"]')!
+  const badge = row.querySelector<HTMLElement>('.aman-ga-badge')!
+  expect(row.classList.contains('is-missed-approach')).toBe(true)
+  expect(badge.getAttribute('aria-label')).toBe('Go around')
+  expect(badge.textContent).toBe('')
+  expect(row.querySelector('strong')?.textContent).toBe('TLM128')
+})

@@ -54,6 +54,12 @@
   vertical-align: middle;
 }
 
+/* Keep the visual state marker out of the row's DOM text. Operational runtimes
+   read the strong element as the canonical callsign when dragging and syncing. */
+.aman-ga-badge::before {
+  content: 'GA';
+}
+
 .aman-flight-row.is-missed-approach > b[data-advisory-kind="ga"]::after {
   color: #ff666f !important;
 }

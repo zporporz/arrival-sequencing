@@ -1780,7 +1780,11 @@ export default function App() {
                 }}
               >
                 <span className="tldt">{formatHms(row.tldt)}</span>
-                <strong>{row.callsign}{isMissedApproach && <small className="aman-ga-badge">GA</small>}</strong>
+                <strong>{row.callsign}{isMissedApproach && <small
+                  className="aman-ga-badge"
+                  aria-label="Go around"
+                  title="Go around"
+                />}</strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
                 <span>{row.regional?.etaFfPassed ? 'PASSED' : formatHm(row.tto)}</span>
