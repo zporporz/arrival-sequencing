@@ -50,6 +50,41 @@ function mockMutableFlightStateApi(initial = []) {
 afterEach(() => vi.restoreAllMocks())
 
 describe('terminal flight protection', () => {
+  it('inserts VTBD IFR training once at NOW+10 and preserves controller edits', async () => {
+    const rows = mockMutableFlightStateApi()
+    const flight = {
+      callsign: 'THA1310', sessionId: 'training', departure: 'VTBD', arrival: 'VTBD',
+      flightRules: 'I', state: 'on blocks', onGround: true, predepartureLocal: true,
+      latitude: 13.9126, longitude: 100.6068, groundSpeed: 0,
+    }
+    await reconcileAmanFlights(env, 'VTBD', [flight], '2026-08-25T10:00:00.000Z')
+    expect(rows[0].manual_tldt).toBeUndefined()
+    const airborne = { ...flight, state: 'initial climb', onGround: false,
+      predepartureLocal: false, groundSpeed: 180, latitude: 14.1,
+      trackTimestamp: '2026-08-25T10:01:00.000Z' }
+    await reconcileAmanFlights(env, 'VTBD', [airborne], '2026-08-25T10:01:00.000Z')
+    expect(rows[0].manual_tldt).toBe('2026-08-25T10:11:00.000Z')
+    expect(rows[0].snapshot.iapTraining).toBe(true)
+    await reconcileAmanFlights(env, 'VTBD', [airborne], '2026-08-25T10:02:00.000Z')
+    expect(rows[0].manual_tldt).toBe('2026-08-25T10:11:00.000Z')
+    rows[0].manual_tldt = '2026-08-25T10:15:00.000Z'
+    await reconcileAmanFlights(env, 'VTBD', [airborne], '2026-08-25T10:03:00.000Z')
+    expect(rows[0].manual_tldt).toBe('2026-08-25T10:15:00.000Z')
+  })
+
+  it.each([
+    ['VTBD', 'VTBD', 'V'], ['VTBD', 'VTBS', 'I'], ['VTBS', 'VTBD', 'I'],
+    ['VTBS', 'VTBS', 'I'], ['VTBD', 'VTBD', ''],
+  ])('does not assign an IAP target to %s → %s rules %s', async (departure, arrival, flightRules) => {
+    const rows = mockMutableFlightStateApi()
+    await reconcileAmanFlights(env, arrival, [{
+      callsign: 'OTHER', sessionId: 'other', departure, arrival, flightRules,
+      state: 'en route', onGround: false, groundSpeed: 200, latitude: 14.2, longitude: 100.6,
+    }], '2026-08-25T10:00:00.000Z')
+    expect(rows[0].manual_tldt).toBeUndefined()
+    expect(rows[0].snapshot.iapTraining).toBe(false)
+  })
+
   it('distinguishes a session that connected airborne from a tracked takeoff', () => {
     expect(findTrackedTakeoffEvidence([
       { onGround: false, timestamp: '2026-08-26T03:00:00.000Z' },

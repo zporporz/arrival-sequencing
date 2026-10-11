@@ -29,6 +29,8 @@ export type WorkspacePayload = {
 }
 
 export type IvaoArrivalTrafficFlight = {
+  iapTraining?: boolean
+  manualTldt?: string | null
   sessionId: string
   vid: string | null
   callsign: string

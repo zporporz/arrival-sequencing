@@ -285,6 +285,8 @@ function airborneFlight(flight: IvaoArrivalTrafficFlight) {
 
 function confirmedTakeoff(flight: IvaoArrivalTrafficFlight) {
   return flight.actualDepartureTimeSeconds != null || Boolean(flight.trackedTakeoffAt)
+    || (flight.arrival === 'VTBD' && flight.departure === 'VTBD'
+      && ['I', 'IFR'].includes(String(flight.flightRules || '').toUpperCase()) && airborneFlight(flight))
 }
 
 function previewGroundPhase(item: InboundPreview) {
@@ -1334,6 +1336,18 @@ export default function App() {
           const resolved = await Promise.all((payload.flights ?? []).map(async (flight) => {
             const id = `${airport}:${flight.sessionId}`
             const distanceToBkk = processingDistanceNm(flight)
+            if (flight.iapTraining && airborneFlight(flight) && flight.manualTldt) {
+              const prediction: AmanArrivalPrediction = {
+                id, callsign: flight.callsign, aircraftType: flight.aircraft,
+                wakeTurbulence: flight.wakeTurbulence, performanceCategory: null,
+                runway: '', refFix: 'IAP', predictedIawpAt: flight.manualTldt,
+                nominalStarSeconds: 0, processingDistanceNm: distanceToBkk,
+              }
+              return { preview: { airport, id, flight, refFix: 'IAP',
+                predictedIawpAt: flight.manualTldt, source: 'IAP TRAINING',
+                reason: 'VTBD local IFR training · shared landing target',
+                processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction }
+            }
             const match = findAipIawp(airport, flight.route, [...ENTRY_FIXES[airport]])
             if (!match) return { preview: { airport, id, flight, refFix: null, predictedIawpAt: null, source: 'UNRESOLVED', reason: 'IAWP not resolved from filed route', processingDistanceNm: distanceToBkk } satisfies InboundPreview, prediction: null }
             const nominalSeconds = hasOperationalWorkspace(operationalConfig, airport, vtbsFlow, vtbdFlow)

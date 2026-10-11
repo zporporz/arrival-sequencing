@@ -67,6 +67,13 @@ function cleanCallsign(value) {
   return callsign ? callsign.slice(0, 20) : null;
 }
 
+export function isIapTraining(flight, airport) {
+  return airport === 'VTBD'
+    && cleanAirport(flight?.departure) === 'VTBD'
+    && cleanAirport(flight?.arrival) === 'VTBD'
+    && ['I', 'IFR'].includes(String(flight?.flightRules || '').trim().toUpperCase());
+}
+
 function toMillis(value, fallback = NaN) {
   const millis = new Date(value ?? '').getTime();
   return Number.isFinite(millis) ? millis : fallback;
@@ -305,6 +312,7 @@ function sharedFields(record) {
     missedApproachSource: record?.missed_approach_source || null,
     missedApproachDetectedAt: record?.missed_approach_detected_at || null,
     missedApproachExpiresAt: record?.missed_approach_expires_at || null,
+    iapTraining: record?.snapshot?.iapTraining === true,
   };
 }
 
@@ -491,6 +499,8 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
       ...rawFlight,
       sessionId: canonicalSessionId,
       rawSessionId,
+      iapTraining: isIapTraining(rawFlight, airport),
+      iapTrainingInitialized: previousSnapshot.iapTrainingInitialized === true,
     };
 
     // ON BLOCKS / ON GROUND at the departure airport is a valid inbound that has
@@ -499,6 +509,23 @@ export async function reconcileAmanFlights(env, airportValue, flightsValue, fetc
     const terminalNow = snapshot.predepartureLocal !== true
       && looksLandedAtAirport(snapshot, airport);
     const gaPatch = gaStatePatch(record, snapshot, airport, fetchedMs, terminalNow);
+    // Persist the first airborne training target in shared state. Refreshes and
+    // reconnects must not keep moving it to NOW+10 or overwrite controller edits.
+    const trainingAirborne = snapshot.onGround === false
+      || ['initial climb', 'en route', 'approach'].includes(String(snapshot.state || '').toLowerCase());
+    if (snapshot.iapTraining && trainingAirborne && !terminalNow
+      && !snapshot.iapTrainingInitialized) {
+      snapshot.iapTrainingInitialized = true;
+      if (!record?.manual_tldt && !record?.frozen_tldt && !gaPatch.manual_tldt) {
+        Object.assign(gaPatch, {
+          target_mode: 'MANUAL',
+          manual_tldt: new Date(fetchedMs + GA_DIRECT_INSERT_OFFSET_MS).toISOString(),
+          manual_updated_at: fetchedAt,
+          manual_updated_by_vid: null,
+          manual_updated_by_name: 'AMAN IAP TRAINING',
+        });
+      }
+    }
 
     const write = {
       service_date: serviceDate,
