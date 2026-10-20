@@ -1730,8 +1730,8 @@ export default function App() {
                 style={{ '--offset-px': `${offsetPx}px` } as CSSProperties}
                 title={`${phase === 'TAKEOFF_EST' ? 'AIRBORNE · ACTUAL TAKEOFF PENDING' : 'DEPARTING'} · PROVISIONAL ONLY · NOT IN SEQUENCE / AAR / HLD`}
               >
-                <span className="tldt">{formatHms(row.tldt)}</span>
-                <strong>{row.callsign}<small>{phase === 'TAKEOFF_EST' ? 'TAKEOFF EST' : 'DEPARTING EST'}</small></strong>
+                <span className="tldt">{formatHm(row.tldt)}</span>
+                <strong>{row.callsign}</strong>
                 <span>{row.aircraftType || '----'}</span>
                 <span className={`fix-code ${compactFixClass(airport, row.refFix)}`}>{compactFix(airport, row.refFix)}</span>
                 <span>{row.regional?.etaFfPassed ? 'PASSED' : formatHm(row.tto)}</span>

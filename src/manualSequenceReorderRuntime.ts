@@ -66,6 +66,7 @@ type DragOrderState = {
   startY: number
   lastY: number
   dropTarget: HTMLElement | null
+  crossingTargets: Array<{ row: HTMLElement; identity: string; rect: DOMRect; centerY: number }>
 }
 
 const MOVE_TOLERANCE_PX = 4
@@ -355,9 +356,15 @@ export function sequenceOrderAfterCrossedTargets(
   currentOrder: readonly string[],
   draggedIdentity: string,
   crossedTargetIdentities: readonly string[],
+  placement: 'before' | 'after' = 'before',
 ) {
   return crossedTargetIdentities.reduce<string[]>((order, targetIdentity) => {
     if (targetIdentity === draggedIdentity || !order.includes(targetIdentity)) return order
+    if (placement === 'after') {
+      const next = order.filter((identity) => identity !== draggedIdentity)
+      next.splice(next.indexOf(targetIdentity) + 1, 0, draggedIdentity)
+      return next
+    }
     return sequenceOrderForTarget(order, draggedIdentity, targetIdentity)
   }, [...currentOrder])
 }
@@ -412,12 +419,8 @@ export function shouldCommitSequenceReorder(input: {
   hasDropTarget: boolean
 }) {
   return input.moved
-    && isDownwardSequenceDrag(input.startY, input.pointerY)
+    && Math.abs(input.pointerY - input.startY) >= MOVE_TOLERANCE_PX
     && input.hasDropTarget
-}
-
-function isDownwardDrag(state: DragOrderState, pointerY: number) {
-  return isDownwardSequenceDrag(state.startY, pointerY)
 }
 
 export function isWithinSequenceDropZone(
@@ -438,7 +441,7 @@ function validDropTarget(state: DragOrderState, pointerX: number, pointerY: numb
   const allowed = rowsForGroup(state.airport, state.runway).filter((row) => row !== state.row)
   if (!allowed.length) return null
 
-  const direct = document.elementsFromPoint(pointerX, pointerY)
+  const direct = (document.elementsFromPoint?.(pointerX, pointerY) ?? [])
     .map((element) => element.closest<HTMLElement>('.aman-flight-row'))
     .find((row): row is HTMLElement => Boolean(row && allowed.includes(row)))
   if (direct) return direct
@@ -479,24 +482,23 @@ function updateDropPreview(state: DragOrderState, event: PointerEvent) {
 }
 
 function crossedTargets(state: DragOrderState, event: PointerEvent) {
-  if (event.clientY <= state.lastY) return []
+  if (event.clientY === state.lastY) return []
+  const downward = event.clientY > state.lastY
 
-  return rowsForGroup(state.airport, state.runway)
-    .filter((row) => row !== state.row)
-    .map((row) => {
-      const rect = row.getBoundingClientRect()
-      const identity = rowIdentity(row)?.identity || ''
-      return { row, identity, rect, centerY: rect.top + rect.height / 2 }
-    })
+  // Use the original slots: live SEP cascade moves followers away during an
+  // upward drag, otherwise the pointer can never catch the row it must cross.
+  return state.crossingTargets
     .filter(({ identity, rect, centerY }) => identity
       && event.clientX >= rect.left
       && event.clientX <= rect.right
-      && centerY > state.lastY
-      && centerY <= event.clientY)
-    .sort((a, b) => a.centerY - b.centerY)
+      && (downward
+        ? centerY > state.lastY && centerY <= event.clientY
+        : centerY < state.lastY && centerY >= event.clientY))
+    .sort((a, b) => downward ? a.centerY - b.centerY : b.centerY - a.centerY)
 }
 
-function updateLiveDownwardOrder(state: DragOrderState, event: PointerEvent) {
+function updateLiveDragOrder(state: DragOrderState, event: PointerEvent) {
+  const downward = event.clientY > state.lastY
   const crossed = crossedTargets(state, event)
   state.lastY = event.clientY
   if (!crossed.length) {
@@ -508,6 +510,7 @@ function updateLiveDownwardOrder(state: DragOrderState, event: PointerEvent) {
     state.currentOrder,
     state.identity,
     crossed.map(({ identity }) => identity),
+    downward ? 'before' : 'after',
   )
   if (sameOrder(state.currentOrder, nextOrder)) return
 
@@ -646,8 +649,8 @@ export function installManualSequenceReorderRuntime() {
     const startIndex = startOrder.indexOf(identity.identity)
     if (startIndex < 0) return
 
-    // Latch order before React starts changing TLDT. An upward drag is timing-only and
-    // the normal pairwise cascade therefore pushes every later follower in real time.
+    // Latch order before React changes TLDT; crossing a row in either direction
+    // changes rank before the normal separation cascade runs.
     groupOrders.set(groupKey(identity.airport, scopeRunway), [...startOrder])
     publishOrderSnapshot()
 
@@ -665,6 +668,12 @@ export function installManualSequenceReorderRuntime() {
       startY: event.clientY,
       lastY: event.clientY,
       dropTarget: null,
+      crossingTargets: rowsForGroup(identity.airport, scopeRunway)
+        .filter((target) => target !== row)
+        .map((target) => {
+          const rect = target.getBoundingClientRect()
+          return { row: target, identity: rowIdentity(target)?.identity || '', rect, centerY: rect.top + rect.height / 2 }
+        }),
     }
   }
 
@@ -672,30 +681,14 @@ export function installManualSequenceReorderRuntime() {
     if (!drag || drag.pointerId !== event.pointerId) return
     if (Math.abs(event.clientY - drag.startY) >= MOVE_TOLERANCE_PX) drag.moved = true
 
-    const downward = isDownwardDrag(drag, event.clientY)
-
-    if (!downward) {
-      // Upward = pure live TLDT push. Do not run any drop/reorder targeting at all.
-      // Let React's pointermove update the dragged TLDT immediately; its cascade then
-      // moves all later followers at the same time according to the latched order + SEP.
-      clearDropPreview(drag)
-      return
-    }
-
-    // Downward keeps the existing explicit replace behaviour. Only this direction uses
-    // a yellow drop target and can commit a sequence reorder on release.
-    updateLiveDownwardOrder(drag, event)
+    if (drag.moved) updateLiveDragOrder(drag, event)
   }
 
   const onPointerUp = (event: PointerEvent) => {
     if (!drag || drag.pointerId !== event.pointerId) return
     const finished = drag
-    const downward = isDownwardDrag(finished, event.clientY)
-
-    if (downward) updateLiveDownwardOrder(finished, event)
-    else clearDropPreview(finished)
-
-    const shouldReorder = downward && finished.orderChanged
+    if (finished.moved) updateLiveDragOrder(finished, event)
+    const shouldReorder = finished.orderChanged
 
     if (!shouldReorder) {
       clearDropPreview(finished)
@@ -703,8 +696,7 @@ export function installManualSequenceReorderRuntime() {
       delete finished.row.dataset.sequenceReorderTarget
       drag = null
 
-      // Upward/empty release only ends the already-live TLDT drag. No reorder or slot
-      // replacement happens here; followers have already moved through normal cascade.
+      // Without a crossed row, keep the existing rank and commit only timing.
       if (finished.moved) {
         commitSharedOrder(finished.airport, finished.runway, finished.startOrder)
       }

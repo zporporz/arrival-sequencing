@@ -243,10 +243,11 @@ describe('manual drag sequencing', () => {
     expect(result[0].tldt).toBe('2026-08-25T09:58:00.000Z')
   })
 
-  it('recognises a downward sequence drag', () => {
+  it('recognises sequence drops in both directions and rejects clicks', () => {
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: false })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: true, hasDropTarget: true })).toBe(true)
-    expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 80, moved: true, hasDropTarget: true })).toBe(false)
+    expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 80, moved: true, hasDropTarget: true })).toBe(true)
+    expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 98, moved: true, hasDropTarget: true })).toBe(false)
     expect(shouldCommitSequenceReorder({ startY: 100, pointerY: 140, moved: false, hasDropTarget: true })).toBe(false)
   })
 
@@ -262,6 +263,47 @@ describe('manual drag sequencing', () => {
       'THA3',
       ['THA2'],
     )).toEqual(['THA1', 'THA3', 'THA2'])
+  })
+
+  it('moves upward after crossed flights and reverses back without moving other ranks', () => {
+    const upward = sequenceOrderAfterCrossedTargets(['A', 'B', 'C', 'D'], 'A', ['B', 'C'], 'after')
+    expect(upward).toEqual(['B', 'C', 'A', 'D'])
+    expect(sequenceOrderAfterCrossedTargets(upward, 'A', ['C', 'B'], 'before')).toEqual(['A', 'B', 'C', 'D'])
+  })
+
+  it('publishes an upward crossing before release, rather than pushing the other flight away', () => {
+    document.body.innerHTML = `
+      <div class="aman-flight-row" style="--offset-px: 0" title="VTBD RWY 21R"><strong>THA1</strong><span class="runway-assignment"><select><option selected>21R</option></select></span></div>
+      <div class="aman-flight-row" style="--offset-px: -20px" title="VTBD RWY 21R"><strong>THA2</strong><span class="runway-assignment"><select><option selected>21R</option></select></span></div>
+    `
+    const [first, second] = Array.from(document.querySelectorAll<HTMLElement>('.aman-flight-row'))
+    for (const [row, top] of [[first, 110], [second, 80]] as const) {
+      Object.defineProperty(row, 'getBoundingClientRect', {
+        value: () => ({ left: 100, right: 500, top, bottom: top + 20, width: 400, height: 20 }),
+        configurable: true,
+      })
+    }
+    const removeRuntime = installManualSequenceReorderRuntime()
+    try {
+      first.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 200, clientY: 120 }))
+      first.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientX: 200, clientY: 105 }))
+      // React's separation cascade pushes the follower away before we cross
+      // its original slot. It must remain reachable for an upward reorder.
+      Object.defineProperty(second, 'getBoundingClientRect', {
+        value: () => ({ left: 100, right: 500, top: 20, bottom: 40, width: 400, height: 20 }),
+        configurable: true,
+      })
+      first.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientX: 200, clientY: 85 }))
+      const result = autoSequenceUnstableArrivals([
+        prediction('THA1', 'C', '2026-08-25T10:00:00Z', '21R'),
+        prediction('THA2', 'C', '2026-08-25T10:03:00Z', '21R'),
+      ].map((arrival) => ({ ...arrival, id: arrival.id.replace('VTBS', 'VTBD') })), {
+        runwaySpacingSeconds: { '21R': 120 },
+      })
+      expect(Object.fromEntries(result.map((row) => [row.callsign, row.sequenceIndex]))).toEqual({ THA1: 2, THA2: 1 })
+    } finally {
+      removeRuntime()
+    }
   })
 
   it('publishes the crossed callsign rank before pointerup', () => {

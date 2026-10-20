@@ -56,6 +56,7 @@ describe('approach capture in the live DOM/lifecycle', () => {
     expect(row.dataset.flightStatus).toBe('FROZEN')
   })
   it('clears the Frozen latch on GA and on reassignment, keeping the locked FF', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime('2026-09-12T10:10:00Z')
     const row = makeRow()
     row.dataset.frozenTldt = new Date().toISOString()
     cleanups.push(installEtaFfLifecycleRuntime())

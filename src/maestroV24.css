@@ -104,7 +104,13 @@
   z-index: 2;
 }
 
-.aman-provisional-row strong { color: #b6c3cf; }
+.aman-provisional-row strong {
+  color: #b6c3cf;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .aman-provisional-row strong small {
   display: block;
   margin-top: 3px;
