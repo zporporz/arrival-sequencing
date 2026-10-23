@@ -1313,7 +1313,14 @@ export default function App() {
         try {
           if (sharedUpdate.error) throw sharedUpdate.error
           if (isRegionalAirport(airport)) {
-            const nav = await readRegionalNav(airport)
+            const nav = await readRegionalNav(airport).catch(error => {
+              if (!disposed) setRegionalNav(current => {
+                const next = { ...current }
+                delete next[airport]
+                return next
+              })
+              throw error
+            })
             if (disposed) return { airport, payload: null, resolved: [], error: null }
             registerRegionalFinalGeometry(nav.airport)
             setRegionalNav(current => ({ ...current, [airport]: nav }))
@@ -1660,7 +1667,11 @@ export default function App() {
                 setApproachByAirport(current => ({ ...current, [`${airport}:${runway}`]: event.target.value }))
               }}>
               {(regionalNav[airport]?.airport.procedures || []).filter(p => p.kind === 'APPROACH' && p.runway === (activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0])).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-              {!regionalNav[airport] && <option value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`]}>Loading AIRAC…</option>}
+              {regionalNav[airport] && !regionalNav[airport]!.airport.procedures.some(p => p.kind === 'APPROACH'
+                && p.runway === (activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0])
+                && p.name === approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`])
+                && <option value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`]} disabled>Select approach for AIRAC {regionalNav[airport]!.cycle}</option>}
+              {!regionalNav[airport] && <option value={approachByAirport[`${airport}:${activeRunwaysForAirport(airport, runwayModes)[0] || RUNWAYS[airport][0]}`]}>{trafficErrorsByAirport[airport] ? 'AIRAC unavailable — reimport SQLite' : 'Loading AIRAC…'}</option>}
             </select></label><small>STAR + SimBrief · LAND SEP configurable</small></div>}
           <div className="aman-runway-cards">
             {(airport === 'VTBS' ? VTBS_RUNWAY_GROUPS[vtbsFlow] : airport === 'VTBD' ? VTBD_RUNWAY_GROUPS[vtbdFlow] : RUNWAYS[airport]).map((runway) => {

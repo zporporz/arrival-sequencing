@@ -1,3 +1,5 @@
+import { extractAiracAirports, type AiracAirport } from './core/airacAirportImport'
+
 const SQLJS_VERSION = '1.13.0'
 const SQLJS_BASE = `https://cdn.jsdelivr.net/npm/sql.js@${SQLJS_VERSION}/dist/`
 
@@ -44,6 +46,7 @@ type ExtractedLeg = {
 }
 
 type Package = {
+  airportPackages: Record<string, AiracAirport>
   meta: Record<string, string | number | null>
   procedures: Array<Record<string, unknown>>
   transitions: Array<Record<string, unknown>>
@@ -165,7 +168,8 @@ async function extractThailand(file: File, setStatus: (message: string) => void)
     const source = text(metadata.data_source)?.toUpperCase()
     if (source !== 'NG' && source !== 'NAVIGRAPH') throw new Error(`Unexpected navdata source ${source || 'UNKNOWN'}`)
 
-    setStatus(`AIRAC ${cycle}: extracting all Thailand STAR procedures…`)
+    setStatus(`AIRAC ${cycle}: extracting STAR, Approach and runway geometry…`)
+    const airportPackages = extractAiracAirports(sql => rows(db, sql))
     const approachRows = rows(db, `
       SELECT a.*, upper(coalesce(nullif(a.airport_ident,''), ap.ident)) AS airport_code
       FROM approach a
@@ -264,6 +268,7 @@ async function extractThailand(file: File, setStatus: (message: string) => void)
     setStatus(`Ready: ${airports.size} airports · ${procedures.length} STAR · ${transitions.length} transitions · ${legs.length} legs · ${constrained} constrained`)
 
     return {
+      airportPackages,
       meta: {
         cycle,
         validThrough: text(metadata.valid_through),
@@ -361,7 +366,7 @@ export function installStaffThailandNavdataImporterRuntime() {
       try {
         await postPackage(candidate)
         candidate = null
-        setStatus('AIRAC staged. Reloading…')
+        setStatus('AIRAC saved with STAR/Approach data. Reloading…')
         window.location.reload()
       } catch (error) {
         showRuntimeError(error instanceof Error ? error.message : String(error), actions?.parentElement || null)
@@ -383,7 +388,7 @@ export function installStaffThailandNavdataImporterRuntime() {
         filename,
         document.createTextNode('. The raw SQLite stays in this browser; structured '),
         scope,
-        document.createTextNode(' is staged for staff review.'),
+        document.createTextNode(' and STAR/Approach/runway packages for VTBD, VTBS, VTCC and VTSP are staged together. Selecting an already imported file completes its missing airport package.'),
       )
     }
     const sourceSmall = document.querySelector<HTMLElement>('.navadmin-summary-grid > article:nth-child(4) small')

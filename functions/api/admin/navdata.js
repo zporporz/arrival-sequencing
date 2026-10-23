@@ -1,5 +1,6 @@
 import { supabaseAdminRequest } from '../../_lib/supabaseAdmin.js';
 import { diffNavdataProcedures } from '../../_lib/navdataDiff.js';
+import { cycleAiracAirports, validateAiracAirports } from '../../_lib/activeAiracAirports.js';
 
 const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
@@ -12,7 +13,7 @@ function cleanText(value, max = 200) {
 async function readCycles(env) {
   const [cycles, events] = await Promise.all([
     supabaseAdminRequest(env, 'navdata_cycles?select=*&order=imported_at.desc&limit=20'),
-    supabaseAdminRequest(env, 'navdata_events?select=*&order=created_at.desc&limit=50'),
+    supabaseAdminRequest(env, 'navdata_events?action=neq.AIRAC_PACKAGE&select=*&order=created_at.desc&limit=50'),
   ]);
   return { cycles: cycles.data || [], events: events.data || [] };
 }
@@ -68,11 +69,17 @@ async function readCycleDetail(env, cycleId) {
 
 async function importCycle(env, auth, payload) {
   const meta = payload.meta || {};
+  const airports = validateAiracAirports(payload.airportPackages);
+  if (!/^\d{4}$/.test(String(meta.cycle)) || !/^[a-f0-9]{64}$/i.test(meta.sourceSha256 || '')) throw new Error('Valid AIRAC cycle and source SHA-256 required.');
+  const sha = meta.sourceSha256.toLowerCase();
+  const { data: existing } = await supabaseAdminRequest(env, `navdata_cycles?source_sha256=eq.${sha}&select=id,cycle,source_sha256&limit=1`);
+  const previous = existing?.[0];
+  if (previous && previous.cycle !== meta.cycle) throw new Error('AIRAC cycle/source mismatch.');
   const procedures = Array.isArray(payload.procedures) ? payload.procedures : [];
   const transitions = Array.isArray(payload.transitions) ? payload.transitions : [];
   const legs = Array.isArray(payload.legs) ? payload.legs : [];
   if (!procedures.length) throw new Error('No STAR procedures were extracted from the SQLite database');
-  const rpc = await supabaseAdminRequest(env, 'rpc/import_navdata_cycle', {
+  const rpc = previous ? { data: previous.id } : await supabaseAdminRequest(env, 'rpc/import_navdata_cycle', {
     method: 'POST',
     body: JSON.stringify({
       p_meta: meta,
@@ -83,11 +90,23 @@ async function importCycle(env, auth, payload) {
       p_name: auth.name || null,
     }),
   });
+  const cycleId = rpc.data;
+  if (!cycleId) throw new Error('AIRAC import did not return a cycle ID.');
+  const { data: saved } = await supabaseAdminRequest(env, `navdata_events?cycle_id=eq.${encodeURIComponent(cycleId)}&action=eq.AIRAC_PACKAGE&select=id&limit=1`);
+  if (!saved?.length) {
+    await supabaseAdminRequest(env, 'navdata_events', { method: 'POST', body: JSON.stringify({
+      cycle_id: cycleId, cycle: meta.cycle, action: 'AIRAC_PACKAGE', actor_vid: String(auth.vid), actor_name: auth.name || null,
+      details: { cycle: meta.cycle, sourceSha256: sha, airports },
+    }) });
+  }
   return { id: rpc.data };
 }
 
 async function activateCycle(env, auth, cycleId) {
   if (!cycleId) throw new Error('Cycle id is required');
+  const target = await supabaseAdminRequest(env, `navdata_cycles?id=eq.${encodeURIComponent(cycleId)}&select=id,cycle,source_sha256&limit=1`);
+  if (!target.data?.[0]) throw new Error('AIRAC cycle not found.');
+  await cycleAiracAirports(env, target.data[0]);
   await supabaseAdminRequest(env, 'rpc/activate_navdata_cycle', {
     method: 'POST',
     body: JSON.stringify({ p_cycle_id: cycleId, p_vid: String(auth.vid), p_name: auth.name || null }),
@@ -97,6 +116,11 @@ async function activateCycle(env, auth, cycleId) {
 
 async function deleteCycle(env, auth, cycleId) {
   if (!cycleId) throw new Error('Cycle id is required');
+  if (env.AMAN_DATA) {
+    await supabaseAdminRequest(env, 'rpc/delete_navdata_cycle', { method: 'POST',
+      body: JSON.stringify({ p_cycle_id: cycleId, p_vid: String(auth.vid), p_name: auth.name || null }) });
+    return { id: cycleId, deletedBy: String(auth.vid) };
+  }
   const current = await supabaseAdminRequest(env, `navdata_cycles?id=eq.${encodeURIComponent(cycleId)}&select=id,cycle,status&limit=1`);
   const target = current.data?.[0];
   if (!target) throw new Error('Cycle not found');
