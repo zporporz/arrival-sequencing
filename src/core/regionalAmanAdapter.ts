@@ -28,7 +28,7 @@ export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSn
     && trackAge >= -15000 && trackAge <= 90000
   const entryOnly = !keepLock && !live?.estimate && arrival.entryFix ? estimateRegionalEntry(flight,
     snapshot.routes[flight.sessionId] || null, arrival.entryFix, snapshot.traffic.fetchedAt) : null
-  const reason = [arrival.selection?.reason || arrival.reason, keepLock && !live?.estimate ? 'LOCKED EST — awaiting published route reacquisition'
+  const reason = [arrival.selection?.reason || arrival.reason, profile?.source === 'LOCAL_ESTIMATE' ? 'C172 planning performance · EST' : '', keepLock && !live?.estimate ? 'LOCKED EST — awaiting published route reacquisition'
     : !star ? 'STAR unresolved for selected runway' : !approach ? 'Select approach' : result?.error || live?.error || '',
     !live?.estimate && entryOnly != null ? 'ENTRY ONLY EST · current groundspeed · landing time unavailable' : ''].filter(Boolean).join(' · ')
   const distance = flight.latitude != null && flight.longitude != null

@@ -167,7 +167,7 @@ function upstreamProfile(type, entry) {
   };
 }
 
-export async function getSimbriefAircraftPerformance(env, typeValue) {
+async function getSourceAircraftPerformance(env, typeValue) {
   const type = cleanType(typeValue);
   if (!type) return null;
   const memory = profileCache.get(type);
@@ -195,6 +195,33 @@ export async function getSimbriefAircraftPerformance(env, typeValue) {
   } catch {
     if (storedProfile) return storedProfile;
     throw new Error(`No stored or live SimBrief performance profile for ${type}`);
+  }
+}
+
+// Controller-approved planning substitute, not a SimBrief or certified C208
+// performance claim. Keep it out of the persisted SIMBRIEF profile table.
+export function c172PlanningEstimate(typeValue) {
+  const type = cleanType(typeValue);
+  if (!['C172', 'C208'].includes(type)) return null;
+  return {
+    source: 'LOCAL_ESTIMATE', aircraftType: type,
+    aircraftName: type === 'C208' ? 'Cessna 208 — C172 planning estimate' : 'Cessna 172 planning estimate',
+    aircraftDefaultCruise: null, aircraftSpeed: null, performanceCategory: 'A',
+    descentProfile: 'C172 EST · 120/110 KT', descentMach: 0.3,
+    descentIasKt: 120, descentBelow10000IasKt: 110,
+  };
+}
+
+export async function getSimbriefAircraftPerformance(env, typeValue) {
+  const substitute = c172PlanningEstimate(typeValue);
+  try {
+    const profile = await getSourceAircraftPerformance(env, typeValue);
+    const usable = profile && normalizePerformanceCategory(profile.performanceCategory)
+      && [profile.descentMach, profile.descentIasKt, profile.descentBelow10000IasKt].every(v => Number.isFinite(v) && v > 0);
+    return usable ? profile : substitute || profile;
+  } catch (error) {
+    if (substitute) return substitute;
+    throw error;
   }
 }
 

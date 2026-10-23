@@ -71,7 +71,7 @@ export type IvaoArrivalTrafficFlight = {
 export type AircraftPerformanceCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'H'
 
 export type AircraftPerformanceProfile = {
-  source: 'SIMBRIEF'
+  source: 'SIMBRIEF' | 'LOCAL_ESTIMATE'
   aircraftType: string
   aircraftName: string | null
   aircraftDefaultCruise: string | null

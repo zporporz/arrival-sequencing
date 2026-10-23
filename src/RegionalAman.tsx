@@ -137,7 +137,7 @@ export default function RegionalAman() {
       <section className="regional-panel"><h2>Route calculator</h2><form className="regional-controls" onSubmit={(e) => { e.preventDefault(); setCalculatorType(typeInput.trim().toUpperCase()); setReload((n) => n + 1) }}>
         <label>STAR<select value={selectedStar?.id || ''} onChange={(e) => setCalculatorStar(e.target.value)}>{stars.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Aircraft type<input value={typeInput} maxLength={4} onChange={(e) => setTypeInput(e.target.value.toUpperCase())} placeholder="A320" /></label><button type="submit">Calculate</button>
-        <span className="regional-meta">{calculatorProfile ? `SimBrief ${calculatorProfile.aircraftType} · ${calculatorProfile.descentProfile} · CAT ${calculatorProfile.performanceCategory || '—'}` : profileError || 'Loading profile…'}</span>
+          <span className="regional-meta">{calculatorProfile ? `${calculatorProfile.source === 'LOCAL_ESTIMATE' ? 'EST' : 'SimBrief'} ${calculatorProfile.aircraftType} · ${calculatorProfile.descentProfile} · CAT ${calculatorProfile.performanceCategory || '—'}` : profileError || 'Loading profile…'}</span>
       </form>{calculation?.error && <p className="regional-warning">{calculation.error}</p>}{calculation?.timing && <><p className="regional-total">{duration(calculation.timing.nominalSeconds)} <small>STAR entry → runway threshold · EST</small></p><TimingDetails timing={calculation.timing} /></>}</section>
     </>}
     <footer>For flight simulation only · speed/altitude restrictions + SimBrief speed schedule; not a validated aircraft performance prediction.</footer>
