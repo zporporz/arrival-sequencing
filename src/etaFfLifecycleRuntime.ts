@@ -262,7 +262,8 @@ function refreshRows() {
 
     if (row.dataset.etaFfPassed === 'true') {
       const cell = etaCell(row)
-      if (cell && cell.textContent !== 'PASSED') cell.textContent = 'PASSED'
+      const label = row.dataset.landingTargetOnly === 'true' ? '—' : 'PASSED'
+      if (cell && cell.textContent !== label) cell.textContent = label
       return
     }
     const resolved = resolveDisplayedEta(row, now, status, key)

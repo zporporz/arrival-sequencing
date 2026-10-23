@@ -20,6 +20,7 @@ export type AmanArrivalPrediction = {
 }
 
 export type RegionalArrivalState = {
+  landingTargetOnly?: boolean
   modelKey: string
   callsign: string
   runway: string

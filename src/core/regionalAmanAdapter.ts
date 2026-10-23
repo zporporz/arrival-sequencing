@@ -14,6 +14,34 @@ export function regionalFlightArrival(nav: RegionalNavPayload, runway: string, f
 }
 
 export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSnapshot, runway: string, approachName: string, flight: IvaoArrivalTrafficFlight, locked?: Pick<AmanArrivalPrediction, 'predictedIawpAt' | 'regional'>) {
+  // A confirmed GA already has a shared landing target. It does not need to
+  // rejoin its old STAR before it can be shown and resequenced by controllers.
+  const targetMs = Date.parse(flight.manualTldt || '')
+  const expiresMs = Date.parse(flight.missedApproachExpiresAt || '')
+  const nowMs = Date.parse(snapshot.traffic.fetchedAt)
+  if (nav.airport.code === 'VTCC' && flight.arrival === 'VTCC'
+    && flight.missedApproachActive === true && flight.targetMode === 'MANUAL'
+    && Number.isFinite(targetMs) && Number.isFinite(expiresMs) && nowMs <= expiresMs
+    && flight.onGround === false && flight.manualRunway === runway) {
+    const distance = flight.latitude != null && flight.longitude != null
+      ? regionalDistanceNm({ lat: flight.latitude, lon: flight.longitude }, nav.airport) : null
+    const target = new Date(targetMs).toISOString()
+    const prediction: AmanArrivalPrediction = {
+      id: `${nav.airport.code}:${flight.sessionId}`, callsign: flight.callsign,
+      aircraftType: flight.aircraft, wakeTurbulence: flight.wakeTurbulence,
+      performanceCategory: snapshot.profiles[flight.aircraft || '']?.performanceCategory ?? null,
+      runway, refFix: 'GA', predictedIawpAt: target, nominalStarSeconds: 0,
+      processingDistanceNm: distance,
+      regional: {
+        modelKey: `${nav.cycle}|${runway}|GA|${flight.missedApproachDetectedAt || ''}`,
+        landingTargetOnly: true,
+        callsign: flight.callsign, runway, estimatedLandingAt: target,
+        nominalStarSeconds: 0, etaFfPassed: true, stage: 'SUPERSTABLE',
+      },
+    }
+    return { prediction, reason: 'GA · shared landing target · awaiting approach rejoin',
+      distance, selection: null, entryEtaMs: null, refFix: 'GA' }
+  }
   const arrival = regionalFlightArrival(nav, runway, flight), star = arrival.star
   const approach = nav.airport.procedures.find(p => p.kind === 'APPROACH' && p.runway === runway && p.name === approachName)
   const profile = snapshot.profiles[flight.aircraft || '']
@@ -63,6 +91,7 @@ export function regionalPrediction(nav: RegionalNavPayload, snapshot: RegionalSn
  * as it arrives. Model/runway/session changes cannot inherit another lock. */
 export function retainRegionalLock(previous: AmanArrivalPrediction | undefined, incoming: AmanArrivalPrediction, manual = false): AmanArrivalPrediction {
   if (!incoming.regional) return incoming
+  if (incoming.regional.landingTargetOnly) return incoming
   const old = previous?.regional
   if (old && previous!.id === incoming.id && old.modelKey === incoming.regional.modelKey && old.stage !== 'UNSTABLE') {
     return { ...incoming, predictedIawpAt: previous!.predictedIawpAt, nominalStarSeconds: previous!.nominalStarSeconds,

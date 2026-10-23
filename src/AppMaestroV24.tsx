@@ -285,6 +285,7 @@ function airborneFlight(flight: IvaoArrivalTrafficFlight) {
 
 function confirmedTakeoff(flight: IvaoArrivalTrafficFlight) {
   return flight.actualDepartureTimeSeconds != null || Boolean(flight.trackedTakeoffAt)
+    || (flight.arrival === 'VTCC' && flight.missedApproachActive === true && airborneFlight(flight))
     || (flight.arrival === 'VTBD' && flight.departure === 'VTBD'
       && ['I', 'IFR'].includes(String(flight.flightRules || '').toUpperCase()) && airborneFlight(flight))
 }
@@ -815,6 +816,7 @@ export default function App() {
       : nominalStarSeconds(airport, prediction.refFix, vtbsFlow, vtbdFlow) == null)) return false
     if (!prediction.regional) return true
     const runway = prediction.regional.runway
+    if (prediction.regional.landingTargetOnly) return airport === 'VTCC' && activeRunwaysForAirport(airport, runwayModes).includes(runway)
     const approach = regionalNav[airport]?.airport.procedures.find(p => p.kind === 'APPROACH'
       && p.runway === runway && p.name === approachByAirport[`${airport}:${runway}`])
     return activeRunwaysForAirport(airport, runwayModes).includes(runway)
@@ -1779,6 +1781,7 @@ export default function App() {
                 data-regional-model={row.regional?.modelKey}
                 data-regional-approach={row.regional ? approachByAirport[`${airport}:${row.runway}`] : undefined}
                 data-eta-ff-passed={row.regional?.etaFfPassed ? 'true' : undefined}
+                data-landing-target-only={row.regional?.landingTargetOnly ? 'true' : undefined}
                 data-timing-model={row.regional ? 'EST' : undefined}
                 data-matrix-band={matrix.band}
                 data-gap-seconds={gapSeconds || undefined}

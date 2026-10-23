@@ -31,6 +31,12 @@ export type WorkspacePayload = {
 export type IvaoArrivalTrafficFlight = {
   iapTraining?: boolean
   manualTldt?: string | null
+  manualRunway?: string | null
+  targetMode?: 'AUTO' | 'MANUAL'
+  missedApproachActive?: boolean
+  missedApproachDetectedAt?: string | null
+  missedApproachExpiresAt?: string | null
+  operationalReinsert?: boolean
   sessionId: string
   vid: string | null
   callsign: string
